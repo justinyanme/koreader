@@ -60,6 +60,7 @@ local ReaderUserHyph = require("apps/reader/modules/readeruserhyph")
 local ReaderView = require("apps/reader/modules/readerview")
 local ReaderWikipedia = require("apps/reader/modules/readerwikipedia")
 local ReaderZooming = require("apps/reader/modules/readerzooming")
+local Replacements = require("apps/replacements")
 local Screenshoter = require("ui/widget/screenshoter")
 local SettingsMigration = require("ui/data/settings_migration")
 local UIManager = require("ui/uimanager")
@@ -173,7 +174,7 @@ function ReaderUI:init()
     -- menu widget should be registered after link widget and highlight widget
     -- so that taps on link and highlight areas won't popup reader menu
     -- reader menu controller
-    self:registerModule("menu", ReaderMenu:new{
+    self:registerModule("menu", (Replacements.reader_menu or ReaderMenu):new{
         view = self.view,
         ui = self
     })
@@ -250,7 +251,7 @@ function ReaderUI:init()
     -- configurable controller
     if self.document.info.configurable then
         -- config panel controller
-        self:registerModule("config", ReaderConfig:new{
+        self:registerModule("config", (Replacements.reader_config or ReaderConfig):new{
             configurable = self.document.configurable,
             dialog = self.dialog,
             view = self.view,

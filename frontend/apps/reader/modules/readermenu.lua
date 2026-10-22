@@ -442,6 +442,12 @@ function ReaderMenu:onShowMenu(tab_index, do_not_show)
     return true
 end
 
+-- Landing spot for "All settings (original)": opens this menu even when a
+-- replacement (see apps/replacements) overrides onShowMenu.
+function ReaderMenu:onShowOriginalMenu(tab_index)
+    return ReaderMenu.onShowMenu(self, tab_index)
+end
+
 function ReaderMenu:onCloseReaderMenu()
     if not self.menu_container then return true end
     self.last_tab_index = self.menu_container[1].last_index

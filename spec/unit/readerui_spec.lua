@@ -58,4 +58,33 @@ describe("Readerui module", function()
         new_readerui:closeDocument()
         new_readerui:onClose()
     end)
+    it("should use registered replacement modules and keep the original menu reachable", function()
+        local Event = require("ui/event")
+        local ReaderConfig = require("apps/reader/modules/readerconfig")
+        local ReaderMenu = require("apps/reader/modules/readermenu")
+        local Replacements = require("apps/replacements")
+        local replaced_show_menu_called = false
+        Replacements.reader_menu = ReaderMenu:extend{
+            is_replacement = true,
+            onShowMenu = function() replaced_show_menu_called = true return true end,
+        }
+        Replacements.reader_config = ReaderConfig:extend{ is_replacement = true }
+        local ok, err = pcall(function()
+            local ui = ReaderUI:new{
+                dimen = Screen:getSize(),
+                document = DocumentRegistry:openDocument(sample_epub),
+            }
+            assert.is_true(ui.menu.is_replacement)
+            assert.is_true(ui.config.is_replacement)
+            ui:handleEvent(Event:new("ShowOriginalMenu"))
+            assert.is_false(replaced_show_menu_called)
+            assert.is_truthy(ui.menu.menu_container)
+            ui.menu:onCloseReaderMenu()
+            ui:closeDocument()
+            ui:onClose()
+        end)
+        Replacements.reader_menu = nil
+        Replacements.reader_config = nil
+        assert(ok, err)
+    end)
 end)

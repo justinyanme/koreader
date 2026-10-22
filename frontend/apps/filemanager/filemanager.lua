@@ -30,6 +30,7 @@ local ReaderDeviceStatus = require("apps/reader/modules/readerdevicestatus")
 local ReaderDictionary = require("apps/reader/modules/readerdictionary")
 local ReaderWikipedia = require("apps/reader/modules/readerwikipedia")
 local ReadHistory = require("readhistory")
+local Replacements = require("apps/replacements")
 local Screenshoter = require("ui/widget/screenshoter")
 local TitleBar = require("ui/widget/titlebar")
 local UIManager = require("ui/uimanager")
@@ -1320,7 +1321,7 @@ function FileManager:showFiles(path, focused_file, selected_files)
     path = ffiUtil.realpath(path or G_reader_settings:readSetting("lastdir") or filemanagerutil.getDefaultDir())
     G_reader_settings:saveSetting("lastdir", path)
     self:setRotationMode()
-    local file_manager = FileManager:new{
+    local file_manager = (Replacements.filemanager or FileManager):new{
         dimen = Screen:getSize(),
         covers_fullscreen = true, -- hint for UIManager:_repaint()
         root_path = path,

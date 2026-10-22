@@ -370,3 +370,18 @@ describe("GetText module", function()
         end)
     end)
 end)
+
+describe("Bundled l10n catalog", function()
+    it("should translate the fork's own entries (eink-redesign) in zh_CN", function()
+        require("commonrequire")
+        local GetText = require("gettext")
+        local dirname = GetText.dirname
+        GetText.dirname = "l10n"
+        local ok = GetText.changeLang("zh_CN")
+        local translated = GetText("All settings (original)")
+        GetText.changeLang("C")
+        GetText.dirname = dirname
+        assert.is_true(ok)
+        assert.is_equal("全部设置（原版）", translated)
+    end)
+end)
