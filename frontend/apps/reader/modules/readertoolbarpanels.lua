@@ -430,9 +430,8 @@ local function moreContent(toolbar, sheet)
         end },
         { "eink/export", _("Export notes"), ui.exporter ~= nil and ui.exporter:isReadyToExport(), function() ui.exporter:onExportCurrentNotes() end },
         { "eink/stats", _("Reading statistics"), ui.statistics ~= nil, function() ui.statistics:onShowReaderProgress() end },
-        -- Until the reorganized settings (#12) exist: the original menu, on its settings tab.
-        { "eink/refresh", _("Refresh and ghosting"), true, function() toolbar:showOriginalMenuTab("appbar.settings") end },
-        { "eink/sliders", _("All settings"), true, function() ui:handleEvent(Event:new("ShowOriginalMenu")) end },
+        { "eink/refresh", _("Refresh and ghosting"), true, function() ui:handleEvent(Event:new("ShowEinkSettings", "refresh")) end },
+        { "eink/sliders", _("All settings"), true, function() ui:handleEvent(Event:new("ShowEinkSettings")) end },
     }
     local group = VerticalGroup:new{ align = "left" }
     local row
@@ -451,6 +450,8 @@ local function moreContent(toolbar, sheet)
     table.insert(group, row)
     return group
 end
+
+Panels.TapZones = TapZones -- also previewed from the settings (apps/settings/einksettings)
 
 function Panels.more(toolbar)
     local sheet = BottomSheet:new{

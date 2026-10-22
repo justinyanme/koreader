@@ -324,6 +324,28 @@ describe("Shelf home, 我的 tab", function()
         fm:onClose()
     end)
 
+    it("opens the reorganized settings from the settings row", function()
+        local fm, view = openMe()
+        local function find(widget, pred)
+            if type(widget) ~= "table" then return end
+            if pred(widget) then return widget end
+            for _, child in ipairs(widget) do
+                local found = find(child, pred)
+                if found then return found end
+            end
+        end
+        local row = find(view, function(w)
+            return w.callback and find(w, function(c) return c.text == _("Settings") end) ~= nil
+        end)
+        row.callback()
+        local EinkSettings = require("apps/settings/einksettings")
+        local top = UIManager._window_stack[#UIManager._window_stack].widget
+        assert.are.equal(EinkSettings, getmetatable(top).__index)
+        assert.is_nil(fm.menu.menu_container)
+        top:closeMenu()
+        fm:onClose()
+    end)
+
     it("leaves the menu swipe to the file manager", function()
         local fm = openMe()
         assert.is_nil(fm.menu.menu_container)
