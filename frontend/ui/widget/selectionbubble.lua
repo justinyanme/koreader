@@ -27,7 +27,6 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local Palette = require("ui/palette")
 local TextWidget = require("ui/widget/textwidget")
-local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local Screen = Device.screen
 
@@ -65,6 +64,7 @@ local SelectionBubble = InputContainer:extend{
     rows = nil, -- array of rows; a row is an array of { text = or widget =, selected = , callback = }
     anchor_rects = nil, -- screen rects of the selection
     tap_close_callback = nil, -- called when a tap outside the bubble closes it
+    rule_color = Palette.bubble_rule, -- dividers; Palette.paper survives a black and white ("fast") refresh
 }
 
 function SelectionBubble:init()
@@ -94,13 +94,13 @@ function SelectionBubble:init()
     local vgroup = VerticalGroup:new{}
     for r, row in ipairs(self.rows) do
         if r > 1 then
-            table.insert(vgroup, LineWidget:new{ background = Palette.bubble_rule, dimen = Geom:new{ w = bubble_w, h = rule } })
+            table.insert(vgroup, LineWidget:new{ background = self.rule_color, dimen = Geom:new{ w = bubble_w, h = rule } })
         end
         local hgroup = HorizontalGroup:new{}
         local avail = bubble_w - (#row - 1) * rule
         for c, cell in ipairs(row) do
             if c > 1 then
-                table.insert(hgroup, LineWidget:new{ background = Palette.bubble_rule, dimen = Geom:new{ w = rule, h = cell_h } })
+                table.insert(hgroup, LineWidget:new{ background = self.rule_color, dimen = Geom:new{ w = rule, h = cell_h } })
             end
             local w = math.floor(avail / #row)
             if c == #row then w = avail - (#row - 1) * w end
@@ -125,21 +125,34 @@ function SelectionBubble:init()
 end
 
 -- Same placement as the prototype: above the selection if it fits, else below; 10dp from screen edges.
+-- When neither fits (or there is no selection on screen), it overlays the selection, without an arrow.
 function SelectionBubble:place()
     local size = self.frame:getSize()
+    local sw, sh = Screen:getWidth(), Screen:getHeight()
     local edge, gap = Screen:scaleBySize(10), Screen:scaleBySize(10)
+    local rects = self.anchor_rects or {}
     self.arrow_h = Screen:scaleBySize(7)
-    local top0, bot0 = math.huge, 0
-    for _, r in ipairs(self.anchor_rects) do
-        top0 = math.min(top0, r.y)
-        bot0 = math.max(bot0, r.y + r.h)
+    local top0, bot0, anchor
+    if #rects > 0 then
+        top0, bot0 = math.huge, 0
+        for _, r in ipairs(rects) do
+            top0 = math.min(top0, r.y)
+            bot0 = math.max(bot0, r.y + r.h)
+        end
     end
-    self.above = top0 - size.h - Screen:scaleBySize(12) > Screen:scaleBySize(8)
-    local anchor = self.above and self.anchor_rects[1] or self.anchor_rects[#self.anchor_rects]
-    local mid = anchor.x + math.floor(anchor.w / 2)
+    local y
+    if top0 and top0 - gap - size.h >= edge then
+        self.above, anchor, y = true, rects[1], top0 - gap - size.h
+    elseif bot0 and bot0 + gap + size.h <= sh - edge then
+        self.above, anchor, y = false, rects[#rects], bot0 + gap
+    else
+        self.above, self.arrow_h = true, 0
+        y = math.max(edge, math.min(sh - size.h - edge, top0 or math.floor((sh - size.h) / 2)))
+    end
+    local mid = anchor and anchor.x + math.floor(anchor.w / 2) or math.floor(sw / 2)
     self.bubble_rect = Geom:new{
-        x = math.max(edge, math.min(Screen:getWidth() - size.w - edge, mid - math.floor(size.w / 2))),
-        y = self.above and top0 - size.h - gap or bot0 + gap,
+        x = math.max(edge, math.min(sw - size.w - edge, mid - math.floor(size.w / 2))),
+        y = y,
         w = size.w,
         h = size.h,
     }
