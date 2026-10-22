@@ -1,0 +1,588 @@
+--[[--
+Typeset panel of the e-ink redesign (see DESIGN.md, Bottom sheet, and the
+prototype's typeSheet): font size, font, line spacing and margins of reflowable
+books in one bottom sheet, opened from the toolbar's "Font" ("ShowConfigMenu").
+"More layout options" pages the same sheet to weight, render mode, embedded
+fonts and styles, and links into the existing hyphenation and style tweak menus.
+
+Replaces ReaderConfig (apps/replacements reader_config slot) for reflowable
+books on touch devices. Fixed-layout books and devices without touch keep the
+original bottom bar, which stays reachable for every book through the
+"ShowOriginalConfigMenu" event. Also registers the chapter page header.
+
+Showing, updating and closing the sheet only refresh its rect ("ui"). A type
+change re-lays the page out, which the reader refreshes as it does for a page
+turn ("partial", promoted to "full" by the user's full refresh setting).
+]]
+
+local BottomSheet = require("ui/widget/bottomsheet")
+local CanvasContext = require("document/canvascontext")
+local CenterContainer = require("ui/widget/container/centercontainer")
+local Device = require("device")
+local EinkControls = require("ui/widget/einkcontrols")
+local Event = require("ui/event")
+local Font = require("ui/font")
+local FontList = require("fontlist")
+local FrameContainer = require("ui/widget/container/framecontainer")
+local Geom = require("ui/geometry")
+local GestureRange = require("ui/gesturerange")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
+local IconWidget = require("ui/widget/iconwidget")
+local InfoMessage = require("ui/widget/infomessage")
+local InputContainer = require("ui/widget/container/inputcontainer")
+local LeftContainer = require("ui/widget/container/leftcontainer")
+local LineWidget = require("ui/widget/linewidget")
+local Palette = require("ui/palette")
+local ReaderChapterHeader = require("apps/reader/modules/readerchapterheader")
+local ReaderConfig = require("apps/reader/modules/readerconfig")
+local TextWidget = require("ui/widget/textwidget")
+local UIManager = require("ui/uimanager")
+local VerticalGroup = require("ui/widget/verticalgroup")
+local VerticalSpan = require("ui/widget/verticalspan")
+local Screen = Device.screen
+local T = require("ffi/util").template
+local _ = require("gettext")
+local C_ = _.pgettext
+
+-- Values of the panel's steps; DESIGN.md (Typography, Layout) records them.
+local FONT_SIZES = { 15, 16, 17, 18, 19, 20, 22, 24, 26, 28 }
+local LINE_SPACINGS = { 105, 125, 145 } -- % of the font's line height: about 1.55 / 1.8 / 2.1 em with CJK faces
+local MARGINS = { 18, 28, 44 } -- dp, left and right
+local MAX_LINE_CHARS = 38 -- CJK characters per line
+local SERIF_FACES = { "Source Han Serif SC", "Noto Serif CJK SC", "Source Han Serif CN", "Source Han Serif" } -- 思源宋体, not bundled
+local CJK_SANS = "Noto Sans CJK SC" -- 思源黑体, bundled
+local LATIN_FACES = { serif = "Noto Serif", sans = "Noto Sans" }
+
+local LABEL_W = Screen:scaleBySize(64)
+
+local function text(str, face, color, max_width)
+    return TextWidget:new{ text = str, face = Font:getFace(face), fgcolor = color or Palette.ink, max_width = max_width }
+end
+
+local function hasFace(name)
+    for _, info in pairs(FontList.fontinfo) do
+        if info[1] and info[1].name == name then return true end
+    end
+    return false
+end
+
+local function serifFace()
+    for _, face in ipairs(SERIF_FACES) do
+        if hasFace(face) then return face end
+    end
+end
+
+-- Where users put their own fonts on this device.
+local function fontsDir()
+    local dirs = CanvasContext:hasSystemFonts() and require("ui/elements/font_settings"):getPath()
+              or os.getenv("EXT_FONT_DIR")
+    return dirs and dirs:match("[^;]+") or require("ffi/util").realpath(FontList.fontdir) or FontList.fontdir
+end
+
+-- Gray label column, then the control ("srow").
+local function controlRow(label, control)
+    return HorizontalGroup:new{
+        LeftContainer:new{
+            dimen = Geom:new{ w = LABEL_W, h = Screen:scaleBySize(52) },
+            text(label, "ui_label", Palette.ink_2, LABEL_W),
+        },
+        control,
+    }
+end
+
+-- Full-width tappable row: label on the left, an optional widget on the right.
+local Row = InputContainer:extend{
+    label = nil, -- widget
+    right = nil, -- widget
+    height = nil,
+    callback = nil,
+}
+
+function Row:init()
+    local w = BottomSheet.getContentWidth()
+    local right_w = self.right and self.right:getSize().w or 0
+    self.dimen = Geom:new{ w = w, h = self.height }
+    self[1] = HorizontalGroup:new{
+        LeftContainer:new{ dimen = Geom:new{ w = w - right_w, h = self.height }, self.label },
+        self.right,
+    }
+    if self.callback then
+        self.ges_events = { TapSelect = { GestureRange:new{ ges = "tap", range = self.dimen } } }
+    end
+end
+
+function Row:onTapSelect()
+    self.callback()
+    return true
+end
+
+local function ruleAbove(widget)
+    return VerticalGroup:new{
+        LineWidget:new{ dimen = Geom:new{ w = BottomSheet.getContentWidth(), h = Screen:scaleBySize(1) }, background = Palette.rule },
+        widget,
+    }
+end
+
+local function linkRow(label, callback)
+    local chev = Screen:scaleBySize(18)
+    return ruleAbove(Row:new{
+        height = Screen:scaleBySize(48),
+        label = text(label, "ui_label_large", Palette.ink, BottomSheet.getContentWidth() - chev),
+        right = IconWidget:new{ icon = "eink/chev", width = chev, height = chev, alpha = true },
+        callback = callback,
+    })
+end
+
+-- Font tile: a sample in the face over its name; 2dp ink border when selected, 1dp rule gray otherwise.
+local FontCard = InputContainer:extend{
+    width = nil,
+    sample = nil, -- widget
+    name = nil, -- string
+    selected = false,
+    enabled = true,
+    callback = nil,
+}
+
+function FontCard:init()
+    local h = Screen:scaleBySize(66)
+    local bw = self.selected and Screen:scaleBySize(2) or Screen:scaleBySize(1)
+    self.dimen = Geom:new{ w = self.width, h = h }
+    self[1] = FrameContainer:new{
+        bordersize = bw, padding = 0, radius = Screen:scaleBySize(10),
+        color = self.selected and Palette.ink or Palette.rule, background = Palette.paper,
+        CenterContainer:new{
+            dimen = Geom:new{ w = self.width - 2 * bw, h = h - 2 * bw },
+            VerticalGroup:new{
+                self.sample,
+                VerticalSpan:new{ width = Screen:scaleBySize(2) },
+                text(self.name, "ui_micro", self.enabled and Palette.ink_2 or Palette.ink_3, self.width - 2 * bw),
+            },
+        },
+    }
+    self.ges_events = { TapSelect = { GestureRange:new{ ges = "tap", range = self.dimen } } }
+end
+
+function FontCard:onTapSelect()
+    self.callback()
+    return true
+end
+
+local ReaderTypesetPanel = ReaderConfig:extend{
+    sheet = nil, -- BottomSheet while shown
+    page = nil, -- "main" or "more"
+}
+
+--- Registers the panel in its replacement slot and applies its typesetting defaults.
+function ReaderTypesetPanel.register()
+    require("apps/replacements").reader_config = ReaderTypesetPanel
+    ReaderTypesetPanel.applyTypesetDefaults()
+end
+
+--- Design defaults for books without their own settings; never overrides a default the user has set.
+-- The 44dp top margin leaves room for the chapter header.
+function ReaderTypesetPanel.applyTypesetDefaults()
+    for key, value in pairs{
+        copt_font_size = 19,
+        copt_line_spacing = LINE_SPACINGS[2],
+        copt_h_page_margins = { MARGINS[2], MARGINS[2] },
+        copt_t_page_margin = 44,
+    } do
+        if not G_reader_settings:has(key) then
+            G_reader_settings:saveSetting(key, value)
+        end
+    end
+end
+
+function ReaderTypesetPanel:init()
+    ReaderConfig.init(self)
+    if self.document.koptinterface == nil then -- reflowable
+        self.view:registerViewModule("chapter_header", ReaderChapterHeader:new{})
+    end
+end
+
+function ReaderTypesetPanel:usesPanel()
+    return self.ui.rolling ~= nil and Device:isTouchDevice()
+end
+
+function ReaderTypesetPanel:onShowConfigMenu()
+    if not self:usesPanel() then
+        return ReaderConfig.onShowConfigMenu(self)
+    end
+    if not self.sheet then
+        self.sheet = BottomSheet:new{ on_close = function() self.sheet = nil end }
+        self:showPage("main", true)
+        UIManager:show(self.sheet, "ui", self.sheet:getRefreshRegion())
+    end
+    self.ui:handleEvent(Event:new("HandledAsSwipe")) -- cancel any pan scroll made
+    return true
+end
+
+--- The original bottom bar, for reflowable books too.
+function ReaderTypesetPanel:onShowOriginalConfigMenu()
+    self:closeSheet()
+    return ReaderConfig.onShowConfigMenu(self)
+end
+
+function ReaderTypesetPanel:onCloseConfigMenu()
+    self:closeSheet()
+    ReaderConfig.onCloseConfigMenu(self)
+end
+
+function ReaderTypesetPanel:onSetDimensions(dimen)
+    self:closeSheet(true)
+    ReaderConfig.onSetDimensions(self, dimen)
+end
+
+function ReaderTypesetPanel:onCloseWidget()
+    self:closeSheet(true)
+end
+
+function ReaderTypesetPanel:closeSheet(no_refresh)
+    local sheet = self.sheet
+    if not sheet then return end
+    self.sheet = nil
+    sheet.on_close = nil
+    if no_refresh then
+        UIManager:close(sheet)
+    else
+        sheet:onClose()
+    end
+end
+
+--- Shows a page of the sheet ("main" or "more"); `building` skips the refresh while the sheet is not shown yet.
+function ReaderTypesetPanel:showPage(page, building)
+    local sheet = self.sheet
+    if not sheet then return end
+    self.page = page
+    local content
+    if page == "more" then
+        sheet.title = _("More layout options")
+        sheet.on_back = function() self:showPage("main") end
+        content = self:moreContent()
+    else
+        sheet.title = _("Font & layout")
+        sheet.on_back = nil
+        content = self:mainContent()
+    end
+    if building then
+        sheet.content = content
+        sheet:build()
+    else
+        sheet:setContent(content) -- "ui" on the sheet's rect
+    end
+end
+
+function ReaderTypesetPanel:refreshSheet()
+    self:showPage(self.page)
+end
+
+-- Same path as ConfigDialog: record the option, then apply it.
+function ReaderTypesetPanel:apply(name, value, event, arg)
+    self.ui:handleEvent(Event:new("ConfigChange", name, value))
+    if arg == nil then arg = value end
+    self.ui:handleEvent(Event:new(event, arg))
+end
+
+------------------------------------------------------------------------
+-- Font size and margins
+
+--- Left and right margin (dp) of a margin step: the step's value, widened so that a line holds at most
+-- MAX_LINE_CHARS characters at the current font size. KOReader's dp grows with the screen, so this only
+-- widens margins in landscape or with a DPI override.
+function ReaderTypesetPanel:marginsFor(step)
+    local width = Screen:getWidth() * 1000 / Screen:scaleBySize(1000)
+    local margin = MARGINS[step]
+    return margin + math.max(0, math.ceil((width - 2 * margin - MAX_LINE_CHARS * self.configurable.font_size) / 2))
+end
+
+--- The margin step matching the current margins, if any.
+function ReaderTypesetPanel:marginStep()
+    local current = self.configurable.h_page_margins or {}
+    for step in ipairs(MARGINS) do
+        local margin = self:marginsFor(step)
+        if current[1] == margin and current[2] == margin then return step end
+    end
+end
+
+function ReaderTypesetPanel:setMargins(step)
+    local margin = self:marginsFor(step)
+    local current = self.configurable.h_page_margins or {}
+    if current[1] ~= margin or current[2] ~= margin then
+        self:apply("h_page_margins", { margin, margin }, "SetPageHorizMargins")
+    end
+end
+
+function ReaderTypesetPanel:setFontSize(size)
+    local step = self:marginStep() -- before the size changes
+    self:apply("font_size", size, "SetFontSize")
+    if step then
+        self:setMargins(step)
+    end
+end
+
+local function nearestIndex(values, value)
+    local best, best_d = 1, math.huge
+    for i, v in ipairs(values) do
+        local d = math.abs(v - (value or 0))
+        if d < best_d then best, best_d = i, d end
+    end
+    return best
+end
+
+local function indexOf(values, value)
+    for i, v in ipairs(values) do
+        if v == value then return i end
+    end
+end
+
+------------------------------------------------------------------------
+-- Fonts
+
+function ReaderTypesetPanel:isCJK()
+    local tag = (self.ui.typography and self.ui.typography.text_lang_tag or ""):lower()
+    return tag:match("^zh") or tag:match("^ja") or tag:match("^ko")
+end
+
+--- The face behind a font card ("serif" or "sans") for this book's language,
+-- or nil for the CJK serif when it is not installed.
+function ReaderTypesetPanel:cardFace(kind)
+    if not self:isCJK() then
+        return LATIN_FACES[kind]
+    end
+    return kind == "sans" and CJK_SANS or serifFace()
+end
+
+function ReaderTypesetPanel:showSerifMissing()
+    UIManager:show(InfoMessage:new{
+        text = T(_("Source Han Serif is not installed. Put its font files in %1 and restart KOReader. Source Han Sans is used for now."),
+                 fontsDir()),
+    })
+end
+
+function ReaderTypesetPanel:setCardFont(kind)
+    local face = self:cardFace(kind)
+    if not face then
+        face = CJK_SANS
+        self:showSerifMissing()
+    end
+    self.ui.font:onSetFont(face)
+end
+
+function ReaderTypesetPanel:fontCards(width)
+    local gap = Screen:scaleBySize(10)
+    local card_w = math.floor((width - 2 * gap) / 3)
+    local cre = require("document/credocument"):engineInit()
+    local function sample(face, color)
+        local file, index = cre.getFontFaceFilenameAndFaceIndex(face)
+        return TextWidget:new{
+            text = "永 Aa",
+            face = file and Font:getFace(file, 20, index) or Font:getFace("cfont", 20),
+            fgcolor = color,
+            max_width = card_w,
+        }
+    end
+    local row = HorizontalGroup:new{}
+    for __, card in ipairs{ { "serif", _("Source Han Serif") }, { "sans", _("Source Han Sans") } } do
+        local face = self:cardFace(card[1])
+        local name = card[2]
+        if not face then
+            name = T(_("%1 · not installed"), name)
+        end
+        table.insert(row, FontCard:new{
+            width = card_w,
+            sample = sample(face or CJK_SANS, face and Palette.ink or Palette.ink_3),
+            name = name,
+            enabled = face ~= nil,
+            selected = face ~= nil and self.ui.font.font_face == face,
+            callback = function()
+                self:setCardFont(card[1])
+                self:refreshSheet()
+            end,
+        })
+        table.insert(row, HorizontalSpan:new{ width = gap })
+    end
+    local icon_size = Screen:scaleBySize(20)
+    table.insert(row, FontCard:new{
+        width = width - 2 * (card_w + gap),
+        sample = IconWidget:new{ icon = "eink/plus", width = icon_size, height = icon_size, alpha = true },
+        name = _("More fonts"),
+        callback = function() self:showFontMenu() end,
+    })
+    return row
+end
+
+------------------------------------------------------------------------
+-- Existing menus, opened on their own
+
+--- Shows a menu item table (the original menu's format) as a single-tab menu, after closing the sheet.
+function ReaderTypesetPanel:showMenu(item_table)
+    self:closeSheet()
+    local TouchMenu = require("ui/widget/touchmenu")
+    local tab = { icon = "appbar.typeset", max_per_page = item_table.max_per_page }
+    for i, item in ipairs(item_table) do
+        tab[i] = item
+    end
+    local container = CenterContainer:new{ covers_header = true, ignore = "height", dimen = Screen:getSize() }
+    local menu = TouchMenu:new{ width = Screen:getWidth(), tab_item_table = { tab }, show_parent = container }
+    menu.close_callback = function() UIManager:close(container) end
+    container[1] = menu
+    UIManager:show(container)
+end
+
+function ReaderTypesetPanel:showFontMenu()
+    local font = self.ui.font
+    if font.face_table.needs_refresh and font.face_table.refresh_func then
+        font.face_table.refresh_func()
+    end
+    self:showMenu(font.face_table)
+end
+
+--- The style tweaks submenu titled `title`, or all style tweaks.
+function ReaderTypesetPanel:styleTweaks(title)
+    local tweaks = self.ui.styletweak.tweaks_table
+    local function find(items)
+        for _, item in ipairs(items) do
+            if item.sub_item_table then
+                local item_text = item.text_func and item.text_func() or item.text or ""
+                if item_text:sub(1, #title) == title then return item.sub_item_table end
+                local found = find(item.sub_item_table)
+                if found then return found end
+            end
+        end
+    end
+    return title and find(tweaks) or tweaks
+end
+
+------------------------------------------------------------------------
+-- Pages
+
+function ReaderTypesetPanel:mainContent()
+    local w = BottomSheet.getContentWidth()
+    local control_w = w - LABEL_W
+    local size = self.configurable.font_size
+    return VerticalGroup:new{
+        align = "left",
+        controlRow(T(C_("Typeset panel", "Font size %1"), string.format("%g", size)),
+            EinkControls.TickStepper:new{
+                count = #FONT_SIZES, width = control_w,
+                value = nearestIndex(FONT_SIZES, size),
+                on_change = function(i)
+                    self:setFontSize(FONT_SIZES[i])
+                    self:refreshSheet()
+                end,
+            }),
+        controlRow(_("Font"), self:fontCards(control_w)),
+        controlRow(C_("Typeset panel", "Line spacing"),
+            EinkControls.Segmented:new{
+                labels = { C_("Line spacing", "Compact"), C_("Line spacing", "Standard"), C_("Line spacing", "Loose") }, width = control_w,
+                value = indexOf(LINE_SPACINGS, self.configurable.line_spacing),
+                on_change = function(i)
+                    self:apply("line_spacing", LINE_SPACINGS[i], "SetLineSpace")
+                    self:refreshSheet()
+                end,
+            }),
+        controlRow(_("Margins"),
+            EinkControls.Segmented:new{
+                labels = { C_("Margins", "Narrow"), C_("Margins", "Standard"), C_("Margins", "Wide") }, width = control_w,
+                value = self:marginStep(),
+                on_change = function(i)
+                    self:setMargins(i)
+                    self:refreshSheet()
+                end,
+            }),
+        VerticalSpan:new{ width = Screen:scaleBySize(10) },
+        linkRow(_("More layout options: weight, hyphenation, indent, style tweaks"), function() self:showPage("more") end),
+    }
+end
+
+function ReaderTypesetPanel:option(name)
+    for _, tab in ipairs(self.options) do
+        for _, option in ipairs(tab.options) do
+            if option.name == name then return option end
+        end
+    end
+end
+
+function ReaderTypesetPanel:toggleRow(label, name, event)
+    local toggle = EinkControls.Toggle:new{ checked = self.configurable[name] == 1 }
+    toggle.callback = function(on)
+        UIManager:setDirty(self.sheet, "fast", toggle.dimen)
+        self:apply(name, on and 1 or 0, event, on)
+    end
+    return ruleAbove(Row:new{
+        height = Screen:scaleBySize(52) - Screen:scaleBySize(1),
+        label = text(label, "ui_label_large", Palette.ink, BottomSheet.getContentWidth() - toggle:getSize().w),
+        right = toggle,
+    })
+end
+
+function ReaderTypesetPanel:moreContent()
+    local control_w = BottomSheet.getContentWidth() - LABEL_W
+    local weight = self:option("font_base_weight")
+    local render = self:option("block_rendering_mode")
+    return VerticalGroup:new{
+        align = "left",
+        controlRow(_("Font Weight"),
+            EinkControls.TickStepper:new{
+                count = #weight.values, width = control_w,
+                value = nearestIndex(weight.values, self.configurable.font_base_weight),
+                on_change = function(i)
+                    self:apply("font_base_weight", weight.values[i], "SetFontBaseWeight")
+                    self:refreshSheet()
+                end,
+            }),
+        controlRow(_("Render Mode"),
+            EinkControls.Segmented:new{
+                labels = render.toggle, width = control_w,
+                value = indexOf(render.values, self.configurable.block_rendering_mode),
+                on_change = function(i)
+                    self:apply("block_rendering_mode", render.values[i], "SetBlockRenderingMode", render.args[i])
+                    self:refreshSheet()
+                end,
+            }),
+        self:toggleRow(_("Embedded Fonts"), "embedded_fonts", "ToggleEmbeddedFonts"),
+        self:toggleRow(_("Embedded Style"), "embedded_css", "ToggleEmbeddedStyleSheet"),
+        linkRow(_("Hyphenation"), function() self:showMenu(self.ui.typography.menu_table) end),
+        linkRow(_("Paragraph indent"), function() self:showMenu(self:styleTweaks(_("Paragraph first-line indentation"))) end),
+        linkRow(_("Paragraph spacing"), function() self:showMenu(self:styleTweaks(_("Spacing between paragraphs"))) end),
+        linkRow(_("Style tweaks"), function() self:showMenu(self:styleTweaks()) end),
+        linkRow(_("All layout options (original)"), function() self:onShowOriginalConfigMenu() end),
+    }
+end
+
+------------------------------------------------------------------------
+-- Default reading font
+
+-- A book opened for the first time, with no font chosen by the user, reads in the CJK serif when its
+-- language is CJK (Source Han Sans while the serif is missing). Applied before the first render.
+function ReaderTypesetPanel:onReadSettings(config)
+    ReaderConfig.onReadSettings(self, config)
+    self.pick_default_font = self.document.koptinterface == nil
+        and not config:has("font_face") and not G_reader_settings:has("cre_font")
+end
+
+-- Sent by ReaderTypography once it knows the book's language (and again if the book's metadata overrides it).
+function ReaderTypesetPanel:onTypographyLanguageChanged()
+    if not self.pick_default_font then return end
+    local face
+    if self:isCJK() then
+        face = serifFace()
+        self.serif_missing = face == nil
+        face = face or CJK_SANS
+    else
+        self.serif_missing = nil
+        face = self.document.default_font
+    end
+    self.ui.font:onSetFont(face)
+end
+
+function ReaderTypesetPanel:onReaderReady()
+    if self.pick_default_font and self.serif_missing and not G_reader_settings:isTrue("typeset_serif_missing_shown") then
+        G_reader_settings:makeTrue("typeset_serif_missing_shown")
+        self:showSerifMissing()
+    end
+    self.pick_default_font = nil
+end
+
+return ReaderTypesetPanel
