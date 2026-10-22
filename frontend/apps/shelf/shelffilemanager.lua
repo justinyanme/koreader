@@ -15,6 +15,7 @@ tab opens something on top instead. #10 and #11 replace the files and me tabs.
 local BD = require("ui/bidi")
 local Device = require("device")
 local Event = require("ui/event")
+local FileChooser = require("ui/widget/filechooser")
 local FileManager = require("apps/filemanager/filemanager")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
@@ -143,7 +144,7 @@ end
 -- "Parent folder" means nothing here, so Back exits or prompts as by default.
 function ShelfFileManager:onBack()
     if G_reader_settings:readSetting("back_in_filemanager", "default") == "default" then
-        return self.file_chooser:onBack()
+        return FileChooser.onBack(self.file_chooser) -- not 文件's own Back, which goes up a folder
     end
     return true
 end

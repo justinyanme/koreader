@@ -67,9 +67,12 @@ function Row:paintTo(bb, x, y)
     end
 end
 
+-- rows focused before their first paint are drawn with the list
 function Row:onFocus()
     self.focused = true
-    UIManager:setDirty(self.show_parent, "fast", self.dimen)
+    if self.dimen then
+        UIManager:setDirty(self.show_parent, "fast", self.dimen)
+    end
     return true
 end
 
@@ -77,7 +80,9 @@ function Row:onUnfocus()
     -- also sent to rows that never had focus
     if self.focused then
         self.focused = nil
-        UIManager:setDirty(self.show_parent, "fast", self.dimen)
+        if self.dimen then
+            UIManager:setDirty(self.show_parent, "fast", self.dimen)
+        end
     end
     return true
 end
@@ -93,12 +98,38 @@ function FilesChooser:genItemTable(dirs, files, path)
     return item_table
 end
 
--- Folders keep the counts upstream already lists for its mandatory text; files show no mandatory.
-function FilesChooser:getMenuItemMandatory(item, collate)
-    if not collate then
-        local sub_dirs, dir_files = self:getList(item.path)
-        item.n_dirs, item.n_files = #sub_dirs, #dir_files
+-- Without the "../" row a folder can list nothing: Menu would then look up item 0 for the focused path.
+function FilesChooser:switchItemTable(new_title, new_item_table, itemnumber, itemmatch, new_subtitle)
+    if new_item_table and #new_item_table == 0 then
+        itemmatch = nil
     end
+    return FileChooser.switchItemTable(self, new_title, new_item_table, itemnumber, itemmatch, new_subtitle)
+end
+
+-- Folders keep the counts upstream already lists for its mandatory text, instead of that text.
+-- Files keep theirs: FileSearcher lists its results with our getListItem.
+function FilesChooser:getMenuItemMandatory(item, collate)
+    if collate then
+        return FileChooser.getMenuItemMandatory(self, item, collate)
+    end
+    local sub_dirs, dir_files = self:getList(item.path)
+    item.n_dirs, item.n_files = #sub_dirs, #dir_files
+end
+
+local function homeFolder()
+    local home = filemanagerutil.getHomeFolder()
+    return ffiUtil.realpath(home) or home
+end
+
+-- With the default setting Back goes up while there is a folder above (the crumbs replace "../"),
+-- and only exits (or prompts) at home or "/".
+function FilesChooser:onBack()
+    if G_reader_settings:readSetting("back_in_filemanager", "default") == "default"
+            and self.path ~= "/" and self.path ~= homeFolder() then
+        self:onFolderUp()
+        return true
+    end
+    return FileChooser.onBack(self)
 end
 
 function FilesChooser:_recalculateDimen()
@@ -120,10 +151,13 @@ function FilesChooser:updateItems(select_number)
     self.layout = {}
     local list = VerticalGroup:new{ align = "left" }
     local first = (self.page - 1) * self.perpage
+    local focused -- the item Show folder asked for
     for i = first + 1, math.min(first + self.perpage, #self.item_table) do
         local item = self.item_table[i]
         item.idx = i
-        if i == self.itemnumber then select_number = i - first end
+        if i == self.itemnumber then
+            select_number, focused = i - first, true
+        end
         local row = self:buildRow(item)
         table.insert(list, row)
         table.insert(self.layout, { row })
@@ -145,8 +179,14 @@ function FilesChooser:updateItems(select_number)
             self:buildPager(),
         },
     }
-    if Device:hasDPad() and #self.layout > 0 then
-        self:moveFocusTo(1, math.min(select_number or 1, #self.layout), FocusManager.FOCUS_ONLY_ON_NT)
+    if (focused or Device:hasDPad()) and #self.layout > 0 then
+        local y = math.min(select_number or 1, #self.layout)
+        self:moveFocusTo(1, y, FocusManager.FOCUS_ONLY_ON_NT)
+        if focused then
+            -- Show folder marks its book. Not with FORCED_FOCUS: that adds a "fast" refresh of the whole
+            -- screen, while the mark is drawn with the list below.
+            self.layout[y][1].focused = true
+        end
     end
     self.path_items[self.path] = first + (select_number or 1)
     UIManager:setDirty(self.show_parent, "ui", self.dimen)
@@ -183,8 +223,7 @@ end
 
 --- Returns the crumbs of `path`: { text, path } from the home folder, or from "/" outside it.
 function FilesChooser:getCrumbs(path)
-    local home = filemanagerutil.getHomeFolder()
-    home = ffiUtil.realpath(home) or home
+    local home = homeFolder()
     local base, rest
     if path == home or util.stringStartsWith(path, home == "/" and "/" or home .. "/") then
         base, rest = home, path:sub(#home + 1)
@@ -275,7 +314,7 @@ function FilesChooser:buildRow(item)
     local fg = item.dim and Palette.ink_3 or Palette.ink
     local lead, trail, sub
     if item.is_file then
-        local suffix = util.getFileNameSuffix(item.path):upper()
+        local suffix = util.getFileNameSuffix(item.text):upper()
         lead = FrameContainer:new{
             bordersize = Size.border.default,
             color = fg,
