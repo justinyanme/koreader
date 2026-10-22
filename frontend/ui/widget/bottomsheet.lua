@@ -35,6 +35,7 @@ local BottomSheet = InputContainer:extend{
     title = nil,
     content = nil, -- widget
     on_close = nil, -- function, called once the sheet is closed
+    on_back = nil, -- function; when set, the header starts with a back button
     close_on_scrim = true,
 }
 
@@ -56,15 +57,17 @@ function BottomSheet:build()
     local close_size = Screen:scaleBySize(24)
     local close_pad = Screen:scaleBySize(10)
     local content_w = self.getContentWidth()
+    local back_w = self.on_back and close_size + close_pad or 0
+    local title_w = content_w - close_size - close_pad - back_w
     local title = TextWidget:new{
         text = self.title or "",
         face = Font:getFace("ui_title"),
         fgcolor = Palette.ink,
-        max_width = content_w - close_size - close_pad,
+        max_width = title_w,
     }
     local header = HorizontalGroup:new{
         LeftContainer:new{
-            dimen = Geom:new{ w = content_w - close_size - close_pad, h = Screen:scaleBySize(54) },
+            dimen = Geom:new{ w = title_w, h = Screen:scaleBySize(54) },
             title,
         },
         IconButton:new{
@@ -77,6 +80,17 @@ function BottomSheet:build()
             callback = function() self:onClose() end,
         },
     }
+    if self.on_back then
+        table.insert(header, 1, IconButton:new{
+            icon = "eink/back",
+            width = close_size,
+            height = close_size,
+            padding_left = 0,
+            padding_right = close_pad,
+            allow_flash = false,
+            callback = function() self.on_back() end,
+        })
+    end
     local radius = Screen:scaleBySize(16)
     local border = Screen:scaleBySize(1)
     self.frame = FrameContainer:new{
