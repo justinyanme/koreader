@@ -335,7 +335,7 @@ function TocDrawer:buildHeader()
         table.insert(info, text((props.authors:gsub("\n", ", ")), "ui_label", Palette.ink_2, text_w))
     end
     table.insert(info, VerticalSpan:new{ width = dp(4) })
-    table.insert(info, text(chapters > 0 and T(_("Read %1% · %2 chapters"), percent, chapters) or T(_("Read %1%"), percent),
+    table.insert(info, text(chapters > 0 and T(_("Read %1% · %2 chapters"), percent, chapters) or T(C_("Contents drawer", "Read %1%"), percent),
                             "ui_caption", Palette.ink_2, text_w))
     return VerticalGroup:new{
         VerticalSpan:new{ width = dp(22) },

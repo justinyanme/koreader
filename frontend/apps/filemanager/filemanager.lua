@@ -139,6 +139,7 @@ function FileManager:setupLayout()
     local file_chooser = FileChooser:new{
         name = "filemanager",
         path = self.root_path,
+        height = self.file_chooser_height, -- nil: full screen; set by a replacement that adds its own chrome
         focused_path = self.focused_file,
         show_parent = self.show_parent,
         file_filter = function(filename) return DocumentRegistry:hasProvider(filename) end,
