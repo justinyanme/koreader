@@ -15,6 +15,7 @@ tab opens something on top instead. #10 and #11 replace the files and me tabs.
 local BD = require("ui/bidi")
 local Device = require("device")
 local Event = require("ui/event")
+local FileChooser = require("ui/widget/filechooser")
 local FileManager = require("apps/filemanager/filemanager")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
@@ -30,6 +31,7 @@ local _ = require("gettext")
 
 local ShelfFileManager = FileManager:extend{
     current_tab = "shelf",
+    file_chooser_class = require("apps/shelf/fileschooser"), -- the 文件 tab
 }
 
 ShelfFileManager.tabs = {
@@ -118,6 +120,13 @@ function ShelfFileManager:onPathChanged(path)
     end
 end
 
+-- the 文件 title's plus button turns into a check while selecting
+function ShelfFileManager:onToggleSelectMode(...)
+    FileManager.onToggleSelectMode(self, ...)
+    self.file_chooser:updateTitle()
+    return true
+end
+
 function ShelfFileManager:onSwipeFM(ges)
     if self.current_tab == "files" then
         return FileManager.onSwipeFM(self, ges)
@@ -135,7 +144,7 @@ end
 -- "Parent folder" means nothing here, so Back exits or prompts as by default.
 function ShelfFileManager:onBack()
     if G_reader_settings:readSetting("back_in_filemanager", "default") == "default" then
-        return self.file_chooser:onBack()
+        return FileChooser.onBack(self.file_chooser) -- not 文件's own Back, which goes up a folder
     end
     return true
 end
