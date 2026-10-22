@@ -70,6 +70,7 @@ describe("书源 (OPDS as a remote shelf)", function()
         if mode == "html" then return 200, {}, "<html><body>Login</body></html>" end
         if mode == "json" and path == "/opds" then return 200, {}, '{"error": "not a feed"}' end
         if mode == "osd_timeout" and path == "/opds/osd" then return nil end
+        if mode == "osd_auth" and path == "/opds/osd" then return 401, {}, "Unauthorized" end
         local atom = { ["content-type"] = "application/atom+xml" }
         if path == "/opds" and server.cookie then atom["set-cookie"] = "CF_Authorization=old; Path=/" end
         if path == "/opds" then
@@ -102,6 +103,8 @@ describe("书源 (OPDS as a remote shelf)", function()
             if mode == "empty" then return 200, atom, xmlFeed("Recently added Books") end
             return 200, atom, xmlFeed("Recently added Books",
                 '<link rel="next" href="/opds/new?offset=40" type="application/atom+xml;profile=opds-catalog"/>', books(1, 40))
+        elseif path == "/opds/new?offset=40" and server.fail_next then
+            return 500, {}, "boom"
         elseif path == "/opds/new?offset=40" then
             return 200, atom, xmlFeed("Recently added Books", "", books(41, 42))
         elseif path == "/opds/books" then
@@ -118,7 +121,9 @@ describe("书源 (OPDS as a remote shelf)", function()
             local f = io.open(PNG, "rb")
             local png = f:read("*a")
             f:close()
-            return 200, { ["content-type"] = "image/png" }, png
+            -- server.thumb_type: what the server calls its covers ("" for no Content-Type)
+            local thumb_type = server.thumb_type or "image/png"
+            return 200, thumb_type ~= "" and { ["content-type"] = thumb_type } or {}, png
         elseif path == "/opds/download/3/epub/" then
             return 302, { location = "https://cdn.example/files/book3.epub" }, ""
         elseif path == "/opds/download/4/epub/" then
@@ -521,6 +526,29 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.is_true(has(view, "42 books"))
         end)
 
+        it("asks once and says so once when the next batch fails", function()
+            server.fail_next = true
+            local view = openSources(openFM())
+            local page = view:top()
+            local toasts = {}
+            local orig_show = UIManager.show
+            UIManager.show = function(self, widget, ...)
+                if getmetatable(widget).__index == require("ui/widget/notification") then table.insert(toasts, widget.text) end
+                return orig_show(self, widget, ...)
+            end
+            -- forward until a page the device cannot fill
+            for _ = 1, 20 do
+                view:turnPage(page.page_no + 1)
+                flush()
+                if #requestsTo(ROOT .. "/new?offset=40") > 0 then break end
+            end
+            for _ = 1, 5 do flush() end
+            UIManager.show = orig_show
+            assert.are.equal(1, #requestsTo(ROOT .. "/new?offset=40"))
+            assert.are.equal(1, #toasts)
+            assert.are.equal(40, #page.result.books)
+        end)
+
         it("repaints under the nav bar once a feed arrives, so the search row and caption show", function()
             local fm = openFM()
             local refreshes, restore = spyRefreshes()
@@ -787,11 +815,26 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.is_nil(feedRequests()[count + 1].headers.Cookie)
         end)
 
-        it("stops at the first unreachable request instead of waiting on each", function()
+        it("keeps the feed and turns search off when the search description times out, asking nothing more", function()
             server.mode = "osd_timeout"
             local view = openSources(openFM())
-            assert.are.equal("unreachable", view:top().result.state)
+            assert.are.equal("ok", view:top().result.state)
+            assert.is_true(has(view, "Recently added Books")) -- the root's entries, as categories
+            assert.is_nil(view:top().root.search_url)
+            assert.are.equal(1, #requestsTo(ROOT .. "/osd"))
             assert.are.same({}, requestsTo(ROOT .. "/new"))
+            assert.is_true(has(view, _("Search this source")))
+            assert.has_error(function() tap(view, _("Search this source")) end) -- shown, but nothing to tap
+        end)
+
+        it("keeps the feed and turns search off when the search description is refused", function()
+            server.mode = "osd_auth"
+            local view = openSources(openFM())
+            assert.are.equal("ok", view:top().result.state)
+            assert.are.equal(ROOT .. "/new", view:top().result.url)
+            assert.is_false(has(view, _("Login failed")))
+            assert.is_nil(view:top().root.search_url)
+            assert.are.equal(1, #requestsTo(ROOT .. "/osd"))
         end)
 
         it("says a JSON answer that is not OPDS is not a catalog", function()
@@ -811,6 +854,16 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.is_nil(lfs.attributes(home .. "/Author 6 - Book 6.epub", "mode"))
             assert.is_nil(savedSources()[1].downloaded)
             assert.are.same({}, opened)
+        end)
+
+        it("caches covers sent as octet-stream or without a type", function()
+            for _, thumb_type in ipairs{ "application/octet-stream", "" } do
+                server.thumb_type = thumb_type
+                BookSource.thumb_dir = tmp .. "/thumbs-" .. (thumb_type == "" and "none" or "octet")
+                local view = openSources(openFM())
+                waitFor(function() return view.thumbs[ROOT .. "/cover_240_240/1"] ~= nil end, thumb_type .. " covers")
+                view:close(true)
+            end
         end)
 
         it("does not cache a thumbnail that is not an image", function()
@@ -837,6 +890,20 @@ describe("书源 (OPDS as a remote shelf)", function()
                 toast.text)
             assert.is_nil(view.downloads["urn:uuid:book-1"])
             assert.are.same({}, requestsTo(ROOT .. "/download/"))
+        end)
+
+        it("closes a keyboard dialog it opened when a download finishes and the book opens", function()
+            local view = openSources(openFM())
+            tap(view, "Book 1")
+            tap(view, "eink/more")
+            tap(topWidget(), _("Edit source"))
+            view.edit_rows.username.callback()
+            assert.are.equal(InputDialog, getmetatable(topWidget()).__index)
+            waitFor(function() return #opened == 1 end, "the book to open")
+            for _, entry in ipairs(UIManager._window_stack) do
+                local class = getmetatable(entry.widget).__index
+                assert.is_true(class ~= InputDialog and class ~= BottomSheet and class ~= BookSourceView)
+            end
         end)
 
         it("closes its sheets with the page, and says a running download was canceled", function()
