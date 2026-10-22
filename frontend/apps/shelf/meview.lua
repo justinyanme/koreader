@@ -12,6 +12,7 @@ local BD = require("ui/bidi")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local DataStorage = require("datastorage")
 local Device = require("device")
+local EinkControls = require("ui/widget/einkcontrols")
 local Event = require("ui/event")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
@@ -31,6 +32,7 @@ local ShelfWidgets = require("apps/shelf/shelfwidgets")
 local Size = require("ui/size")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
+local TocDrawer = require("apps/reader/modules/readertocdrawer")
 local TopContainer = require("ui/widget/container/topcontainer")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -52,23 +54,31 @@ local ROW_H = dp(56)
 local CHART_H = dp(118)
 local WEEKDAYS = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" }
 
+local function getFace(face)
+    return type(face) == "string" and Font:getFace(face) or face
+end
+
 local function text(str, face, color, max_width, bold)
-    return TextWidget:new{ text = str, face = type(face) == "string" and Font:getFace(face) or face,
+    return TextWidget:new{ text = str, face = getFace(face),
         fgcolor = color or Palette.ink, max_width = max_width, bold = bold, padding = 0 }
 end
 
--- Wrapped text clamped to max_lines, with an ellipsis when it overflows.
-local function textBox(str, face, width, max_lines, color, bold)
-    local args = { text = str, face = type(face) == "string" and Font:getFace(face) or face, width = width,
-        fgcolor = color or Palette.ink, bold = bold }
-    local box = TextBoxWidget:new(args)
-    if #box.vertical_string_list > max_lines then
-        args.height = max_lines * box.line_height_px
-        args.height_overflow_show_ellipsis = true
-        box:free()
-        box = TextBoxWidget:new(args)
-    end
-    return box
+-- Line height of a TextBoxWidget in `face` (see TextBoxWidget:init).
+local function lineHeight(face)
+    return math.floor(1.3 * getFace(face).size + 0.5)
+end
+
+local function textSize(str, face, bold)
+    local widget = TextWidget:new{ text = str, face = getFace(face), bold = bold }
+    local size = widget:getSize()
+    widget:free()
+    return size
+end
+
+-- Wrapped text exactly `lines` tall, with an ellipsis when it needs more.
+local function textBox(str, face, width, lines, color)
+    return TextBoxWidget:new{ text = str, face = getFace(face), width = width, fgcolor = color or Palette.ink,
+        height = lines * lineHeight(face), height_overflow_show_ellipsis = true }
 end
 
 local function rule(w, color)
@@ -141,30 +151,6 @@ end
 function WeekChart:free()
     for __, w in pairs(self.labels) do w:free() end
     for __, w in pairs(self.values) do w:free() end
-end
-
--- Splits measured rows into pages that fit max_h; a group header never ends a page.
--- ponytail: same as TocDrawer.paginate (#17); switch to it once that lands.
-local function paginate(items, max_h)
-    local pages, page, used = {}, {}, 0
-    for i, item in ipairs(items) do
-        local h = item:getSize().h
-        if #page > 0 and used + h > max_h then
-            local last = page[#page]
-            if items[last].is_header and #page > 1 then
-                table.remove(page)
-                table.insert(pages, page)
-                page, used = { last }, items[last]:getSize().h
-            else
-                table.insert(pages, page)
-                page, used = {}, 0
-            end
-        end
-        table.insert(page, i)
-        used = used + h
-    end
-    if #page > 0 then table.insert(pages, page) end
-    return pages
 end
 
 local MeView = InputContainer:extend{
@@ -267,16 +253,19 @@ function MeView:buildHome()
     }
 end
 
--- subpage => title and the method building its list rows
+-- subpage => title and the method measuring its list rows
 local subpages = {
-    notes = { title = function() return C_("Me page", "Notes") end, items = "buildNotesItems" },
-    vocab = { title = function() return C_("Me page", "Vocabulary") end, items = "buildVocabItems" },
-    sync = { title = function() return _("Sync and transfer") end, items = "buildSyncItems" },
+    notes = { title = function() return C_("Me page", "Notes") end, items = "notesItems" },
+    vocab = { title = function() return C_("Me page", "Vocabulary") end, items = "vocabItems" },
+    sync = { title = function() return _("Sync and transfer") end, items = "syncItems" },
 }
 
 --- Opens a subpage ("notes", "vocab" or "sync") over the content area.
 function MeView:open(kind)
     self.subpage = kind
+    -- rows are measured (nothing rendered) and paginated once; only the shown page is built
+    self.items = self[subpages[kind].items](self)
+    self.pages = TocDrawer.paginate(self.items, self.height - NAV_H - PAGER_H - dp(4))
     self.page = 1
     self:build()
     UIManager:setDirty(self.ui, "ui", self.dimen)
@@ -284,7 +273,7 @@ end
 
 --- Leaves the subpage for the home page.
 function MeView:close()
-    self.subpage = nil
+    self.subpage, self.items, self.pages = nil, nil, nil
     self:build()
     UIManager:setDirty(self.ui, "ui", self.dimen)
 end
@@ -308,26 +297,17 @@ function MeView:buildNavBar(title)
 end
 
 function MeView:buildSubpage()
-    local subpage = subpages[self.subpage]
-    local items = self[subpage.items](self)
-    local list_h = self.height - NAV_H - PAGER_H - dp(4)
-    self.pages = paginate(items, list_h)
-    self.page = math.max(1, math.min(self.page, #self.pages))
     local list = VerticalGroup:new{ align = "left" }
     for __, i in ipairs(self.pages[self.page] or {}) do
-        table.insert(list, items[i])
-    end
-    local pager = HorizontalGroup:new{}
-    if #self.pages > 1 then
-        pager = ShelfWidgets.Pager:new{ page = self.page, pages = #self.pages,
-            on_change = function(page) self:goToPage(page) end }
+        table.insert(list, self.items[i].build())
     end
     return VerticalGroup:new{
         align = "left",
-        self:buildNavBar(subpage.title()),
+        self:buildNavBar(subpages[self.subpage].title()),
         VerticalSpan:new{ width = dp(4) },
-        TopContainer:new{ dimen = Geom:new{ w = self.width, h = list_h }, padded(list) },
-        CenterContainer:new{ dimen = Geom:new{ w = self.width, h = PAGER_H }, pager },
+        TopContainer:new{ dimen = Geom:new{ w = self.width, h = self.height - NAV_H - PAGER_H - dp(4) }, padded(list) },
+        EinkControls.Pager:new{ width = self.width, page = self.page, pages = #self.pages,
+            on_change = function(page) self:goToPage(page) end },
     }
 end
 
@@ -340,117 +320,105 @@ function MeView:goToPage(page)
         w = self.width, h = self.height - NAV_H })
 end
 
-function MeView:emptyState(title, hint)
-    local group = VerticalGroup:new{
-        align = "center",
-        VerticalSpan:new{ width = dp(40) },
-        text(title, "ui_body", Palette.ink, self.inner_w, true),
-        VerticalSpan:new{ width = dp(4) },
-        textBox(hint, "ui_label_large", self.inner_w - dp(16), 3, Palette.ink_2),
-    }
-    return CenterContainer:new{ dimen = Geom:new{ w = self.inner_w, h = group:getSize().h }, group }
+-- A measured list row: its height and how to build it.
+local function item(h, build)
+    return { h = h, build = build }
 end
 
-function MeView:groupHeader(title)
-    local header = VerticalGroup:new{
-        align = "left",
-        VerticalSpan:new{ width = dp(18) },
-        text(title, "ui_caption", Palette.ink_2, self.inner_w),
-        VerticalSpan:new{ width = dp(6) },
-        rule(self.inner_w, Palette.ink),
-    }
-    header.is_header = true
-    return header
+-- An entry row (56dp), measured.
+function MeView:entryItem(title, subtitle, callback)
+    return item(ROW_H, function() return self:entryRow(title, subtitle, callback) end)
 end
 
--- ponytail: stand-in until #17's note rows can be reused (TocDrawer.buildNoteRow).
-function MeView:noteRow(book, item)
-    local content = VerticalGroup:new{
-        align = "left",
-        textBox(item.text or "", "ui_excerpt", self.inner_w, 3),
-        VerticalSpan:new{ width = dp(4) },
-        text((item.datetime or ""):sub(1, 10), "ui_caption", Palette.ink_2, self.inner_w),
-    }
-    return ShelfWidgets.Tappable:new{
-        callback = function() self:openNote(book, item) end,
-        VerticalGroup:new{
-            align = "left",
-            VerticalSpan:new{ width = dp(12) },
-            content,
-            VerticalSpan:new{ width = dp(12) },
-            rule(self.inner_w, Palette.rule),
-        },
-    }
+-- TocDrawer's measured rows (note, group header, empty state), with how to build them here.
+function MeView:drawerItem(it, build, callback)
+    it.build = function() return build(self.inner_w, it, callback) end
+    return it
+end
+
+function MeView:emptyItem(title, hint)
+    return self:drawerItem(TocDrawer.emptyItem(title, hint), TocDrawer.emptyState)
 end
 
 --- Opens the note's book at the note (a full refresh, as for opening any book).
-function MeView:openNote(book, item)
+function MeView:openNote(book, note)
     filemanagerutil.openFile(self.ui, book.file, nil, nil, function(ui)
-        ui.bookmark:gotoBookmark(item.page, item.pos0)
+        ui.bookmark:gotoBookmark(note.page, note.pos0)
     end)
 end
 
-function MeView:buildNotesItems()
-    local items = {}
+function MeView:notesItems()
     if self.library.note_count == 0 then
-        return { self:emptyState(_("No notes yet"), _("Long-press text in a book, then tap Highlight or Add note.")) }
+        return { self:emptyItem(_("No notes yet"), _("Long-press text in a book, then tap Highlight or Add note.")) }
     end
+    local items = {}
     if self.ui.exporter then
-        table.insert(items, self:entryRow(_("Export notes"), nil, function() self.ui.exporter:onExportAllNotes() end))
+        table.insert(items, self:entryItem(_("Export notes"), nil, function() self.ui.exporter:onExportAllNotes() end))
     end
     for __, book in ipairs(self.library.books) do
-        table.insert(items, self:groupHeader(T(_("%1 · %2 notes"), book.title, #book.notes)))
-        for __, item in ipairs(book.notes) do
-            table.insert(items, self:noteRow(book, item))
+        table.insert(items, self:drawerItem(TocDrawer.headerItem(T(_("%1 · %2 notes"), book.title, #book.notes)),
+            TocDrawer.groupHeader))
+        for __, note in ipairs(book.notes) do
+            table.insert(items, self:drawerItem(TocDrawer.noteItem(self.inner_w, note), TocDrawer.buildNoteRow,
+                function() self:openNote(book, note) end))
         end
     end
     return items
 end
 
-function MeView:buildVocabItems()
+function MeView:vocabItems()
     local items = {}
     local vocabbuilder = self.ui.vocabbuilder
     if vocabbuilder then
-        table.insert(items, self:entryRow(C_("Vocabulary builder", "Review"), nil,
+        table.insert(items, self:entryItem(C_("Vocabulary builder", "Review"), nil,
             function() vocabbuilder:onShowVocabBuilder() end))
     end
     if #self.words == 0 then
-        table.insert(items, self:emptyState(_("Your vocabulary is empty"),
+        table.insert(items, self:emptyItem(_("Your vocabulary is empty"),
             _("When looking up a word, tap Add to vocabulary builder.")))
         return items
     end
+    local word_face, context_face = Font:getFace("ui_excerpt", 17), Font:getFace("ui_excerpt", 13)
+    local caption_h = textSize("0", "ui_caption").h
     for __, w in ipairs(self.words) do
-        local group = VerticalGroup:new{
-            align = "left",
-            VerticalSpan:new{ width = dp(12) },
-            text(w.word, Font:getFace("ui_excerpt", 17), Palette.ink, self.inner_w, true),
-        }
-        local context = table.concat({ w.prev_context or "", w.word, w.next_context or "" }):gsub("%s+", " ")
-        if (w.prev_context or "") ~= "" or (w.next_context or "") ~= "" then
-            table.insert(group, VerticalSpan:new{ width = dp(2) })
-            table.insert(group, textBox(BD.auto(context), Font:getFace("ui_excerpt", 13), self.inner_w, 2, Palette.ink_2))
-        end
+        local word_h = textSize(w.word, word_face, true).h
+        local context = ((w.prev_context or "") ~= "" or (w.next_context or "") ~= "")
+            and BD.auto((table.concat({ w.prev_context or "", w.word, w.next_context or "" }):gsub("%s+", " ")))
+        local lines = context and math.max(1, math.min(2, math.ceil(textSize(context, context_face).w / self.inner_w))) or 0
         local meta = {}
         if w.book and w.book ~= "" then table.insert(meta, w.book) end
         if w.create_time then table.insert(meta, os.date("%Y-%m-%d", w.create_time)) end
-        table.insert(group, VerticalSpan:new{ width = dp(4) })
-        table.insert(group, text(table.concat(meta, " · "), "ui_caption", Palette.ink_2, self.inner_w))
-        table.insert(group, VerticalSpan:new{ width = dp(12) })
-        table.insert(group, rule(self.inner_w, Palette.rule))
-        table.insert(items, group)
+        local h = dp(12) + word_h + (context and dp(2) + lines * lineHeight(context_face) or 0)
+            + dp(4) + caption_h + dp(12) + Size.border.default
+        table.insert(items, item(h, function()
+            local group = VerticalGroup:new{
+                align = "left",
+                VerticalSpan:new{ width = dp(12) },
+                text(w.word, word_face, Palette.ink, self.inner_w, true),
+            }
+            if context then
+                table.insert(group, VerticalSpan:new{ width = dp(2) })
+                table.insert(group, textBox(context, context_face, self.inner_w, lines, Palette.ink_2))
+            end
+            table.insert(group, VerticalSpan:new{ width = dp(4) })
+            table.insert(group, text(table.concat(meta, " · "), "ui_caption", Palette.ink_2, self.inner_w))
+            table.insert(group, VerticalSpan:new{ width = dp(12) })
+            table.insert(group, rule(self.inner_w, Palette.rule))
+            return group
+        end))
     end
     return items
 end
 
-function MeView:buildSyncItems()
+function MeView:syncItems()
     local disabled = G_reader_settings:readSetting("plugins_disabled") or {}
     local items = {}
     -- KOSync only runs in the reader: show its account, and where to set it up
     if disabled.kosync then
-        table.insert(items, self:entryRow(_("Progress sync"), _("Plugin disabled")))
+        table.insert(items, self:entryItem(_("Progress sync"), _("Plugin disabled")))
     else
         local kosync = LuaSettings:open(DataStorage:getSettingsDir() .. "/kosync.lua"):readSetting("settings") or {}
-        table.insert(items, self:entryRow(_("Progress sync"),
+        table.insert(items, self:entryItem(_("Progress sync"),
             kosync.userkey and kosync.username and T(_("Logged in as %1"), kosync.username) or _("Not logged in"),
             function()
                 UIManager:show(InfoMessage:new{
@@ -462,18 +430,17 @@ function MeView:buildSyncItems()
         -- ponytail: state as of building the page; a connection made in the background shows on the next visit
         local wireless = package.loaded["wireless"]
         local connected = wireless and wireless.calibre_socket ~= nil
-        table.insert(items, self:entryRow(_("Calibre wireless connection"),
+        table.insert(items, self:entryItem(_("Calibre wireless connection"),
             connected and _("Connected") or _("Not connected"), function()
                 self.ui:handleEvent(Event:new(connected and "CloseWirelessConnection" or "StartWirelessConnection"))
-                self:build()
-                UIManager:setDirty(self.ui, "ui", self.dimen)
+                self:open("sync")
             end))
     else
-        table.insert(items, self:entryRow(_("Calibre wireless connection"), _("Plugin disabled")))
+        table.insert(items, self:entryItem(_("Calibre wireless connection"), _("Plugin disabled")))
     end
-    table.insert(items, self:entryRow(_("OPDS catalog"), not self.ui.opds and _("Plugin disabled") or nil,
+    table.insert(items, self:entryItem(_("OPDS catalog"), not self.ui.opds and _("Plugin disabled") or nil,
         self.ui.opds and function() self.ui.opds:onShowOPDSCatalog() end))
-    table.insert(items, self:entryRow(_("Cloud storage"), not self.ui.cloudstorage and _("Plugin disabled") or nil,
+    table.insert(items, self:entryItem(_("Cloud storage"), not self.ui.cloudstorage and _("Plugin disabled") or nil,
         self.ui.cloudstorage and function() self.ui.cloudstorage:onShowCloudStorageList() end))
     return items
 end

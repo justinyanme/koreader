@@ -200,6 +200,15 @@ describe("Shelf home, 我的 tab", function()
         assert.is_true(index(first) < index(second))
         assert.is_false(contains(shown, "a bookmark, not a note"))
         assert.is_nil(index("No notes here"))
+        -- the contents drawer's note rows, one per highlight
+        local rows = {}
+        local function collect(w)
+            if type(w) ~= "table" then return end
+            if type(w.note) == "table" then table.insert(rows, w.note) end
+            for __, child in ipairs(w) do collect(child) end
+        end
+        collect(view)
+        assert.are.equal(3, #rows)
         assert.are.equal(2, #view.library.books)
         assert.are.equal(2, #view.library.books[1].notes)
         assert.are.equal(1, #view.library.books[2].notes)
