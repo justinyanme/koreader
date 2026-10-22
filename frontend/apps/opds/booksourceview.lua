@@ -198,9 +198,11 @@ function BookSourceView:close(no_refresh)
     self.closed = true
     -- what this page opened on top goes first: it may show our thumbnails, freed with the page
     self:closeSheet()
-    for _, widget in ipairs{ self.input_dialog, self.path_chooser } do
-        if UIManager:isWidgetShown(widget) then UIManager:close(widget) end
+    self:closeInput()
+    if self.path_chooser and UIManager:isWidgetShown(self.path_chooser) then
+        UIManager:close(self.path_chooser)
     end
+    self.path_chooser = nil
     local canceled = next(self.downloads) ~= nil
     for key in pairs(self.downloads) do
         self:cancelDownload(key, true)
@@ -267,9 +269,10 @@ end
 function BookSourceView:fetch(page)
     local source = page.source
     if page.kind == "home" and not page.query and not page.url then
-        local root = BookSource.load(source, source.url)
+        local root = BookSource.load(source, source.url, true)
         page.root = root.state == "ok" and root or nil
-        local home = root.state == "ok" and BookSource.homeUrl(root)
+        -- an unreachable search description: no more requests in this open, the root stands in for the home
+        local home = root.state == "ok" and root.search_failed ~= "unreachable" and BookSource.homeUrl(root)
         page.home_url = home or source.url
         page.result = (not home or home == root.url) and root or BookSource.load(source, home)
     else
@@ -645,7 +648,7 @@ function BookSourceView:fetchMore(page, done)
         else
             UIManager:show(Notification:new{ text = BookSource.failureText(more) })
         end
-        done()
+        done(more.state == "ok")
     end)
 end
 
@@ -665,10 +668,10 @@ function BookSourceView:turnPage(page_no)
     if not page.per_page or page.loading_more or page_no < 1 or page_no == page.page_no then return end
     local result = page.result
     if result and result.next and page_no * page.per_page > itemCount(page) then
-        return self:fetchMore(page, function()
+        return self:fetchMore(page, function(ok)
             page.page_no = math.min(page_no, math.max(1, math.ceil(itemCount(page) / page.per_page)))
             self:refreshContent(page)
-            self:prefetch(page)
+            if ok then self:prefetch(page) end -- after a failure, not the same request again
         end)
     end
     if page_no > page.pages then return end
@@ -903,19 +906,32 @@ function BookSourceView:showSearch(page)
         input = page.query,
         input_hint = _("Title or author"),
         buttons = {{
-            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            { text = _("Cancel"), id = "close", callback = function() self:closeInput() end },
             {
                 text = _("Search"),
                 is_enter_default = true,
                 callback = function()
-                    UIManager:close(dialog)
+                    self:closeInput()
                     self:search(dialog:getInputText())
                 end,
             },
         }},
     }
+    self:showInput(dialog)
+end
+
+--- Keyboard dialogs opened from the page: tracked, so closing the page closes them too.
+function BookSourceView:showInput(dialog)
+    self.input_dialog = dialog
     UIManager:show(dialog)
     dialog:onShowKeyboard()
+end
+
+function BookSourceView:closeInput()
+    if self.input_dialog and UIManager:isWidgetShown(self.input_dialog) then
+        UIManager:close(self.input_dialog)
+    end
+    self.input_dialog = nil
 end
 
 --- Shows the results for `query` on the home page; nil or "" goes back to the home feed.
@@ -1162,7 +1178,7 @@ end
 
 function BookSourceView:chooseFolder(source)
     local PathChooser = require("ui/widget/pathchooser")
-    UIManager:show(PathChooser:new{
+    self.path_chooser = PathChooser:new{
         select_directory = true,
         select_file = false,
         show_files = false,
@@ -1175,7 +1191,8 @@ function BookSourceView:chooseFolder(source)
                     or _("This folder is outside the home folder: books downloaded here won't show up on the shelf."),
             })
         end,
-    })
+    }
+    UIManager:show(self.path_chooser) -- closing the page closes it if it is still up
 end
 
 --- 分类浏览: the root's entries in two columns; the home feed is marked.
@@ -1417,20 +1434,19 @@ function BookSourceView:editField(field, draft, rebuild)
         input_hint = field.hint,
         text_type = field.password and "password" or nil,
         buttons = {{
-            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            { text = _("Cancel"), id = "close", callback = function() self:closeInput() end },
             {
                 text = _("OK"),
                 is_enter_default = true,
                 callback = function()
-                    UIManager:close(dialog)
+                    self:closeInput()
                     draft[field.key] = dialog:getInputText()
                     rebuild()
                 end,
             },
         }},
     }
-    UIManager:show(dialog)
-    dialog:onShowKeyboard()
+    self:showInput(dialog)
 end
 
 local function nonEmpty(str)

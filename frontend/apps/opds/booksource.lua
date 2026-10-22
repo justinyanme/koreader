@@ -200,7 +200,8 @@ end
 --- Loads a feed as a page: { state = "ok", title, books, navs, next, search_url, facets, sort_new } or a failure state.
 -- books: { key, title, author, summary, thumbnail, formats, language, year }
 -- navs: { title, url, summary, acquisition } -- acquisition: the link says the feed is a book list
-function BookSource.load(source, feed_url)
+-- Only `with_search` (the root) fetches the search description; other feeds repeat it and need not.
+function BookSource.load(source, feed_url, with_search)
     local result = BookSource.fetch(source, feed_url)
     if result.state ~= "ok" then return result end
     local catalog = result.catalog
@@ -211,9 +212,10 @@ function BookSource.load(source, feed_url)
         parseFeed = function(_, u)
             if failed then return end
             local r = BookSource.fetch(source, u)
-            if r.state == "unreachable" or r.state == "auth" then failed = r end
+            if r.state ~= "ok" then failed = r end
             return r.catalog
         end,
+        getSearchTemplate = not with_search and function() end or nil,
     }, { __index = browser() })
     local items
     if catalog.is_opds2 then
@@ -221,7 +223,6 @@ function BookSource.load(source, feed_url)
     else
         items = browser().genItemTableFromCatalog(parser, catalog, feed_url)
     end
-    if failed then return failed end
     local feed = catalog.feed or {}
     -- genItemTableFromCatalog makes exactly one item per feed entry, in order (OPDS 1.x only)
     local entries = not catalog.is_opds2 and feed.entry or {}
@@ -232,7 +233,9 @@ function BookSource.load(source, feed_url)
         books = {},
         navs = {},
         next = items.hrefs and items.hrefs.next,
-        search_url = parser.search_url,
+        -- a search description that failed turns search off; the feed itself stays
+        search_url = not failed and parser.search_url or nil,
+        search_failed = failed and failed.state,
         facets = parser.facet_groups,
         sort_new = items.hrefs and items.hrefs[SORT_NEW],
     }
@@ -340,8 +343,10 @@ function BookSource.fetchThumbs(source, thumb_urls)
             socketutil:set_timeout(BookSource.block_timeout, BookSource.total_timeout)
             local code, headers = BookSource.request(source, { url = thumb_url, sink = ltn12.sink.file(file) })
             socketutil:reset_timeout()
-            local content_type = headers and headers["content-type"] or ""
-            if code == 200 and content_type:lower():match("^%s*image/") then
+            -- servers often send covers as octet-stream or untyped; drawing them (thumbFor) weeds out the rest
+            local content_type = (headers and headers["content-type"] or ""):lower()
+            if code == 200 and (content_type == "" or content_type:match("^%s*image/")
+                    or content_type:match("^%s*application/octet%-stream")) then
                 os.rename(path .. ".part", path)
             else
                 os.remove(path .. ".part")
