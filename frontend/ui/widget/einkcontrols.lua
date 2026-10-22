@@ -135,6 +135,7 @@ local TickStepper = HorizontalGroup:extend{
     value = 1,
     width = nil,
     on_change = nil, -- function(value)
+    on_step = nil, -- optional function(direction): handles the minus (-1) and plus (+1) buttons instead of on_change
     minus_icon = "eink/minus",
     plus_icon = "eink/plus",
 }
@@ -142,9 +143,16 @@ local TickStepper = HorizontalGroup:extend{
 function TickStepper:init()
     local bw, bh, gap = Screen:scaleBySize(44), Screen:scaleBySize(38), Screen:scaleBySize(8)
     local set = function(v) if self.on_change then self.on_change(v) end end
+    local step = function(direction)
+        if self.on_step then
+            self.on_step(direction)
+        else
+            set(self.value + direction)
+        end
+    end
     self[1] = PillButton:new{
         icon = self.minus_icon, width = bw, height = bh, enabled = self.value > 1,
-        callback = function() set(self.value - 1) end,
+        callback = function() step(-1) end,
     }
     self[2] = HorizontalSpan:new{ width = gap }
     self[3] = TickTrack:new{
@@ -153,7 +161,7 @@ function TickStepper:init()
     self[4] = HorizontalSpan:new{ width = gap }
     self[5] = PillButton:new{
         icon = self.plus_icon, width = bw, height = bh, enabled = self.value < self.count,
-        callback = function() set(self.value + 1) end,
+        callback = function() step(1) end,
     }
 end
 
@@ -193,6 +201,76 @@ function Toggle:onTapSelect()
         self.callback(self.checked)
     end
     return true
+end
+
+--- Segmented control: 38dp pill with a 1.5dp ink outline, segments split by 1dp ink rules, the selected one ink-filled.
+local Segmented = InputContainer:extend{
+    labels = nil, -- array of strings
+    value = nil, -- 1-based index of the selected segment, or nil
+    width = nil,
+    height = Screen:scaleBySize(38),
+    on_change = nil, -- function(index)
+}
+
+function Segmented:init()
+    self.dimen = Geom:new{ w = self.width, h = self.height }
+    self.seg_w = math.floor(self.width / #self.labels)
+    self.texts = {}
+    for i, label in ipairs(self.labels) do
+        self.texts[i] = TextWidget:new{
+            text = label,
+            face = Font:getFace("ui_label_large"),
+            fgcolor = i == self.value and Palette.paper or Palette.ink,
+            max_width = self.seg_w - Screen:scaleBySize(8),
+        }
+    end
+    self.ges_events = tapEvents(self.dimen)
+end
+
+function Segmented:paintTo(bb, x, y)
+    self.dimen.x, self.dimen.y = x, y
+    local w, h, n, seg_w = self.width, self.height, #self.labels, self.seg_w
+    local r = math.floor(h / 2)
+    bb:paintRoundedRect(x, y, w, h, Palette.paper, r)
+    local v = self.value
+    if v then
+        local sx = x + (v - 1) * seg_w
+        local sw = v == n and w - (v - 1) * seg_w or seg_w
+        if n == 1 then
+            bb:paintRoundedRect(x, y, w, h, Palette.ink, r)
+        elseif v == 1 then
+            -- round the outer end only: paint past the inner edge, then restore the neighbour
+            bb:paintRoundedRect(sx, y, sw + r, h, Palette.ink, r)
+            bb:paintRect(sx + sw, y, r, h, Palette.paper)
+        elseif v == n then
+            bb:paintRoundedRect(sx - r, y, sw + r, h, Palette.ink, r)
+            bb:paintRect(sx - r, y, r, h, Palette.paper)
+        else
+            bb:paintRect(sx, y, sw, h, Palette.ink)
+        end
+    end
+    for i = 1, n - 1 do
+        bb:paintRect(x + i * seg_w, y, Size.border.default, h, Palette.ink)
+    end
+    bb:paintBorder(x, y, w, h, Size.border.button, Palette.ink, r, true)
+    for i, t in ipairs(self.texts) do
+        local size = t:getSize()
+        t:paintTo(bb, x + (i - 1) * seg_w + math.floor((seg_w - size.w) / 2), y + math.floor((h - size.h) / 2))
+    end
+end
+
+function Segmented:onTapSelect(_, ges)
+    local i = math.min(#self.labels, math.floor((ges.pos.x - self.dimen.x) / self.seg_w) + 1)
+    if i >= 1 and i ~= self.value and self.on_change then
+        self.on_change(i)
+    end
+    return true
+end
+
+function Segmented:free()
+    for _, t in ipairs(self.texts) do
+        t:free()
+    end
 end
 
 --- Pager band (44dp): back pill, "n / N", forward pill; 44 × 32dp pills with a 1dp border. Empty with one page.
@@ -240,4 +318,5 @@ return {
     TickTrack = TickTrack,
     TickStepper = TickStepper,
     Toggle = Toggle,
+    Segmented = Segmented,
 }

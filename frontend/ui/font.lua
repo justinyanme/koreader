@@ -95,6 +95,8 @@ local Font = {
         ui_headline = "NotoSans-Bold.ttf",
         ui_excerpt = "NotoSerif-Regular.ttf",
         ui_headword = "NotoSerif-Bold.ttf",
+        ui_vocab_word = "NotoSerif-Bold.ttf",
+        ui_vocab_context = "NotoSerif-Regular.ttf",
     },
     sizemap = {
         cfont = 24,
@@ -127,6 +129,8 @@ local Font = {
         ui_headline = 22,
         ui_excerpt = 15, -- 14.5 in DESIGN.md
         ui_headword = 26,
+        ui_vocab_word = 17, -- word in the vocabulary list
+        ui_vocab_context = 13, -- 13.5 in the prototype
     },
     -- This fallback fonts list should only contain
     -- regular weight (non bold) font files.

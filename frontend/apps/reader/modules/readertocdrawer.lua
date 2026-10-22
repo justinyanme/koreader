@@ -483,57 +483,123 @@ function TocDrawer:bookmarkItems()
     return items
 end
 
+--[[--
+Measured rows shared with other note lists (the 我的 tab's all-notes page): a group header,
+a highlight with its note and date, and an empty state. Build them with TocDrawer.groupHeader,
+TocDrawer.buildNoteRow and TocDrawer.emptyState, `w` wide. `metrics` (TocDrawer.noteMetrics())
+holds the sizes every row shares: measure it once per list.
+]]
+function TocDrawer.noteMetrics()
+    return {
+        excerpt_h = lineHeight("ui_excerpt", 0.6),
+        label_h = lineHeight("ui_label_large"),
+        caption_h = textSize("0", "ui_caption").h,
+        thought_w = textSize(_("Thought"), "ui_label_large", true).w + dp(4),
+    }
+end
+
+function TocDrawer.headerItem(title, metrics)
+    return { kind = "header", is_header = true, title = title, h = dp(18) + metrics.caption_h + dp(6) + dp(1) }
+end
+
+function TocDrawer.emptyItem(title, hint)
+    return { kind = "empty", h = 0, title = title, hint = hint }
+end
+
+--- Measured row of an annotation with a drawer (a highlight), `w` wide.
+function TocDrawer.noteItem(w, item, metrics)
+    local excerpt = snippet(item.text, 400)
+    local lines = lineCount(excerpt, "ui_excerpt", w - dp(24), 3)
+    local note = item.note and item.note ~= "" and snippet(item.note, 200)
+    local note_lines = note and lineCount(note, "ui_label_large", w - metrics.thought_w, 2) or 0
+    return {
+        kind = "note", item = item, excerpt = excerpt, lines = lines, note = note, note_lines = note_lines,
+        h = lines * metrics.excerpt_h + (note and dp(6) + note_lines * metrics.label_h or 0)
+            + dp(4) + metrics.caption_h + 2 * dp(12) + dp(1),
+    }
+end
+
 function TocDrawer:noteItems()
     if #self.notes == 0 then
-        return { { kind = "empty", h = 0, title = _("No notes yet"), hint = _("Long-press text, then tap Highlight or Add note.") } }
+        return { self.emptyItem(_("No notes yet"), _("Long-press text, then tap Highlight or Add note.")) }
     end
-    local w = self.content_w
-    local excerpt_h, label_h = lineHeight("ui_excerpt", 0.6), lineHeight("ui_label_large")
-    local caption_h = textSize("0", "ui_caption").h
-    local thought_w = textSize(_("Thought"), "ui_label_large", true).w + dp(4)
+    local metrics = self.noteMetrics()
     local items, chapter = {}, nil
     for __, item in ipairs(self.notes) do
         local item_chapter = item.chapter or self.ui.doc_props.display_title
         if item_chapter ~= chapter then
             chapter = item_chapter
-            table.insert(items, { kind = "header", is_header = true, title = chapter, h = dp(18) + caption_h + dp(6) + dp(1) })
+            table.insert(items, self.headerItem(chapter, metrics))
         end
-        local excerpt = snippet(item.text, 400)
-        local lines = lineCount(excerpt, "ui_excerpt", w - dp(24), 3)
-        local note = item.note and item.note ~= "" and snippet(item.note, 200)
-        local note_lines = note and lineCount(note, "ui_label_large", w - thought_w, 2) or 0
-        table.insert(items, {
-            kind = "note", item = item, excerpt = excerpt, lines = lines, note = note, note_lines = note_lines,
-            h = lines * excerpt_h + (note and dp(6) + note_lines * label_h or 0) + dp(4) + caption_h + 2 * dp(12) + dp(1),
-        })
+        table.insert(items, self.noteItem(self.content_w, item, metrics))
     end
     return items
+end
+
+function TocDrawer.emptyState(w, it)
+    local group = VerticalGroup:new{
+        align = "center",
+        VerticalSpan:new{ width = dp(40) },
+        text(it.title, "ui_body", Palette.ink, w, true),
+    }
+    if it.hint then
+        table.insert(group, VerticalSpan:new{ width = dp(4) })
+        table.insert(group, textBox(it.hint, "ui_label_large", w - dp(16), nil, { alignment = "center", fgcolor = Palette.ink_2 }))
+    end
+    return ListRow:new{ CenterContainer:new{ dimen = Geom:new{ w = w, h = group:getSize().h }, group } }
+end
+
+function TocDrawer.groupHeader(w, it)
+    return ListRow:new{
+        is_header = true,
+        VerticalGroup:new{
+            align = "left",
+            VerticalSpan:new{ width = dp(18) },
+            text(it.title, "ui_caption", Palette.ink_2, w),
+            VerticalSpan:new{ width = dp(6) },
+            rule(w, Palette.ink),
+        },
+    }
+end
+
+--- A note row (style swatch, excerpt, note, date) from TocDrawer.noteItem; `callback` on tap.
+function TocDrawer.buildNoteRow(w, it, callback)
+    local swatch_w = dp(24)
+    local content = VerticalGroup:new{
+        align = "left",
+        HorizontalGroup:new{
+            align = "top",
+            LeftContainer:new{
+                dimen = Geom:new{ w = swatch_w, h = lineHeight("ui_excerpt", 0.6) },
+                Swatch:new{ drawer = it.item.drawer },
+            },
+            textBox(it.excerpt, "ui_excerpt", w - swatch_w, it.lines, { line_height = 0.6 }),
+        },
+    }
+    if it.note then
+        local label = text(_("Thought"), "ui_label_large", Palette.ink, nil, true)
+        local gap = dp(4)
+        table.insert(content, VerticalSpan:new{ width = dp(6) })
+        table.insert(content, HorizontalGroup:new{
+            align = "top",
+            label,
+            HorizontalSpan:new{ width = gap },
+            textBox(it.note, "ui_label_large", w - label:getSize().w - gap, it.note_lines),
+        })
+    end
+    table.insert(content, VerticalSpan:new{ width = dp(4) })
+    table.insert(content, text(date(it.item), "ui_caption", Palette.ink_2, w))
+    local r = row(w, it.h, content, callback)
+    r.note = it.item
+    return r
 end
 
 function TocDrawer:buildRow(it)
     local w = self.content_w
     if it.kind == "empty" then
-        local group = VerticalGroup:new{
-            align = "center",
-            VerticalSpan:new{ width = dp(40) },
-            text(it.title, "ui_body", Palette.ink, w, true),
-        }
-        if it.hint then
-            table.insert(group, VerticalSpan:new{ width = dp(4) })
-            table.insert(group, textBox(it.hint, "ui_label_large", w - dp(16), nil, { alignment = "center", fgcolor = Palette.ink_2 }))
-        end
-        return ListRow:new{ CenterContainer:new{ dimen = Geom:new{ w = w, h = group:getSize().h }, group } }
+        return self.emptyState(w, it)
     elseif it.kind == "header" then
-        return ListRow:new{
-            is_header = true,
-            VerticalGroup:new{
-                align = "left",
-                VerticalSpan:new{ width = dp(18) },
-                text(it.title, "ui_caption", Palette.ink_2, w),
-                VerticalSpan:new{ width = dp(6) },
-                rule(w, Palette.ink),
-            },
-        }
+        return self.groupHeader(w, it)
     elseif it.kind == "toc" then
         local right = HorizontalGroup:new{ align = "center" }
         if it.is_current then
@@ -571,35 +637,7 @@ function TocDrawer:buildRow(it)
             text(it.meta, "ui_caption", Palette.ink_2, w),
         }, function() self:goTo(it.item) end)
     end
-    -- note
-    local swatch_w = dp(24)
-    local content = VerticalGroup:new{
-        align = "left",
-        HorizontalGroup:new{
-            align = "top",
-            LeftContainer:new{
-                dimen = Geom:new{ w = swatch_w, h = lineHeight("ui_excerpt", 0.6) },
-                Swatch:new{ drawer = it.item.drawer },
-            },
-            textBox(it.excerpt, "ui_excerpt", w - swatch_w, it.lines, { line_height = 0.6 }),
-        },
-    }
-    if it.note then
-        local label = text(_("Thought"), "ui_label_large", Palette.ink, nil, true)
-        local gap = dp(4)
-        table.insert(content, VerticalSpan:new{ width = dp(6) })
-        table.insert(content, HorizontalGroup:new{
-            align = "top",
-            label,
-            HorizontalSpan:new{ width = gap },
-            textBox(it.note, "ui_label_large", w - label:getSize().w - gap, it.note_lines),
-        })
-    end
-    table.insert(content, VerticalSpan:new{ width = dp(4) })
-    table.insert(content, text(date(it.item), "ui_caption", Palette.ink_2, w))
-    local r = row(w, it.h, content, function() self:goTo(it.item) end)
-    r.note = it.item
-    return r
+    return self.buildNoteRow(w, it, function() self:goTo(it.item) end)
 end
 
 function TocDrawer:goTo(item)
