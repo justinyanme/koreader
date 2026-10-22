@@ -1060,6 +1060,12 @@ function FileManagerMenu:onShowMenu(tab_index, do_not_show)
     return true
 end
 
+-- Landing spot for "All settings (original)": opens this menu even when a
+-- subclass overrides onShowMenu.
+function FileManagerMenu:onShowOriginalMenu(tab_index)
+    return FileManagerMenu.onShowMenu(self, tab_index)
+end
+
 function FileManagerMenu:onCloseFileManagerMenu()
     if not self.menu_container then return true end
     local last_tab_index = self.menu_container[1].last_index
