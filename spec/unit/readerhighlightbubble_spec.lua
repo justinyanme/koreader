@@ -242,6 +242,125 @@ describe("ReaderHighlightBubble module", function()
             assert.is_nil(ui.highlight.highlight_dialog)
             ui.search.searchCallback:revert()
         end)
+
+        it("should not bring back a looked-up highlight on a long-press on nothing (C1)", function()
+            select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
+            tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
+            ui.highlight:closeBubble()
+            UIManager:forceRePaint()
+            local box = ui.view.highlight.visible_boxes[1].rect
+            tap(box.x + math.floor(box.w / 2), box.y + math.floor(box.h / 2))
+            UIManager:forceRePaint()
+            stub(ui.dictionary, "onLookupWord")
+            tapWidget(cell(ui.highlight.highlight_dialog, "Look up"))
+            assert.stub(ui.dictionary.onLookupWord).was_called()
+            ui.dictionary.onLookupWord:revert()
+            -- long-press where there is no text
+            stub(ui.document, "getWordFromPosition")
+            select(ui, Geom:new{ x = Screen:getWidth() / 2, y = Screen:getHeight() - 2 })
+            ui.document.getWordFromPosition:revert()
+            assert.is_nil(ui.highlight.highlight_dialog)
+            assert.are.equal(ui, topWidget())
+            assert.are.equal(1, #ui.annotation.annotations)
+        end)
+
+        it("should keep upstream behavior with the \"Do nothing\" long-press action", function()
+            ui.highlight:onSetHighlightAction(2, true) -- "nothing"
+            local ok, err = pcall(function()
+                select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
+                assert.is_nil(ui.highlight.highlight_dialog)
+                assert.are.equal(ui, topWidget())
+            end)
+            ui.highlight:onSetHighlightAction(1, true) -- "ask"
+            assert(ok, err)
+        end)
+
+        it("should jump to a search result and record the position for going back", function()
+            local Trapper = require("ui/trapper")
+            local orig_wrap, orig_run = Trapper.wrap, Trapper.dismissableRunInSubprocess
+            Trapper.wrap = function(_, fn) return fn() end
+            Trapper.dismissableRunInSubprocess = function(_, task) return true, task() end
+            local ok, err = pcall(function()
+                select(ui, Geom:new{ x = 400, y = 70 })
+                tapWidget(cell(ui.highlight.highlight_dialog, "Search"))
+                local menu = ui.search.result_menu
+                assert.is_truthy(menu)
+                assert.are.equal(menu, topWidget())
+                assert.is_true(#menu.item_table > 0)
+                local stack = #(ui.link.location_stack or {})
+                menu.onMenuChoice(menu, menu.item_table[1])
+                assert.are.equal(stack + 1, #ui.link.location_stack)
+            end)
+            Trapper.wrap, Trapper.dismissableRunInSubprocess = orig_wrap, orig_run
+            for i = #UIManager._window_stack, 1, -1 do
+                local w = UIManager._window_stack[i].widget
+                if w ~= ui then UIManager:close(w) end
+            end
+            assert(ok, err)
+        end)
+    end)
+
+    describe("without the replacement", function()
+        it("should offer the wave in the original Style dialog", function()
+            Replacements.reader_highlight = nil
+            local ok, err = pcall(function()
+                local ui = openReader(sample_epub, true)
+                ui.rolling:onGotoPage(10)
+                ui.highlight:onHold(nil, { pos = Geom:new{ x = 400, y = 110 } })
+                ui.highlight:onHoldPan(nil, { pos = Geom:new{ x = 400, y = 170 } })
+                ui.highlight:saveHighlight()
+                ui.highlight:onClose()
+                ui.highlight:editHighlightStyle(1)
+                local selector = topWidget()
+                local found
+                for _, v in ipairs(selector.values) do
+                    if v[2] == "wave" then found = true end
+                end
+                assert.is_true(found)
+                UIManager:close(selector)
+                ui.annotation.annotations = {}
+                closeReader(ui)
+            end)
+            ReaderHighlightBubble.register()
+            assert(ok, err)
+        end)
+    end)
+
+    describe("bubble placement", function()
+        local SelectionBubble
+        setup(function() SelectionBubble = require("ui/widget/selectionbubble") end)
+        local function bubbleFor(rects)
+            return SelectionBubble:new{ rows = { { { text = "Copy" }, { text = "Search" } } }, anchor_rects = rects }
+        end
+        local function assertOnScreen(b)
+            local r = b:getRefreshRegion()
+            assert.is_true(r.x >= 0 and r.y >= 0)
+            assert.is_true(r.x + r.w <= Screen:getWidth() and r.y + r.h <= Screen:getHeight())
+        end
+
+        it("should go below a selection at the top", function()
+            local b = bubbleFor({ Geom:new{ x = 40, y = 5, w = 100, h = 30 } })
+            assert.is_false(b.above)
+            assert.is_true(b.bubble_rect.y >= 35)
+            assertOnScreen(b)
+        end)
+
+        it("should go above a selection at the bottom", function()
+            local h = Screen:getHeight()
+            local b = bubbleFor({ Geom:new{ x = 40, y = h - 40, w = 100, h = 30 } })
+            assert.is_true(b.above)
+            assert.is_true(b.bubble_rect.y + b.bubble_rect.h <= h - 40)
+            assertOnScreen(b)
+        end)
+
+        it("should overlay a page-tall selection without an arrow, and survive no selection", function()
+            local b = bubbleFor({ Geom:new{ x = 0, y = 10, w = Screen:getWidth(), h = Screen:getHeight() - 20 } })
+            assert.are.equal(0, b.arrow_h)
+            assertOnScreen(b)
+            b = bubbleFor({})
+            assert.are.equal(0, b.arrow_h)
+            assertOnScreen(b)
+        end)
     end)
 
     describe("with a PDF", function()
@@ -261,6 +380,57 @@ describe("ReaderHighlightBubble module", function()
             assert.is_truthy(item.pboxes)
             assert.are.equal(ui.highlight.highlight_dialog, topWidget())
             closeReader(ui)
+        end)
+
+        it("should not save a duplicate after a looked-up highlight and a long-press on nothing (C1)", function()
+            local ui = openReader(sample_pdf, true)
+            ui:handleEvent(Event:new("SetScrollMode", false))
+            ui.paging:onGotoPage(10)
+            UIManager:forceRePaint()
+            select(ui, Geom:new{ x = 430, y = 210 }, Geom:new{ x = 60, y = 236 })
+            tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
+            ui.highlight:closeBubble()
+            UIManager:forceRePaint()
+            ui.highlight:showHighlightBubble(1)
+            UIManager:forceRePaint()
+            stub(ui.dictionary, "onLookupWord")
+            tapWidget(cell(ui.highlight.highlight_dialog, "Look up"))
+            ui.dictionary.onLookupWord:revert()
+            stub(ui.document, "getWordFromPosition")
+            select(ui, Geom:new{ x = 5, y = Screen:getHeight() - 2 })
+            ui.document.getWordFromPosition:revert()
+            assert.is_nil(ui.highlight.highlight_dialog)
+            assert.are.equal(1, #ui.annotation.annotations)
+            closeReader(ui)
+        end)
+
+        it("should write the highlight into the PDF, and the wave as an underline", function()
+            local DataStorage = require("datastorage")
+            local copy = DataStorage:getDataDir() .. "/readerhighlightbubble.pdf"
+            require("ffi/util").copyFile(sample_pdf, copy)
+            local ui = openReader(copy, true)
+            local ok, err = pcall(function()
+                ui:handleEvent(Event:new("SetScrollMode", false))
+                ui.highlight.highlight_write_into_pdf = true
+                ui.paging:onGotoPage(10)
+                UIManager:forceRePaint()
+                select(ui, Geom:new{ x = 430, y = 210 }, Geom:new{ x = 60, y = 236 })
+                tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
+                local annots = ui.document:getEmbeddedAnnotations()
+                assert.is_truthy(annots and annots[10])
+                assert.are.equal(1, #annots[10])
+                UIManager:forceRePaint()
+                tapWidget(cell(ui.highlight.highlight_dialog, "wave"))
+                assert.are.equal("wave", ui.annotation.annotations[1].drawer)
+                annots = ui.document:getEmbeddedAnnotations()
+                assert.is_truthy(annots and annots[10])
+                assert.are.equal(1, #annots[10])
+                assert.are.equal(9, annots[10][1].type) -- underline
+            end)
+            closeReader(ui)
+            DocSettings:open(copy):purge()
+            os.remove(copy)
+            assert(ok, err)
         end)
     end)
 end)
