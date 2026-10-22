@@ -30,6 +30,7 @@ local _ = require("gettext")
 
 local ShelfFileManager = FileManager:extend{
     current_tab = "shelf",
+    file_chooser_class = require("apps/shelf/fileschooser"), -- the 文件 tab
 }
 
 ShelfFileManager.tabs = {
@@ -116,6 +117,13 @@ function ShelfFileManager:onPathChanged(path)
     if self.initialized then
         self:switchTab("files")
     end
+end
+
+-- the 文件 title's plus button turns into a check while selecting
+function ShelfFileManager:onToggleSelectMode(...)
+    FileManager.onToggleSelectMode(self, ...)
+    self.file_chooser:updateTitle()
+    return true
 end
 
 function ShelfFileManager:onSwipeFM(ges)
