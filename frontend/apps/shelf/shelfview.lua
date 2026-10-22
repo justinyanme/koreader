@@ -72,10 +72,6 @@ local function statusText(book)
     return T(_("Read %1%"), math.floor((book.percent or 0) * 100))
 end
 
-local function homeDir()
-    return G_reader_settings:readSetting("home_dir") or filemanagerutil.getDefaultDir()
-end
-
 local ShelfView = WidgetContainer:extend{
     ui = nil, -- the FileManager
     width = nil,
@@ -105,7 +101,7 @@ end
 -- `rescan` also walks the home folder again; tab switches keep the last scan.
 function ShelfView:reload(rescan)
     if rescan or not self.scanned then
-        self.scanned = Shelf.scan(homeDir())
+        self.scanned = Shelf.scan(Shelf.homeDir())
     end
     self.books = Shelf.load(self.scanned, self.bim, self.cover_specs)
     if self.bim and not self.extracting and #self:pendingFiles() > 0 then

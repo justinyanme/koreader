@@ -366,7 +366,6 @@ return {
     pill = pill,
     gridGeometry = gridGeometry,
     cover = cover,
-    GUTTER = GUTTER,
     TEXT_H = TEXT_H,
     ROW_GAP = ROW_GAP,
 }

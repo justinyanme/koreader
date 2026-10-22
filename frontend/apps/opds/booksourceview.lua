@@ -37,6 +37,7 @@ local OverlapGroup = require("ui/widget/overlapgroup")
 local Palette = require("ui/palette")
 local RenderImage = require("ui/renderimage")
 local Replacements = require("apps/replacements")
+local Shelf = require("apps/shelf/shelf")
 local ShelfView = require("apps/shelf/shelfview")
 local ShelfWidgets = require("apps/shelf/shelfwidgets")
 local Size = require("ui/size")
@@ -86,8 +87,14 @@ local function icon(name, size, dim)
     return IconWidget:new{ icon = name, width = size or dp(24), height = size or dp(24), alpha = true, dim = dim or nil }
 end
 
-local function homeDir()
-    return G_reader_settings:readSetting("home_dir") or filemanagerutil.getDefaultDir()
+--- Makes a tap target at least 44dp tall, whatever its drawn height (DESIGN.md).
+local function tallTarget(tappable)
+    tappable.ges_events.Tap = { GestureRange:new{ ges = "tap", range = function()
+        local d = tappable.dimen
+        local grow = math.max(0, dp(44) - d.h)
+        return Geom:new{ x = d.x, y = d.y - math.floor(grow / 2), w = d.w, h = d.h + grow }
+    end } }
+    return tappable
 end
 
 local function isUnder(path, dir)
@@ -120,8 +127,6 @@ end
 local BookSourceView = InputContainer:extend{
     opds = nil, -- the OPDS plugin: servers, settings
     ui = nil, -- the file manager
-    -- forks a function; replaced by a synchronous runner in tests if forking misbehaves there
-    runInSubProcess = ffiUtil.runInSubProcess,
 }
 
 --- Opens the 书源 page: the only source's home, or the source list.
@@ -141,7 +146,10 @@ function BookSourceView:init()
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     self.covers_fullscreen = true
     self.content_w = self.dimen.w - 2 * GUTTER
+    -- everything below the nav bar: what a new feed, a next batch or a search repaints
+    self.content_rect = Geom:new{ x = 0, y = NAV_H, w = self.dimen.w, h = self.dimen.h - NAV_H }
     self.stack = {}
+    self.thumb_gen = 0
     self.thumbs = {} -- thumbnail URL -> blitbuffer, scaled to the grid's cover size
     self.thumb_tried = {}
     self.downloads = {} -- book key -> running download
@@ -188,6 +196,12 @@ end
 function BookSourceView:close(no_refresh)
     if self.closed then return end
     self.closed = true
+    -- what this page opened on top goes first: it may show our thumbnails, freed with the page
+    self:closeSheet()
+    for _, widget in ipairs{ self.input_dialog, self.path_chooser } do
+        if UIManager:isWidgetShown(widget) then UIManager:close(widget) end
+    end
+    local canceled = next(self.downloads) ~= nil
     for key in pairs(self.downloads) do
         self:cancelDownload(key, true)
     end
@@ -195,6 +209,9 @@ function BookSourceView:close(no_refresh)
         UIManager:close(self)
     else
         UIManager:close(self, "ui", self.dimen)
+    end
+    if canceled then
+        UIManager:show(Notification:new{ text = _("Download canceled") })
     end
 end
 
@@ -233,20 +250,16 @@ end
 function BookSourceView:load(page)
     page.result = { state = NetworkMgr:isOnline() and "loading" or "offline" }
     NetworkMgr:runWhenOnline(function()
+        if self.closed then return end
         if page.result.state == "offline" then
             page.result = { state = "loading" }
-            if self.shown and self:top() == page then
-                self:build()
-                UIManager:setDirty(self, "ui", self.body_rect)
-            end
+            self:refreshContent(page)
         end
         UIManager:nextTick(function()
             if self.closed then return end
             self:fetch(page)
-            if self:top() == page then
-                self:build()
-                UIManager:setDirty(self, "ui", self.body_rect)
-            end
+            self:refreshContent(page)
+            self:prefetch(page)
         end)
     end)
 end
@@ -268,8 +281,14 @@ end
 function BookSourceView:retry()
     local page = self:top()
     self:load(page)
+    self:refreshContent(page)
+end
+
+--- Rebuilds `page` if it shows, and repaints everything below the nav bar (search row, chips, caption, grid, pager).
+function BookSourceView:refreshContent(page)
+    if self.closed or not self.shown or self:top() ~= page then return end
     self:build()
-    UIManager:setDirty(self, "ui", self.body_rect)
+    UIManager:setDirty(self, "ui", self.content_rect)
 end
 
 -- Building
@@ -302,13 +321,13 @@ function BookSourceView:build()
     elseif page.kind == "text" then
         body, pager = self:buildText(page, body_h)
     elseif result.state ~= "ok" then
-        body = self:buildState(page, body_h)
+        body = self:buildState(page)
     elseif #result.books > 0 then
         body, pager = self:buildGrid(page, body_h, y)
     elseif #result.navs > 0 then
         body, pager = self:buildList(page, body_h)
     else
-        body = self:buildState(page, body_h)
+        body = self:buildState(page)
     end
     table.insert(group, TopContainer:new{ dimen = Geom:new{ w = self.dimen.w, h = body_h }, body })
     table.insert(group, pager or VerticalSpan:new{ width = PAGER_H })
@@ -350,7 +369,7 @@ function BookSourceView:buildSearch(page)
     local query = page.query
     local inner_h = field_h - 2 * Size.border.button
     local inner_w = field_w - dp(14) - 2 * Size.border.button
-    local clear_w = query and dp(36) or 0
+    local clear_w = query and dp(44) or 0
     local field = HorizontalGroup:new{
         LeftContainer:new{
             dimen = Geom:new{ w = inner_w - clear_w, h = inner_h },
@@ -364,10 +383,10 @@ function BookSourceView:buildSearch(page)
         },
     }
     if query then
-        table.insert(field, ShelfWidgets.Tappable:new{
+        table.insert(field, tallTarget(ShelfWidgets.Tappable:new{
             callback = function() self:search(nil) end,
             CenterContainer:new{ dimen = Geom:new{ w = clear_w, h = inner_h }, icon("eink/close", dp(18)) },
-        })
+        }))
     end
     local row = HorizontalGroup:new{
         align = "center",
@@ -426,8 +445,7 @@ function BookSourceView:openFacet(page, link)
     page.page_no = 1
     if page.kind == "home" then page.query = nil end
     self:load(page)
-    self:build()
-    UIManager:setDirty(self, "ui", self.dimen)
+    self:refreshContent(page)
 end
 
 function BookSourceView:buildCaption(page)
@@ -478,7 +496,10 @@ function BookSourceView:thumbFor(book, w, h)
     local path = BookSource.cachedThumb(thumb_url)
     if not path then return end
     local ok, image = pcall(RenderImage.renderImageFile, RenderImage, path, false)
-    if not ok or not image then return end
+    if not ok or not image then
+        os.remove(path) -- not an image after all: fetched again next time
+        return
+    end
     -- keep it at the cover's fill size: pages rebuild every progress tick
     local scale = math.max(w / image:getWidth(), h / image:getHeight())
     bb = RenderImage:scaleBlitBuffer(image, math.max(1, math.floor(image:getWidth() * scale + 0.5)),
@@ -599,37 +620,62 @@ function BookSourceView:buildPager(page, pages)
     }
 end
 
---- Turns to page `page_no`; one the device has not fetched yet asks the server for its next batch first.
-function BookSourceView:turnPage(page_no)
-    local page = self:top()
-    if not page.per_page or page.loading_more or page_no < 1 then return end
+-- Items the page lists: books on a grid, rows on a list.
+local function itemCount(page)
     local result = page.result
-    if page_no > page.pages then
-        if not (result and result.next) then return end
-        page.loading_more = true
+    return #result.books > 0 and #result.books or #result.navs
+end
+
+--- Fetches the server's next batch for `page` (the pager reads "Loading more…" meanwhile), then calls `done`.
+function BookSourceView:fetchMore(page, done)
+    local result = page.result
+    page.loading_more = true
+    if self:top() == page then
         self:build()
         UIManager:setDirty(self, "fast", self.pager_rect)
-        UIManager:nextTick(function()
-            if self.closed then return end
-            local more = BookSource.load(page.source, result.next)
-            page.loading_more = nil
-            if more.state == "ok" then
-                for _, book in ipairs(more.books) do table.insert(result.books, book) end
-                for _, nav in ipairs(more.navs) do table.insert(result.navs, nav) end
-                result.next = more.next
-                page.page_no = page_no
-            else
-                UIManager:show(Notification:new{ text = BookSource.failureText(more) })
-            end
-            self:build()
-            UIManager:setDirty(self, "ui", self.body_rect)
-        end)
-        return
     end
-    if page_no == page.page_no then return end
+    UIManager:nextTick(function()
+        if self.closed then return end
+        local more = BookSource.load(page.source, result.next)
+        page.loading_more = nil
+        if more.state == "ok" then
+            for _, book in ipairs(more.books) do table.insert(result.books, book) end
+            for _, nav in ipairs(more.navs) do table.insert(result.navs, nav) end
+            result.next = more.next
+        else
+            UIManager:show(Notification:new{ text = BookSource.failureText(more) })
+        end
+        done()
+    end)
+end
+
+--- Once the reader is on the last fetched page, fetches the next batch in the meantime (the prototype's turnOpds).
+function BookSourceView:prefetch(page)
+    local result = page.result
+    if page.per_page and result and result.state == "ok" and result.next and not page.loading_more
+            and page.page_no * page.per_page >= itemCount(page) then
+        self:fetchMore(page, function() self:refreshContent(page) end)
+    end
+end
+
+--- Turns to page `page_no`. A page the device has not fully fetched asks for the server's next batch
+-- first, so it shows full and no book is skipped.
+function BookSourceView:turnPage(page_no)
+    local page = self:top()
+    if not page.per_page or page.loading_more or page_no < 1 or page_no == page.page_no then return end
+    local result = page.result
+    if result and result.next and page_no * page.per_page > itemCount(page) then
+        return self:fetchMore(page, function()
+            page.page_no = math.min(page_no, math.max(1, math.ceil(itemCount(page) / page.per_page)))
+            self:refreshContent(page)
+            self:prefetch(page)
+        end)
+    end
+    if page_no > page.pages then return end
     page.page_no = page_no
     self:build()
     UIManager:setDirty(self, "ui", self.body_rect)
+    self:prefetch(page)
 end
 
 -- Thumbnails: placeholders first; the page's covers land in one grid repaint, at most THUMB_WAIT seconds later.
@@ -646,10 +692,13 @@ function BookSourceView:fetchThumbs(page, books)
     end
     if #missing == 0 then return end
     local source = page.source
-    local pid = self.runInSubProcess(function()
+    local pid = ffiUtil.runInSubProcess(function()
         BookSource.fetchThumbs(source, missing)
     end)
     if not pid then return end
+    -- only the latest grid page's covers repaint the grid: an earlier page's late ones just stay cached
+    self.thumb_gen = self.thumb_gen + 1
+    local gen, page_no = self.thumb_gen, page.page_no
     local start = os.time()
     local painted = false
     local poll
@@ -666,7 +715,7 @@ function BookSourceView:fetchThumbs(page, books)
             end
             if all or done or os.time() - start >= THUMB_WAIT then
                 painted = true
-                if arrived > 0 and self:top() == page then
+                if arrived > 0 and gen == self.thumb_gen and self:top() == page and page.page_no == page_no then
                     self:build()
                     UIManager:setDirty(self, "ui", self.body_rect)
                 end
@@ -735,8 +784,8 @@ end
 function BookSourceView:buildManage(page, body_h)
     local servers = self.opds.servers
     if #servers == 0 then
-        return self:stateBlock(body_h, _("No sources yet"), _("Add an OPDS address, such as Calibre-Web on your NAS."), nil,
-            _("Add source"), function() self:showEditSheet() end, true)
+        return self:stateBlock(_("No sources yet"), _("Add an OPDS address, such as Calibre-Web on your NAS."), nil,
+            _("Add source"), function() self:showEditSheet() end)
     end
     local rows = {}
     for _, source in ipairs(servers) do
@@ -794,7 +843,8 @@ end
 
 -- Loading, empty and error states (DESIGN.md): in the region they replace
 
-function BookSourceView:stateBlock(body_h, bold, reason, detail, button, callback, solid)
+--- A state block: bold line, reason, optional detail, and at most one outline button.
+function BookSourceView:stateBlock(bold, reason, detail, button, callback)
     local w = self.content_w
     local block = VerticalGroup:new{ align = "center", VerticalSpan:new{ width = dp(40) } }
     if bold then
@@ -809,46 +859,39 @@ function BookSourceView:stateBlock(body_h, bold, reason, detail, button, callbac
     end
     if button then
         table.insert(block, VerticalSpan:new{ width = dp(18) })
-        local pill = EinkControls.PillButton:new{ text = button, callback = callback, solid = solid }
+        local pill = EinkControls.PillButton:new{ text = button, callback = callback }
         if pill.dimen.w < dp(132) then
-            pill = EinkControls.PillButton:new{ text = button, callback = callback, solid = solid, width = dp(132) }
+            pill = EinkControls.PillButton:new{ text = button, callback = callback, width = dp(132) }
         end
         table.insert(block, pill)
     end
     return CenterContainer:new{ dimen = Geom:new{ w = self.dimen.w, h = block:getSize().h }, block }
 end
 
-function BookSourceView:buildState(page, body_h)
+function BookSourceView:buildState(page)
     local result = page.result
     local source = page.source
     local host = BookSource.host(source)
-    if result.state == "loading" then
-        return self:stateBlock(body_h, nil, T(_("Connecting to %1…"), source.title or host))
-    elseif result.state == "offline" then
-        return self:stateBlock(body_h, _("Not connected"), _("Turn on Wi-Fi to browse this source."), nil,
-            _("Retry"), function() self:retry() end)
-    elseif result.state == "unreachable" then
-        return self:stateBlock(body_h, _("Cannot reach the source"),
-            _("Check that the NAS is on and the tunnel is online, then try again."),
-            T("%1 · %2", result.detail or _("No answer"), host), _("Retry"), function() self:retry() end)
-    elseif result.state == "auth" then
-        return self:stateBlock(body_h, _("Login failed"),
-            _("The source refused the login. Check the username, password or Access token."),
-            T("HTTP %1 · %2", result.code, host), _("Edit source"), function() self:showEditSheet(source) end)
-    elseif result.state == "not_opds" then
-        return self:stateBlock(body_h, _("Not an OPDS catalog"),
-            _("The server answered, but not with an OPDS feed. Check the address."),
-            host, _("Edit source"), function() self:showEditSheet(source) end)
-    elseif result.state == "http" then
-        return self:stateBlock(body_h, T(_("Server error %1"), result.code),
-            _("The source answered with an error."),
-            T("HTTP %1%2 · %3", result.code, result.detail and " " .. result.detail or "", host),
-            _("Retry"), function() self:retry() end)
-    elseif page.query then
-        return self:stateBlock(body_h, T(_("Nothing found for “%1”"), page.query),
-            _("Try a word from the title, or the author's name."))
+    local state = result.state
+    if state == "loading" then
+        return self:stateBlock(nil, T(_("Connecting to %1…"), source.title or host))
+    elseif state == "ok" then -- nothing in it
+        if page.query then
+            return self:stateBlock(T(_("Nothing found for “%1”"), page.query), _("Try a word from the title, or the author's name."))
+        end
+        return self:stateBlock(_("No books here yet"), _("Add books on the server and they show up here."))
     end
-    return self:stateBlock(body_h, _("No books here yet"), _("Add books on the server and they show up here."))
+    local text_of = BookSource.describe(result)
+    local detail, button, callback = nil, _("Retry"), function() self:retry() end
+    if state == "unreachable" then
+        detail = T("%1 · %2", result.detail or _("No answer"), host)
+    elseif state == "auth" or state == "not_opds" then
+        detail = state == "auth" and T("HTTP %1 · %2", result.code, host) or host
+        button, callback = _("Edit source"), function() self:showEditSheet(source) end
+    elseif state == "http" then
+        detail = T("HTTP %1%2 · %3", result.code, result.detail and " " .. result.detail or "", host)
+    end
+    return self:stateBlock(text_of.title, text_of.reason, detail, button, callback)
 end
 
 -- Search
@@ -890,8 +933,7 @@ function BookSourceView:search(query)
         page.result = page.home_result or page.result
         page.home_result = nil
     end
-    self:build()
-    UIManager:setDirty(self, "ui", self.dimen)
+    self:refreshContent(page)
 end
 
 -- Opening and downloading
@@ -935,12 +977,17 @@ function BookSourceView:download(page, book, format)
     if self.downloads[book.key] then return end
     local source = page.source
     local dir = BookSource.downloadDir(source)
+    if not BookSource.canWrite(dir) then
+        UIManager:show(Notification:new{ text = T(_("Download failed: %1"),
+            BookSource.failureText{ state = "nowrite", detail = dir }) })
+        return
+    end
     local part = dir .. "/." .. md5(book.key) .. ".part"
-    local pid, fd = self.runInSubProcess(function(_pid, write_fd)
-        local code, status = BookSource.downloadTo(source, format, part, function(size, server_name)
+    local pid, fd = ffiUtil.runInSubProcess(function(_pid, write_fd)
+        local code, status, content_type = BookSource.downloadTo(source, format, part, function(size, server_name)
             ffiUtil.writeToFD(write_fd, T("S\t%1\t%2\n", size or "", server_name or ""))
         end)
-        ffiUtil.writeToFD(write_fd, T("D\t%1\t%2\n", tostring(code), status or ""), true)
+        ffiUtil.writeToFD(write_fd, T("D\t%1\t%2\t%3\n", tostring(code), status or "", content_type or ""), true)
     end, true)
     if not pid then
         UIManager:show(Notification:new{ text = _("Cannot start the download.") })
@@ -961,11 +1008,11 @@ function BookSourceView:pollDownload(dl)
     if exited then dl.fd = nil end
     local finished
     for line in dl.buffer:gmatch("([^\n]*)\n") do
-        local kind, a, b = line:match("^(%a)\t([^\t]*)\t?(.*)$")
+        local kind, a, b, c = line:match("^(%a)\t([^\t]*)\t?([^\t]*)\t?(.*)$")
         if kind == "S" then
             dl.size, dl.server_name = tonumber(a), b ~= "" and b or nil
         elseif kind == "D" then
-            finished = { code = tonumber(a) or a, status = b }
+            finished = { code = tonumber(a) or a, status = b, content_type = c ~= "" and c or nil }
         end
     end
     dl.buffer = dl.buffer:match("[^\n]*$")
@@ -985,17 +1032,22 @@ function BookSourceView:finishDownload(dl, finished)
     if dl.fd then
         UIManager:scheduleIn(1, function() self:collect(dl) end)
     end
-    if finished.code ~= 200 then
+    local result = BookSource.downloadResult(finished.code, finished.status, finished.content_type, dl.dir)
+    local file
+    if result.state == "ok" then
+        local name = dl.source.raw_names and dl.server_name
+            and util.getSafeFilename(dl.server_name, dl.dir) or BookSource.fileName(dl.book, dl.format, dl.dir)
+        file = (dl.dir ~= "/" and dl.dir or "") .. "/" .. name
+        if not os.rename(dl.part, file) or lfs.attributes(file, "mode") ~= "file" then
+            result = { state = "nowrite", detail = dl.dir }
+        end
+    end
+    if result.state ~= "ok" then
         os.remove(dl.part)
         self:refreshTile(dl.book, "ui")
-        local result = BookSource.failure(finished.code, finished.status)
         UIManager:show(Notification:new{ text = T(_("Download failed: %1"), BookSource.failureText(result)) })
         return
     end
-    local name = dl.source.raw_names and dl.server_name
-        and util.getSafeFilename(dl.server_name, dl.dir) or BookSource.fileName(dl.book, dl.format, dl.dir)
-    local file = (dl.dir ~= "/" and dl.dir or "") .. "/" .. name
-    os.rename(dl.part, file)
     BookSource.recordDownload(self.opds, dl.source, dl.book, file)
     if self.closed then return end
     self:openFile(file)
@@ -1119,7 +1171,7 @@ function BookSourceView:chooseFolder(source)
             source.download_dir = path
             BookSource.save(self.opds)
             UIManager:show(Notification:new{
-                text = isUnder(path, homeDir()) and T(_("Books will be downloaded to %1"), filemanagerutil.abbreviate(path))
+                text = isUnder(path, Shelf.homeDir()) and T(_("Books will be downloaded to %1"), filemanagerutil.abbreviate(path))
                     or _("This folder is outside the home folder: books downloaded here won't show up on the shelf."),
             })
         end,
@@ -1306,25 +1358,27 @@ function BookSourceView:editContent(draft, rebuild, save)
         else
             local value = draft[field.key]
             local shown = value ~= "" and (field.password and string.rep("•", math.min(#value, 12)) or value) or field.hint or ""
-            local pill = ShelfWidgets.Tappable:new{
+            local pill = FrameContainer:new{
+                radius = dp(20), bordersize = Size.border.button, color = Palette.ink, background = Palette.paper,
+                padding = 0, padding_left = dp(14), padding_right = dp(14),
+                LeftContainer:new{ dimen = Geom:new{ w = input_w - dp(28) - 2 * Size.border.button, h = dp(40) - 2 * Size.border.button },
+                    text(shown, "ui_body", value ~= "" and Palette.ink or Palette.ink_2, input_w - dp(28) - 2 * Size.border.button) },
+            }
+            -- the whole 52dp row is the tap target, label included
+            local row = ShelfWidgets.Tappable:new{
                 callback = function() self:editField(field, draft, rebuild) end,
-                FrameContainer:new{
-                    radius = dp(20), bordersize = Size.border.button, color = Palette.ink, background = Palette.paper,
-                    padding = 0, padding_left = dp(14), padding_right = dp(14),
-                    LeftContainer:new{ dimen = Geom:new{ w = input_w - dp(28) - 2 * Size.border.button, h = dp(40) - 2 * Size.border.button },
-                        text(shown, "ui_body", value ~= "" and Palette.ink or Palette.ink_2, input_w - dp(28) - 2 * Size.border.button) },
+                CenterContainer:new{
+                    dimen = Geom:new{ w = w, h = dp(52) },
+                    HorizontalGroup:new{
+                        align = "center",
+                        LeftContainer:new{ dimen = Geom:new{ w = label_w, h = dp(52) }, text(field.label, "ui_label", Palette.ink_2, label_w) },
+                        HorizontalSpan:new{ width = dp(10) },
+                        pill,
+                    },
                 },
             }
-            self.edit_rows[field.key] = pill
-            table.insert(form, CenterContainer:new{
-                dimen = Geom:new{ w = w, h = dp(52) },
-                HorizontalGroup:new{
-                    align = "center",
-                    LeftContainer:new{ dimen = Geom:new{ w = label_w, h = dp(52) }, text(field.label, "ui_label", Palette.ink_2, label_w) },
-                    HorizontalSpan:new{ width = dp(10) },
-                    pill,
-                },
-            })
+            self.edit_rows[field.key] = row
+            table.insert(form, row)
         end
     end
     local toggle = EinkControls.Toggle:new{ checked = draft.raw_names }
@@ -1388,6 +1442,7 @@ end
 function BookSourceView:saveSource(source, draft)
     local is_new = source == nil
     source = source or {}
+    if source.url then BookSource.forget(source.url) end -- an old Access cookie must not hide a bad new token
     source.title = util.trim(draft.title)
     source.url = BookSource.normalizeUrl(draft.url)
     source.username = nonEmpty(draft.username)
@@ -1395,6 +1450,7 @@ function BookSourceView:saveSource(source, draft)
     source.access_client_id = nonEmpty(draft.access_client_id)
     source.access_client_secret = nonEmpty(draft.access_client_secret)
     source.raw_names = draft.raw_names or nil
+    BookSource.forget(source.url)
     if is_new then
         table.insert(self.opds.servers, source)
     end

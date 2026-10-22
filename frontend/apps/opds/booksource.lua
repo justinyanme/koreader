@@ -9,9 +9,11 @@ redesign's own fields:
     downloaded                              { [entry id or acquisition href] = local path }
 
 Every request (feeds, thumbnails, downloads) goes through the plugin's
-OPDSClient with the source's cookies, Basic auth and token; the client sends the
-credentials to the source's own origin only. Feeds are parsed by the original
-browser's parser (opdsbrowser.lua), which stays untouched.
+OPDSClient with the source's cookies. Basic auth and the token go only to the
+source's own origin (scheme, host and port of its URL): requests elsewhere,
+links in its feeds included, go without them, and OPDSClient drops them on any
+redirect away from that origin. Feeds are parsed by the original browser's
+parser (opdsbrowser.lua), which stays untouched.
 
 The OPDS plugin's modules are required lazily: this module loads even when the
 plugin is disabled.
@@ -19,6 +21,7 @@ plugin is disabled.
 
 local BookList = require("ui/widget/booklist")
 local DataStorage = require("datastorage")
+local Shelf = require("apps/shelf/shelf")
 local filemanagerutil = require("apps/filemanager/filemanagerutil")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
@@ -41,6 +44,7 @@ local BookSource = {
 }
 
 local SORT_NEW = "http://opds-spec.org/sort/new"
+local DEFAULT_PORTS = { http = "80", https = "443" }
 local clients = {} -- by source URL: one cookie jar per source for the session
 
 local function browser()
@@ -64,7 +68,7 @@ function BookSource.normalizeUrl(str)
 end
 
 function BookSource.downloadDir(source)
-    return source.download_dir or G_reader_settings:readSetting("home_dir") or filemanagerutil.getDefaultDir()
+    return source.download_dir or Shelf.homeDir()
 end
 
 --- Writes the plugin's settings file now, so sources and downloads survive a crash.
@@ -74,8 +78,22 @@ function BookSource.save(opds)
     opds.updated = nil
 end
 
+local function origin(u)
+    local parsed = url.parse(u or "")
+    if not parsed or not parsed.host then return end
+    local scheme = (parsed.scheme or ""):lower()
+    return scheme .. "://" .. parsed.host:lower() .. ":" .. (parsed.port or DEFAULT_PORTS[scheme] or "")
+end
+
+--- Whether `u` is on the source's own origin, the only one that gets its credentials.
+function BookSource.isOwnOrigin(source, u)
+    local own = origin(source.url)
+    return own ~= nil and own == origin(u)
+end
+
 --- Request fields for `source`: Basic auth and the Access token headers (see OPDSClient).
 function BookSource.authorize(source, request)
+    if not BookSource.isOwnOrigin(source, request.url) then return request end
     request.username = source.username
     request.password = source.password
     if source.access_client_id then
@@ -94,6 +112,11 @@ function BookSource.request(source, request)
         clients[source.url] = client
     end
     return client:request(BookSource.authorize(source, request))
+end
+
+--- Drops the source's cookies, e.g. once its address or credentials changed (an old Access cookie would hide a bad token).
+function BookSource.forget(source_url)
+    clients[source_url] = nil
 end
 
 --- Sorts an HTTP outcome into the states the page shows:
@@ -125,7 +148,14 @@ function BookSource.fetch(source, feed_url)
     local ok, catalog
     if body:match("^%s*{") then
         ok, catalog = pcall(require("json").decode, body)
-        if ok and type(catalog) == "table" then catalog.is_opds2 = true end
+        -- an OPDS 2 feed has at least one of these; other JSON is not a catalog
+        if ok and type(catalog) == "table" and (type(catalog.metadata) == "table" or type(catalog.links) == "table"
+                or type(catalog.navigation) == "table" or type(catalog.publications) == "table"
+                or type(catalog.groups) == "table") then
+            catalog.is_opds2 = true
+        else
+            ok = false
+        end
     else
         ok, catalog = pcall(require("opdsparser").parse, require("opdsparser"), body)
     end
@@ -174,9 +204,16 @@ function BookSource.load(source, feed_url)
     local result = BookSource.fetch(source, feed_url)
     if result.state ~= "ok" then return result end
     local catalog = result.catalog
-    -- the original parser, with feeds it needs (the search description) fetched the same way
+    -- the original parser, with feeds it needs (the search description) fetched the same way;
+    -- after one failure it asks nothing more, so a dead server costs one timeout
+    local failed
     local parser = setmetatable({
-        parseFeed = function(_, u) return BookSource.fetch(source, u).catalog end,
+        parseFeed = function(_, u)
+            if failed then return end
+            local r = BookSource.fetch(source, u)
+            if r.state == "unreachable" or r.state == "auth" then failed = r end
+            return r.catalog
+        end,
     }, { __index = browser() })
     local items
     if catalog.is_opds2 then
@@ -184,6 +221,7 @@ function BookSource.load(source, feed_url)
     else
         items = browser().genItemTableFromCatalog(parser, catalog, feed_url)
     end
+    if failed then return failed end
     local feed = catalog.feed or {}
     -- genItemTableFromCatalog makes exactly one item per feed entry, in order (OPDS 1.x only)
     local entries = not catalog.is_opds2 and feed.entry or {}
@@ -292,7 +330,7 @@ function BookSource.cachedThumb(thumb_url)
     end
 end
 
---- Downloads thumbnails into the cache (meant for a subprocess); one that fails is skipped.
+--- Downloads thumbnails into the cache (meant for a subprocess); one that fails, or is not an image, is skipped.
 function BookSource.fetchThumbs(source, thumb_urls)
     util.makePath(BookSource.thumb_dir)
     for _, thumb_url in ipairs(thumb_urls) do
@@ -300,9 +338,10 @@ function BookSource.fetchThumbs(source, thumb_urls)
         local file = io.open(path .. ".part", "wb")
         if file then
             socketutil:set_timeout(BookSource.block_timeout, BookSource.total_timeout)
-            local code = BookSource.request(source, { url = thumb_url, sink = ltn12.sink.file(file) })
+            local code, headers = BookSource.request(source, { url = thumb_url, sink = ltn12.sink.file(file) })
             socketutil:reset_timeout()
-            if code == 200 then
+            local content_type = headers and headers["content-type"] or ""
+            if code == 200 and content_type:lower():match("^%s*image/") then
                 os.rename(path .. ".part", path)
             else
                 os.remove(path .. ".part")
@@ -332,7 +371,8 @@ function BookSource.trimThumbs()
 end
 
 --- Downloads `format` to `part` (meant for a subprocess). Calls `on_size(bytes or nil, server_name)`
--- once the size is known (from a HEAD request), and returns the HTTP code and status.
+-- once the size is known (from a HEAD request), and returns the HTTP code, status and content type;
+-- the code is "nowrite" when `part` cannot be written.
 function BookSource.downloadTo(source, format, part, on_size)
     local parser_headers
     local parser = setmetatable({
@@ -347,29 +387,68 @@ function BookSource.downloadTo(source, format, part, on_size)
     local length = parser_headers and tonumber(parser_headers["content-length"])
     on_size(length or format.size, server_name)
     local file = io.open(part, "wb")
-    if not file then return nil, "cannot write " .. part end
+    if not file then return "nowrite" end
     socketutil:set_timeout(socketutil.FILE_BLOCK_TIMEOUT, socketutil.FILE_TOTAL_TIMEOUT)
-    local code, _headers, status = BookSource.request(source, {
+    local code, headers, status = BookSource.request(source, {
         url = format.href,
         headers = { ["Accept-Encoding"] = "identity" },
         sink = ltn12.sink.file(file),
     })
     socketutil:reset_timeout()
-    return code, status
+    return code, status, headers and headers["content-type"]
+end
+
+--- The state of a finished download: "ok", or a failure (a web page instead of a book, e.g. a login page, fails too).
+function BookSource.downloadResult(code, status, content_type, dir)
+    if code == "nowrite" then
+        return { state = "nowrite", detail = dir }
+    elseif code == 200 and content_type and content_type:lower():match("^%s*text/html") then
+        return { state = "not_book" }
+    elseif code == 200 then
+        return { state = "ok" }
+    end
+    return BookSource.failure(tonumber(code) or code, status)
+end
+
+--- Whether books can be written to `dir`.
+function BookSource.canWrite(dir)
+    if lfs.attributes(dir, "mode") ~= "directory" then return false end
+    local probe = dir .. "/.koreader-write-test"
+    local file = io.open(probe, "wb")
+    if not file then return false end
+    file:close()
+    os.remove(probe)
+    return true
+end
+
+--- What a state means for the reader: { title, reason }. The page shows both; toasts show the reason.
+function BookSource.describe(result)
+    local state = result.state
+    if state == "auth" then
+        return { title = _("Login failed"),
+            reason = _("The source refused the login. Check the username, password or Access token.") }
+    elseif state == "unreachable" then
+        return { title = _("Cannot reach the source"),
+            reason = _("Check that the NAS is on and the tunnel is online, then try again.") }
+    elseif state == "not_opds" then
+        return { title = _("Not an OPDS catalog"),
+            reason = _("The server answered, but not with an OPDS feed. Check the address.") }
+    elseif state == "offline" then
+        return { title = _("Not connected"), reason = _("Turn on Wi-Fi to browse this source.") }
+    elseif state == "not_book" then
+        return { title = _("Not a book"),
+            reason = _("The server sent a web page instead of the book. Check the source's login.") }
+    elseif state == "nowrite" then
+        return { title = _("Cannot save the book"),
+            reason = T(_("Cannot write to the download folder %1. Choose another one in the source's menu."),
+                filemanagerutil.abbreviate(result.detail)) }
+    end
+    return { title = T(_("Server error %1"), result.code), reason = T(_("The server answered with status %1."), result.code) }
 end
 
 --- What a failed request means for the reader, in one line.
 function BookSource.failureText(result)
-    if result.state == "auth" then
-        return _("Login failed. Check the source's username, password or Access token.")
-    elseif result.state == "unreachable" then
-        return _("Cannot reach the source. Check the NAS and the network.")
-    elseif result.state == "not_opds" then
-        return _("The server's answer is not an OPDS catalog. Check the address.")
-    elseif result.state == "offline" then
-        return _("Not connected.")
-    end
-    return T(_("The server answered with status %1."), result.code)
+    return BookSource.describe(result).reason
 end
 
 return BookSource

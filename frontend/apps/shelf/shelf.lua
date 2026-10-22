@@ -11,6 +11,7 @@ is KOReader's own (BookList); a book without a sidecar is "new".
 local BookList = require("ui/widget/booklist")
 local DataStorage = require("datastorage")
 local DocumentRegistry = require("document/documentregistry")
+local filemanagerutil = require("apps/filemanager/filemanagerutil")
 local ReadHistory = require("readhistory")
 local ffiUtil = require("ffi/util")
 local lfs = require("libs/libkoreader-lfs")
@@ -30,6 +31,11 @@ local LIGHT_SQL = "SELECT directory, filename, title, authors, cover_fetched, ha
     .. "cover_w, cover_h, ignore_cover, ignore_meta FROM bookinfo WHERE in_progress=0;"
 local LIGHT_COLS = { "directory", "filename", "title", "authors", "cover_fetched", "has_cover", "cover_sizetag",
     "cover_w", "cover_h", "ignore_cover", "ignore_meta" }
+
+--- The home folder: what the shelf shows, and where 书源 downloads land by default.
+function Shelf.homeDir()
+    return G_reader_settings:readSetting("home_dir") or filemanagerutil.getDefaultDir()
+end
 
 --- Returns the books (`{ file, mtime }`) under `root`, in no particular order.
 function Shelf.scan(root)
