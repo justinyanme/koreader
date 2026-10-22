@@ -225,7 +225,9 @@ end
 
 function ShelfView:buildHeader()
     local field_h = dp(40)
-    local field_w = self.width - 2 * GUTTER - dp(10) - dp(44)
+    -- the 书源 icon only shows with the OPDS plugin
+    local has_sources = self.ui.opds ~= nil
+    local field_w = self.width - 2 * GUTTER - dp(10) - dp(44) - (has_sources and dp(44) or 0)
     local query = self.query
     local inner_h = field_h - 2 * Size.border.button
     local inner_w = field_w - dp(14) - 2 * Size.border.button
@@ -266,12 +268,20 @@ function ShelfView:buildHeader()
             },
         },
         HorizontalSpan:new{ width = dp(10) },
+    }
+    if has_sources then
+        table.insert(row, ShelfWidgets.Tappable:new{
+            callback = function() self.ui.opds:onShowOPDSCatalog() end,
+            CenterContainer:new{ dimen = Geom:new{ w = dp(44), h = dp(44) },
+                IconWidget:new{ icon = "eink/source", width = dp(24), height = dp(24) } },
+        })
+    end
+    table.insert(row,
         ShelfWidgets.Tappable:new{
             callback = function() self:showSortSheet() end,
             CenterContainer:new{ dimen = Geom:new{ w = dp(44), h = dp(44) },
                 IconWidget:new{ icon = "eink/sliders", width = dp(24), height = dp(24) } },
-        },
-    }
+        })
     return LeftContainer:new{
         dimen = Geom:new{ w = self.width, h = HEADER_H },
         HorizontalGroup:new{ HorizontalSpan:new{ width = GUTTER }, VerticalGroup:new{ VerticalSpan:new{ width = dp(12) }, row } },

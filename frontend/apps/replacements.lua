@@ -17,4 +17,5 @@ return {
     reader_highlight = nil, -- instead of ReaderHighlight, which owns the selection and highlight dialogs
     reader_dictionary = nil, -- instead of ReaderDictionary in the reader, which shows the lookup popup
     filemanager = nil, -- instead of FileManager, whose setupLayout() builds the home screen
+    opds_catalog = nil, -- instead of OPDSBrowser on "ShowOPDSCatalog": a module with show(opds_plugin)
 }

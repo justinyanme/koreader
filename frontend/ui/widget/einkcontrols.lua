@@ -21,6 +21,7 @@ local Palette = require("ui/palette")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
 local Screen = require("device").screen
+local _ = require("gettext")
 
 local function tapEvents(dimen)
     return { TapSelect = { GestureRange:new{ ges = "tap", range = dimen } } }
@@ -274,16 +275,19 @@ function Segmented:free()
 end
 
 --- Pager band (44dp): back pill, "n / N", forward pill; 44 × 32dp pills with a 1dp border. Empty with one page.
+-- `more`: the server has pages not fetched yet, so "n / …" with forward enabled; `loading`: both disabled, "Loading more…".
 local Pager = HorizontalGroup:extend{
     page = 1,
     pages = 1,
+    more = false,
+    loading = false,
     width = nil,
     on_change = nil, -- function(new_page)
 }
 
 function Pager:init()
     local band = Geom:new{ w = self.width, h = Screen:scaleBySize(44) }
-    if self.pages <= 1 then
+    if self.pages <= 1 and not self.more then
         self[1] = CenterContainer:new{ dimen = band, HorizontalSpan:new{ width = 0 } }
         return
     end
@@ -292,19 +296,23 @@ function Pager:init()
         return PillButton:new{
             icon = "eink/chev", icon_size = Screen:scaleBySize(16), icon_rotation_angle = rotation,
             width = Screen:scaleBySize(44), height = Screen:scaleBySize(32), bordersize = Size.border.default,
-            enabled = target >= 1 and target <= self.pages,
+            enabled = not self.loading and target >= 1 and (target <= self.pages or self.more),
             callback = function() self.on_change(target) end,
         }
     end
     local gap = Screen:scaleBySize(14)
+    local count = TextWidget:new{
+        text = self.loading and _("Loading more…") or self.page .. " / " .. (self.more and "…" or self.pages),
+        face = Font:getFace("ui_label"), fgcolor = Palette.ink,
+    }
     self[1] = CenterContainer:new{
         dimen = band,
         HorizontalGroup:new{
             button(-1, 180),
             HorizontalSpan:new{ width = gap },
             CenterContainer:new{
-                dimen = Geom:new{ w = Screen:scaleBySize(54), h = band.h },
-                TextWidget:new{ text = self.page .. " / " .. self.pages, face = Font:getFace("ui_label"), fgcolor = Palette.ink },
+                dimen = Geom:new{ w = math.max(Screen:scaleBySize(54), count:getSize().w), h = band.h },
+                count,
             },
             HorizontalSpan:new{ width = gap },
             button(1, 0),
