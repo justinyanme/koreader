@@ -37,6 +37,7 @@ local BottomSheet = InputContainer:extend{
     on_close = nil, -- function, called once the sheet is closed
     on_back = nil, -- function; when set, the header starts with a back button
     close_on_scrim = true,
+    bottom_inset = 0, -- height kept free at the screen bottom, e.g. for the on-screen keyboard
 }
 
 function BottomSheet.getContentWidth()
@@ -110,8 +111,9 @@ function BottomSheet:build()
         },
     }
     local size = self.frame:getSize()
-    local max_h = math.floor(Screen:getHeight() * 0.84) + radius + border
-    self.sheet_y = Screen:getHeight() + radius + border - math.min(size.h, max_h)
+    local avail_h = Screen:getHeight() - self.bottom_inset
+    local max_h = math.floor(avail_h * 0.84) + radius + border
+    self.sheet_y = avail_h + radius + border - math.min(size.h, max_h)
 end
 
 --- The on-screen rect of the sheet: what show, update and close refresh.

@@ -165,7 +165,7 @@ function ReaderUI:init()
         document = self.document,
     })
     -- text highlight
-    self:registerModule("highlight", ReaderHighlight:new{
+    self:registerModule("highlight", (Replacements.reader_highlight or ReaderHighlight):new{
         dialog = self.dialog,
         view = self.view,
         ui = self,
