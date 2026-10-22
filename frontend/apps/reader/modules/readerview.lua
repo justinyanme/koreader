@@ -568,6 +568,7 @@ function ReaderView:drawPageSavedHighlight(bb, x, y)
                         if rect then
                             local hl_box = {
                                 index     = item.parent or (index + idx_offset), -- index in annotations
+                                page      = page,
                                 rect      = box,
                                 drawer    = drawer,
                                 color     = color,
@@ -664,13 +665,21 @@ end
 
 --- Paints a 1.3dp wavy line (12dp period, 1.5dp amplitude) from x to x + w, centered on mid_y.
 -- The phase follows the absolute x, so the boxes of one line join into one wave.
+local wave_offsets -- y offsets over one period, by x
 function ReaderView.paintWave(bb, x, mid_y, w, color)
-    local amp, period = Screen:scaleBySize(1.5), Screen:scaleBySize(12)
+    local period = Screen:scaleBySize(12)
+    if not wave_offsets or #wave_offsets ~= period then
+        local amp = Screen:scaleBySize(1.5)
+        wave_offsets = {}
+        for i = 1, period do
+            wave_offsets[i] = math.floor(amp * math.sin(2 * math.pi * (i - 1) / period) + 0.5)
+        end
+    end
     local stroke = math.max(1, Screen:scaleBySize(1.3))
     local paint = Blitbuffer.isColor8(color) and bb.paintRect or bb.paintRectRGB32
     local prev
     for i = 0, w - 1 do
-        local wy = mid_y + math.floor(amp * math.sin(2 * math.pi * (x + i) / period) + 0.5)
+        local wy = mid_y + wave_offsets[(x + i) % period + 1]
         local top, bottom = wy, wy
         if prev then
             top, bottom = math.min(prev, wy), math.max(prev, wy)
