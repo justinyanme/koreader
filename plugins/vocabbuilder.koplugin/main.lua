@@ -2102,6 +2102,15 @@ function VocabBuilder:onSyncVocabBuilder(interactive)
     return true
 end
 
+-- For the e-ink redesign's dictionary sheet (apps/reader/modules/readerdictsheet.lua)
+function VocabBuilder:hasWord(word)
+    return DB:hasWord(word) ~= nil
+end
+
+function VocabBuilder:removeWord(word)
+    DB:remove({word = word})
+end
+
 -- Event sent by readerdictionary "WordLookedUp"
 function VocabBuilder:onWordLookedUp(word, title, is_manual)
     if not settings.enabled and not is_manual then return end
