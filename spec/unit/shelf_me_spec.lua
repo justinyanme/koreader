@@ -1,5 +1,5 @@
 describe("Shelf home, 我的 tab", function()
-    local BookList, DataStorage, DocSettings, FileManager, Me, ReadHistory, ReaderUI, Replacements, SQ3, UIManager
+    local BookList, DataStorage, DocSettings, Event, FileManager, Geom, Me, ReadHistory, ReaderUI, Replacements, SQ3, UIManager
     local ffiUtil, lfs, T, _
     local home, saved_settings, saved_hist, saved_dbs
     local today -- this week's day of today, Monday = 1
@@ -85,6 +85,20 @@ describe("Shelf home, 我的 tab", function()
         return out
     end
 
+    -- a swipe sent the way input arrives: through the file manager's event dispatch
+    local function swipe(fm, direction, x, y)
+        local screen = require("device").screen
+        fm:handleEvent(Event:new("Gesture", {
+            ges = "swipe", direction = direction, distance = 200, time = 0,
+            pos = Geom:new{ x = x or screen:getWidth() / 2, y = y or screen:getHeight() / 2, w = 0, h = 0 },
+        }))
+    end
+
+    -- the tap callback of an entry row
+    local function tapRow(view, i)
+        view.items[i].build().callback()
+    end
+
     local function contains(list, value)
         for _, v in ipairs(list) do
             if v == value then return true end
@@ -99,7 +113,9 @@ describe("Shelf home, 我的 tab", function()
         BookList = require("ui/widget/booklist")
         DataStorage = require("datastorage")
         DocSettings = require("docsettings")
+        Event = require("ui/event")
         FileManager = require("apps/filemanager/filemanager")
+        Geom = require("ui/geometry")
         Me = require("apps/shelf/me")
         ReadHistory = require("readhistory")
         ReaderUI = require("apps/reader/readerui")
@@ -164,7 +180,7 @@ describe("Shelf home, 我的 tab", function()
             expected[i] = reading[today - i] or 0
             total = total + expected[i]
         end
-        assert.are.same(expected, view.week.minutes)
+        assert.are.same(expected, view.home.week.minutes)
         local shown = texts(view)
         assert.is_true(contains(shown, T(_("%1 h %2 min"), math.floor(total / 60), total % 60)))
         assert.is_true(contains(shown, T(_("%1-day reading streak · %2 finished this year"), 3, 1)))
@@ -209,17 +225,28 @@ describe("Shelf home, 我的 tab", function()
         end
         collect(view)
         assert.are.equal(3, #rows)
-        assert.are.equal(2, #view.library.books)
-        assert.are.equal(2, #view.library.books[1].notes)
-        assert.are.equal(1, #view.library.books[2].notes)
+        assert.are.equal(2, #view.books)
+        assert.are.equal(2, #view.books[1].notes)
+        assert.are.equal(1, #view.books[2].notes)
 
+        -- a note opens its book, pushes the position it opened on, then jumps to the note
         local opened
         local orig = ReaderUI.showReader
         ReaderUI.showReader = function(_, file, _, _, _, after_open) opened = { file = file, after_open = after_open } end
-        view:openNote(view.library.books[2], view.library.books[2].notes[1])
+        local note = view.books[2].notes[1]
+        view:openNote(view.books[2], note)
         ReaderUI.showReader = orig
         assert.are.equal(home .. "/leaves.epub", opened.file)
-        assert.is_function(opened.after_open)
+        local calls = {}
+        opened.after_open{
+            link = { addCurrentLocationToStack = function() table.insert(calls, "stack") end },
+            bookmark = { gotoBookmark = function(_, page, pos0) table.insert(calls, { page, pos0 }) end },
+        }
+        assert.are.same({ "stack", { note.page, note.pos0 } }, calls)
+
+        -- notes are dropped with the subpage
+        view:close()
+        assert.is_nil(view.books)
         fm:onClose()
     end)
 
@@ -260,35 +287,154 @@ describe("Shelf home, 我的 tab", function()
         fm:onClose()
     end)
 
-    it("pages a long list under the nav bar", function()
+    it("pages a long list under the nav bar, with swipes through the file manager", function()
         local fm, view = openMe()
-        local book = view.library.books[1]
-        for i = 1, 40 do
-            table.insert(book.notes, highlight("Highlight number " .. i, "Prologue"))
+        local orig = Me.notes
+        Me.notes = function()
+            local books = orig()
+            for i = 1, 40 do
+                table.insert(books[1].notes, highlight("Highlight number " .. i, "Prologue"))
+            end
+            return books
         end
-        view.library.note_count = view.library.note_count + 40
         view:open("notes")
         assert.is_true(#view.pages > 1)
+        local shelf_page = fm.shelf_view.page
         local refreshes, restore = spyRefreshes()
-        view:onSwipe(nil, { direction = "west" })
+        swipe(fm, "west")
         assert.are.equal(2, view.page)
-        view:goToPage(1)
+        swipe(fm, "east")
         restore()
+        assert.are.equal(1, view.page)
+        assert.are.equal(shelf_page, fm.shelf_view.page)
         assert.are.equal(2, #refreshes)
         for _, r in ipairs(refreshes) do
             assert.are.equal("ui", r.type)
             assert.is_true(r.region.y > fm.content_dimen.y)
         end
-        fm:onClose()
-    end)
-
-    it("keeps 我的 across a layout rebuild", function()
-        local fm, view = openMe()
+        -- a rebuild (rotation) keeps the subpage and its page
+        view:goToPage(2)
         fm:reinit()
         assert.are.equal("me", fm.current_tab)
         assert.are.equal(fm.me_view, fm.content[1])
         assert.are_not.equal(view, fm.me_view)
+        assert.are.equal("notes", fm.me_view.subpage)
+        assert.are.equal(2, fm.me_view.page)
+        Me.notes = orig
         fm:onClose()
+    end)
+
+    it("leaves the menu swipe to the file manager", function()
+        local fm = openMe()
+        assert.is_nil(fm.menu.menu_container)
+        swipe(fm, "south", nil, 5)
+        assert.is_truthy(fm.menu.menu_container)
+        fm.menu:onCloseFileManagerMenu()
+        fm:onClose()
+    end)
+
+    it("exports all notes when the exporter is ready, or opens its settings in the menu", function()
+        local fm, view = openMe()
+        local ready, exported = false, 0
+        fm.exporter = { isReady = function() return ready end, onExportAllNotes = function() exported = exported + 1 end }
+        view:open("notes")
+        tapRow(view, 1)
+        assert.are.equal(0, exported)
+        local menu = fm.menu.menu_container[1]
+        assert.are.equal("appbar.tools", fm.menu.tab_item_table[menu.cur_tab].icon)
+        fm.menu:onCloseFileManagerMenu()
+        ready = true
+        tapRow(view, 1)
+        assert.are.equal(1, exported)
+        fm.exporter = nil
+        fm:onClose()
+    end)
+
+    it("counts a week from Monday 00:00", function()
+        local saved = Me.stats_db
+        Me.stats_db = ffiUtil.realpath(DataStorage:getDataDir()) .. "/me_spec_week.sqlite3"
+        os.remove(Me.stats_db)
+        local conn = SQ3.open(Me.stats_db)
+        conn:exec("CREATE TABLE page_stat_data (id_book integer, page integer, start_time integer, duration integer, total_pages integer);")
+        local sunday = os.time{ year = 2026, month = 10, day = 18, hour = 23, min = 59, sec = 0 }
+        local monday = os.time{ year = 2026, month = 10, day = 19, hour = 0, min = 0, sec = 0 }
+        conn:exec(string.format("INSERT INTO page_stat_data VALUES (1, 1, %d, 600, 100);", sunday))
+        conn:exec(string.format("INSERT INTO page_stat_data VALUES (1, 2, %d, 1200, 100);", monday))
+        conn:close()
+
+        Me.now = function() return sunday + 30 end
+        local fm, view = openMe()
+        assert.are.same({ 0, 0, 0, 0, 0, 0, 10 }, view.home.week.minutes)
+        assert.are.equal(10, view.home.week.total_minutes)
+        fm:onClose()
+
+        Me.now = function() return monday + 30 end
+        fm, view = openMe()
+        assert.are.same({ 20 }, view.home.week.minutes)
+        assert.are.equal(20, view.home.week.total_minutes)
+        assert.are.equal(2, view.home.streak)
+        fm:onClose()
+
+        Me.now = os.time
+        os.remove(Me.stats_db)
+        Me.stats_db = saved
+    end)
+
+    it("reads a missing or older database as empty", function()
+        local saved = { Me.stats_db, Me.vocab_db }
+        local data_dir = ffiUtil.realpath(DataStorage:getDataDir())
+        Me.stats_db = data_dir .. "/me_spec_missing.sqlite3"
+        Me.vocab_db = data_dir .. "/me_spec_old_vocab.sqlite3"
+        os.remove(Me.stats_db)
+        os.remove(Me.vocab_db)
+        local conn = SQ3.open(Me.vocab_db)
+        conn:exec("CREATE TABLE words (word TEXT);") -- no vocabulary table
+        conn:close()
+
+        local fm, view = openMe()
+        for i = 1, view.home.week.today do
+            assert.are.equal(0, view.home.week.minutes[i])
+        end
+        assert.are.equal(0, view.home.streak)
+        assert.are.equal(0, view.home.word_count)
+        view:open("vocab")
+        assert.are.equal(0, #view.words)
+        assert.is_true(contains(texts(view), _("Your vocabulary is empty")))
+        fm:onClose()
+
+        os.remove(Me.vocab_db)
+        Me.stats_db, Me.vocab_db = saved[1], saved[2]
+    end)
+
+    it("reads highlights from sidecars older than annotations, like the exporter", function()
+        local path = home .. "/legacy.epub"
+        ffiUtil.copyFile("spec/front/unit/data/juliet.epub", path)
+        local doc_settings = DocSettings:open(path)
+        doc_settings:saveSetting("doc_props", { title = "Legacy" })
+        doc_settings:saveSetting("highlight", {
+            [3] = {
+                { text = "kept, with a note", datetime = "2020-01-01 10:00:00", pos0 = "/body/p[1].0", drawer = "lighten" },
+                { text = "no bookmark: not exported", datetime = "2020-01-01 11:00:00", pos0 = "/body/p[2].0" },
+            },
+        })
+        doc_settings:saveSetting("bookmarks", {
+            { datetime = "2020-01-01 10:00:00", page = "/body/p[1].0", text = "my thought", highlighted = true },
+        })
+        doc_settings:flush()
+        BookList.resetBookInfoCache(path)
+        ReadHistory:addItem(path, 3000, true)
+
+        local fm, view = openMe()
+        assert.are.equal(4, view.home.note_count)
+        view:open("notes")
+        local legacy = view.books[1]
+        assert.are.equal("Legacy", legacy.title)
+        assert.are.equal(1, #legacy.notes)
+        assert.are.equal("kept, with a note", legacy.notes[1].text)
+        assert.are.equal("my thought", legacy.notes[1].note)
+        fm:onClose()
+
+        table.remove(ReadHistory.hist, ReadHistory:getIndexByFile(ffiUtil.realpath(path)))
     end)
 
     it("shows sync and transfer entries, plugins that are off as disabled", function()
