@@ -18,6 +18,7 @@ local MarkdownExporter = require("base"):new{
             underscore = "underline_markdownit",
             strikeout  = "strikethrough",
             invert     = "bold",
+            wave       = "underline_markdownit",
         },
     },
 }

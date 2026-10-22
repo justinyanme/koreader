@@ -35,7 +35,9 @@ local BottomSheet = InputContainer:extend{
     title = nil,
     content = nil, -- widget
     on_close = nil, -- function, called once the sheet is closed
+    on_back = nil, -- function; when set, the header starts with a back button
     close_on_scrim = true,
+    bottom_inset = 0, -- height kept free at the screen bottom, e.g. for the on-screen keyboard
 }
 
 function BottomSheet.getContentWidth()
@@ -46,7 +48,7 @@ function BottomSheet:init()
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     self.ges_events.TapScrim = { GestureRange:new{ ges = "tap", range = self.dimen } }
     if Device:hasKeys() then
-        self.key_events.Close = { { Device.input.group.Back } }
+        self.key_events.BackKey = { { Device.input.group.Back } }
     end
     self:build()
 end
@@ -56,15 +58,17 @@ function BottomSheet:build()
     local close_size = Screen:scaleBySize(24)
     local close_pad = Screen:scaleBySize(10)
     local content_w = self.getContentWidth()
+    local back_w = self.on_back and close_size + close_pad or 0
+    local title_w = content_w - close_size - close_pad - back_w
     local title = TextWidget:new{
         text = self.title or "",
         face = Font:getFace("ui_title"),
         fgcolor = Palette.ink,
-        max_width = content_w - close_size - close_pad,
+        max_width = title_w,
     }
     local header = HorizontalGroup:new{
         LeftContainer:new{
-            dimen = Geom:new{ w = content_w - close_size - close_pad, h = Screen:scaleBySize(54) },
+            dimen = Geom:new{ w = title_w, h = Screen:scaleBySize(54) },
             title,
         },
         IconButton:new{
@@ -77,6 +81,17 @@ function BottomSheet:build()
             callback = function() self:onClose() end,
         },
     }
+    if self.on_back then
+        table.insert(header, 1, IconButton:new{
+            icon = "eink/back",
+            width = close_size,
+            height = close_size,
+            padding_left = 0,
+            padding_right = close_pad,
+            allow_flash = false,
+            callback = function() self.on_back() end,
+        })
+    end
     local radius = Screen:scaleBySize(16)
     local border = Screen:scaleBySize(1)
     self.frame = FrameContainer:new{
@@ -96,8 +111,9 @@ function BottomSheet:build()
         },
     }
     local size = self.frame:getSize()
-    local max_h = math.floor(Screen:getHeight() * 0.84) + radius + border
-    self.sheet_y = Screen:getHeight() + radius + border - math.min(size.h, max_h)
+    local avail_h = Screen:getHeight() - self.bottom_inset
+    local max_h = math.floor(avail_h * 0.84) + radius + border
+    self.sheet_y = avail_h + radius + border - math.min(size.h, max_h)
 end
 
 --- The on-screen rect of the sheet: what show, update and close refresh.
@@ -132,6 +148,16 @@ end
 
 function BottomSheet:onTapScrim(_, ges)
     if ges.pos.y < self.sheet_y and self.close_on_scrim then
+        self:onClose()
+    end
+    return true
+end
+
+-- Back goes to the previous page when there is one, else closes the sheet.
+function BottomSheet:onBackKey()
+    if self.on_back then
+        self.on_back()
+    else
         self:onClose()
     end
     return true

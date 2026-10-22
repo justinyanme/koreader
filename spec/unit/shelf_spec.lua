@@ -284,12 +284,16 @@ describe("Shelf home (FileManager replacement)", function()
             end)
 
             it("lands on 文件 for Show folder, with the book focused", function()
-                ReaderUI:doShowReader(sample)
-                filemanagerutil.genShowFolderButton(sample, function() end).callback()
+                local book = ffiUtil.realpath(sample) -- as listed: spec/front is a symlink
+                ReaderUI:doShowReader(book)
+                filemanagerutil.genShowFolderButton(book, function() end).callback()
                 local fm = FileManager.instance
                 assert.are.equal("files", fm.current_tab)
                 assert.are.equal(ffiUtil.realpath("spec/front/unit/data"), fm.file_chooser.path)
                 assert.is_nil(FileManager.open_on_files)
+                local fc = fm.file_chooser
+                assert.is_true(fc:getFocusItem().focused)
+                assert.are.equal(book, fc.item_table[(fc.page - 1) * fc.perpage + fc.selected.y].path)
                 fm:onClose()
             end)
 
