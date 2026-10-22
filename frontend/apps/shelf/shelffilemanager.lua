@@ -182,6 +182,12 @@ end
 ShelfFileManager.onRefreshContent = ShelfFileManager.onRefresh
 ShelfFileManager.onBookMetadataChanged = ShelfFileManager.onRefresh
 
+--- The reorganized settings (apps/settings/einksettings), on an optional group or row id; 我的 → 设置 opens it.
+function ShelfFileManager:onShowEinkSettings(target)
+    require("apps/settings/einksettings").show(self, self.menu, target)
+    return true
+end
+
 function ShelfFileManager:onCloseWidget()
     self.shelf_view:stop()
     -- the file browser is out of the widget tree while 书架 shows: it needs its CloseWidget too
