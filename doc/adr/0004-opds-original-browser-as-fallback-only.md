@@ -1,6 +1,6 @@
 # 书源新界面只覆盖"远程书架"，原版 OPDS 浏览器只做兜底、不改动
 
-OPDS 插件的新界面（书源）只重做界面层，协议层（opdsclient / opdsparser / cookiejar）保持不动。新界面只覆盖三件事：浏览、搜索、下载书源里的书。同步书源到文件夹、PSE 流式阅读、下载队列这三项不进新界面，只能从原版入口里的原版 OPDS 浏览器使用。我们不为原版浏览器改上游的 `opdsbrowser.lua`，这样每月合并上游时不会多出冲突。
+OPDS 插件的新界面（书源）只重做界面层，协议层（opdsclient / opdsparser / cookiejar）保持不动。唯一的例外是 `opdsclient.lua` 的一处改动：新增 `auth_headers`，只发给同源地址，因为 Service Token 绝不能泄露到其他源（见 #24）；协议层其余部分都不动。新界面只覆盖三件事：浏览、搜索、下载书源里的书。同步书源到文件夹、PSE 流式阅读、下载队列这三项不进新界面，只能从原版入口里的原版 OPDS 浏览器使用。我们不为原版浏览器改上游的 `opdsbrowser.lua`，这样每月合并上游时不会多出冲突。
 
 ## Consequences
 
