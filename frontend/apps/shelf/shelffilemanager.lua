@@ -3,13 +3,18 @@ The redesigned home: FileManager with a bottom tab bar (书架 / 文件 / 我的
 
 Requiring this module registers it in apps/replacements. It keeps the
 original FileManager layout as the 文件 tab, so modules and plugins that rely
-on file_chooser keep working, and the original menu stays reachable.
+on file_chooser keep working, and the original menu stays reachable. Anything
+that moves file_chooser to a folder (Show folder, search results, shortcuts,
+plugins) brings the 文件 tab forward, and input meant for the file browser
+(swipe, Back, Home) only reaches it while it is showing.
 
 Each tab's `open(fm)` returns the widget for the content area, or nil when the
 tab opens something on top instead. #10 and #11 replace the files and me tabs.
 ]]
 
+local BD = require("ui/bidi")
 local Device = require("device")
+local Event = require("ui/event")
 local FileManager = require("apps/filemanager/filemanager")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
@@ -20,6 +25,7 @@ local ShelfWidgets = require("apps/shelf/shelfwidgets")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
+local lfs = require("libs/libkoreader-lfs")
 local _ = require("gettext")
 
 local ShelfFileManager = FileManager:extend{
@@ -36,6 +42,18 @@ ShelfFileManager.tabs = {
     -- until #11: the original menu on top of the current tab
     { id = "me", icon = "user", text = _("Me"), open = function(fm) fm.menu:onShowMenu() end },
 }
+
+function ShelfFileManager:init()
+    -- Land on 文件 when asked to show a folder (a folder target, or "Show folder" from the reader,
+    -- which sets the one-shot FileManager.open_on_files); otherwise on 书架.
+    if FileManager.open_on_files
+            or (self.focused_file and lfs.attributes(self.focused_file, "mode") == "directory") then
+        self.current_tab = "files"
+    end
+    FileManager.open_on_files = nil
+    FileManager.init(self)
+    self.initialized = true
+end
 
 function ShelfFileManager:setupLayout()
     local tabbar_h = ShelfWidgets.TabBar.height
@@ -92,14 +110,46 @@ function ShelfFileManager:switchTab(id)
     end
 end
 
--- file_chooser handles Back itself while the 文件 tab shows it
+-- file_chooser moved to a folder: show it (skipping the initial PathChanged sent by init)
+function ShelfFileManager:onPathChanged(path)
+    FileManager.onPathChanged(self, path)
+    if self.initialized then
+        self:switchTab("files")
+    end
+end
+
+function ShelfFileManager:onSwipeFM(ges)
+    if self.current_tab == "files" then
+        return FileManager.onSwipeFM(self, ges)
+    end
+    local direction = BD.flipDirectionIfMirroredUILayout(ges.direction)
+    if direction == "west" then
+        self.shelf_view:turnPage(1)
+    elseif direction == "east" then
+        self.shelf_view:turnPage(-1)
+    end
+    return true
+end
+
+-- Only reached on 书架 (file_chooser handles Back itself while 文件 shows it).
+-- "Parent folder" means nothing here, so Back exits or prompts as by default.
 function ShelfFileManager:onBack()
-    return self.file_chooser:onBack()
+    if G_reader_settings:readSetting("back_in_filemanager", "default") == "default" then
+        return self.file_chooser:onBack()
+    end
+    return true
+end
+
+function ShelfFileManager:onHome()
+    if self.current_tab == "files" then
+        return FileManager.onHome(self)
+    end
+    return true
 end
 
 function ShelfFileManager:onRefresh()
     FileManager.onRefresh(self)
-    self.shelf_view:reload()
+    self.shelf_view:reload(true)
     self.shelf_view:update(self.current_tab == "shelf" and "header" or nil)
     return true
 end
@@ -109,6 +159,11 @@ ShelfFileManager.onBookMetadataChanged = ShelfFileManager.onRefresh
 
 function ShelfFileManager:onCloseWidget()
     self.shelf_view:stop()
+    -- the file browser is out of the widget tree while 书架 shows: it needs its CloseWidget too
+    -- (CoverBrowser stops its jobs and timers there)
+    if self.content[1] ~= self.files_ui then
+        self.files_ui:handleEvent(Event:new("CloseWidget"))
+    end
     FileManager.onCloseWidget(self)
 end
 

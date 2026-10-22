@@ -282,6 +282,7 @@ function filemanagerutil.genShowFolderButton(file, caller_callback, button_disab
             else
                 ui = require("apps/reader/readerui").instance
                 ui:onClose()
+                require("apps/filemanager/filemanager").open_on_files = true -- one-shot hint for a replacement home
                 ui:showFileManager(file)
             end
         end,
