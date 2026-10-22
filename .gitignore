@@ -41,3 +41,6 @@ i18n
 /.cproject
 /.project
 .gitignore~
+
+# design review screenshots (regenerated)
+.impeccable/review/

@@ -1,0 +1,1942 @@
+<title>KOReader 墨水屏改版</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@400;600;700&family=Noto+Serif:ital,wght@0,400;0,700;1,400&family=Noto+Sans:wght@400;500;700&display=swap">
+<style>
+:root{
+  /* Layout: a quiet control column beside a scaled e-ink device. The screen is laid out in dp at 1:1 and scaled to fit. Single light look on purpose: it depicts a physical panel. */
+  --desk:#D8D9D5; --desk-2:#CBCCC7; --desk-ink:#1B1C1A; --desk-muted:#575854; --desk-rule:#B7B8B3;
+  --signal:#D9481F;
+  --bezel:#1E1E1D;
+  --paper:#F1F1EC; --ink:#151515; --ink-2:#565653; --ink-3:#9A9A96; --rule:#C4C4BF; --mark:#C6C6C1; --bubble-rule:#4A4A47;
+  --ui:"Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+  --serif:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  /* English books read in KOReader's bundled Latin faces; CJK stacks would set English quotes full-width. */
+  --serif-en:"Noto Serif",Georgia,"Noto Serif SC",serif;
+  --sans-en:"Noto Sans","Helvetica Neue",Arial,"Noto Sans SC",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--desk);color:var(--desk-ink);font-family:var(--ui);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+[hidden]{display:none!important}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer;-webkit-tap-highlight-color:transparent;text-align:inherit}
+button:disabled{cursor:default}
+::selection{background:var(--desk-ink);color:var(--desk)}
+:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+
+/* ---------- stage ---------- */
+.stage{min-height:100%;display:grid;grid-template-columns:292px minmax(0,1fr);gap:44px;align-items:start;align-content:start;max-width:1500px;margin:0 auto;padding-block:28px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.device-area{min-width:0;display:flex;justify-content:center;position:sticky;top:28px}
+.panel{display:flex;flex-direction:column}
+@media (max-width:900px){
+  .stage{grid-template-columns:minmax(0,1fr);gap:28px;padding-block:16px}
+  .device-area{order:-1;position:static}
+}
+.panel h1{font-size:20px;line-height:1.3;margin:0 0 6px;font-weight:700;text-wrap:balance}
+.panel .lede{margin:0;color:var(--desk-muted);font-size:13px;text-wrap:pretty}
+.psec{padding-top:18px;padding-bottom:18px;border-top:1px solid var(--desk-rule)}
+.psec:first-child{border-top:0;padding-top:0}
+.psec h2{font-size:12px;letter-spacing:.06em;color:var(--desk-muted);font-weight:500;margin:0 0 10px}
+.seg-d{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--desk-ink);border-radius:8px;overflow:hidden}
+.seg-d button{height:36px;text-align:center;font-size:13px}
+.seg-d button+button{border-left:1px solid var(--desk-ink)}
+.seg-d button[aria-pressed="true"]{background:var(--desk-ink);color:var(--desk)}
+.seg-d button:not([aria-pressed="true"]):hover{background:var(--desk-2)}
+.caption{font-size:12px;color:var(--desk-muted);margin:8px 0 0;font-variant-numeric:tabular-nums}
+.switch-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.switch-row label{font-size:14px;font-weight:500}
+.pswitch{width:40px;height:24px;border-radius:12px;border:1.5px solid var(--desk-ink);position:relative;flex:none}
+.pswitch::after{content:"";position:absolute;top:3px;left:3px;width:15px;height:15px;border-radius:50%;background:var(--desk-ink)}
+.pswitch[aria-checked="true"]{background:var(--signal);border-color:var(--signal)}
+.pswitch[aria-checked="true"]::after{left:18px;background:#fff}
+.rflog{list-style:none;margin:12px 0 0;padding:0;font-size:12px;font-variant-numeric:tabular-nums}
+.rflog li{display:grid;grid-template-columns:1fr auto auto;gap:10px;padding:5px 0;border-top:1px solid var(--desk-rule)}
+.rflog li:first-child{border-top:0}
+.rflog .t{color:var(--desk-muted)}
+.rflog .a{min-width:38px;text-align:right}
+.rflog .empty{display:block;color:var(--desk-muted)}
+.rfsum{margin-top:8px;font-size:12px;color:var(--desk-muted)}
+.jumps{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.jumps button{height:34px;border:1px solid var(--desk-rule);border-radius:8px;padding:0 10px;font-size:13px;text-align:left}
+.jumps button:hover{border-color:var(--desk-ink)}
+.psec .ctx-name{font-size:16px;font-weight:700;margin:0;line-height:1.35;letter-spacing:0;color:var(--desk-ink)}
+.ctx-what{font-size:13px;color:var(--desk-muted);margin:4px 0 0;text-wrap:pretty}
+.ctx-path{font-family:var(--mono);font-size:11.5px;margin:6px 0 0;color:var(--desk-ink);overflow-wrap:normal;word-break:normal}
+.switch-row+.switch-row{margin-top:12px}
+.seg-d .fitbtn{display:none}
+@media (max-width:600px){.seg-d{grid-template-columns:repeat(4,1fr)}.seg-d .fitbtn{display:block}}
+.device.fit{padding:10px 8px 22px;border-radius:18px}
+.hints{margin:0;padding:0;list-style:none;font-size:13px;color:var(--desk-muted);display:grid;gap:4px}
+.hints b{color:var(--desk-ink);font-weight:500}
+.source{font-size:12px;color:var(--desk-muted);margin:0;text-wrap:pretty}
+
+/* ---------- device ---------- */
+.device-wrap{position:relative;flex:none}
+.device{position:absolute;left:0;top:0;transform-origin:0 0;background:var(--bezel);border-radius:30px;padding:24px 22px 56px}
+.screen{position:relative;width:var(--sw);height:var(--sh);overflow:hidden;background:var(--paper);color:var(--ink);font-family:var(--ui);font-size:15px;line-height:1.45;border-radius:2px;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.inner{position:absolute;inset:0;background:var(--paper)}
+/* Night mode inverts pixels like KOReader; grayscale keeps the inverted paper neutral on a monochrome panel. */
+.screen.night .inner{filter:invert(1) grayscale(1)}
+/* Front-light warmth tints the light, not the pixels, so it sits outside the inversion. */
+.screen::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:52;background:rgb(255 160 70 / var(--warm-a,0));mix-blend-mode:multiply}
+.screen :focus-visible{outline:2px solid var(--ink);outline-offset:-3px}
+.ic{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ic.sm{width:18px;height:18px}
+.ic.xs{width:15px;height:15px}
+
+.sys{position:absolute;top:0;left:0;right:0;height:24px;padding:0 16px;display:flex;align-items:center;justify-content:space-between;font-size:12px;font-variant-numeric:tabular-nums;z-index:2}
+.sys .r{display:flex;align-items:center;gap:6px}
+.batt{width:22px;height:11px;border:1.3px solid currentColor;border-radius:2.5px;position:relative;display:inline-block}
+.batt::before{content:"";position:absolute;inset:1.5px;right:auto;width:calc(var(--b,76%) - 3px);background:currentColor;border-radius:1px}
+.batt::after{content:"";position:absolute;right:-3.5px;top:3px;width:2px;height:3.5px;background:currentColor;border-radius:0 1px 1px 0}
+
+.view{position:absolute;top:24px;left:0;right:0;bottom:56px;display:flex;flex-direction:column}
+.tabbar{position:absolute;left:0;right:0;bottom:0;height:56px;border-top:1px solid var(--ink);display:grid;grid-template-columns:repeat(3,1fr);background:var(--paper);z-index:3}
+.tabbar button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;color:var(--ink-2)}
+.tabbar button[aria-current="page"]{color:var(--ink);font-weight:700}
+.tabbar button[aria-current="page"] .ic{stroke-width:2.2}
+
+/* shelf */
+.shelf-head{padding:12px 24px 0;display:flex;flex-direction:column;gap:12px}
+.search-row{display:flex;gap:10px;align-items:center}
+.searchbox{flex:1;height:40px;border:1.5px solid var(--ink);border-radius:20px;display:flex;align-items:center;gap:8px;padding:0 14px;color:var(--ink-2);font-size:14px}
+.iconbtn{width:44px;height:44px;display:grid;place-items:center;border-radius:22px;flex:none}
+.chips{display:flex;gap:8px}
+.chip{height:30px;padding:0 13px;border:1px solid var(--ink);border-radius:15px;font-size:13px;display:inline-flex;align-items:center;gap:4px;font-variant-numeric:tabular-nums}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.chip .n{opacity:.75}
+.grid{flex:1;min-height:0;padding:18px 24px 0;display:grid;grid-template-columns:repeat(var(--cols),var(--cw));justify-content:space-between;align-content:start;row-gap:18px;overflow:hidden}
+.book{display:flex;flex-direction:column;width:var(--cw);text-align:left}
+.book .bt{margin-top:8px;font-size:13px;line-height:1.35;font-weight:500;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.book .bm{font-size:11.5px;color:var(--ink-2);margin-top:2px;font-variant-numeric:tabular-nums}
+.empty-state{grid-column:1/-1;padding:48px 0;text-align:center;color:var(--ink-2);font-size:14px}
+
+/* covers: grayscale, typographic */
+.cover{position:relative;width:var(--cw);height:calc(var(--cw)*4/3);overflow:hidden;border-radius:3px;font-family:var(--serif);background:#E2E2DD;color:var(--ink);flex:none}
+.cover.en{font-family:var(--serif-en)}
+.cover::after{content:"";position:absolute;inset:0;border:1px solid rgb(21 21 21 / .2);border-radius:3px;pointer-events:none}
+.cv-frame .in{position:absolute;inset:calc(var(--cw)*.07);border:1.5px solid var(--ink);display:flex;flex-direction:row-reverse;align-items:flex-start;justify-content:center;gap:calc(var(--cw)*.06);padding:calc(var(--cw)*.14) 0 calc(var(--cw)*.09)}
+.cv-frame .in::before{content:"";position:absolute;inset:3px;border:.5px solid var(--ink)}
+.cv-frame .t{writing-mode:vertical-rl;font-size:min(calc(var(--cw)*.17),calc(var(--cw)*.86 / var(--n,4)));font-weight:700;letter-spacing:.1em;line-height:1}
+.cv-frame .a{writing-mode:vertical-rl;align-self:flex-end;font-size:calc(var(--cw)*.068);letter-spacing:.12em;line-height:1}
+.cv-frame.en .in{flex-direction:column;align-items:center;justify-content:center;gap:calc(var(--cw)*.1);padding:0 9%}
+.cv-frame.en .t{writing-mode:horizontal-tb;font-size:calc(var(--cw)*.12);letter-spacing:0;line-height:1.15;text-align:center}
+.cv-frame.en .a{writing-mode:horizontal-tb;align-self:center;letter-spacing:.04em;font-size:calc(var(--cw)*.065);font-family:var(--ui)}
+.cv-band{background:var(--ink);color:var(--paper)}
+.cv-band .t{position:absolute;left:10%;right:10%;top:12%;font-size:calc(var(--cw)*.14);font-weight:700;line-height:1.15}
+.cv-band .r{position:absolute;left:10%;right:10%;bottom:22%;border-top:1px solid var(--paper)}
+.cv-band .a{position:absolute;left:10%;right:10%;bottom:9%;font-size:calc(var(--cw)*.07);font-family:var(--ui)}
+.cv-block{background:#8B8B87;color:var(--paper)}
+.cv-block .t{position:absolute;left:9%;right:9%;bottom:24%;font-family:var(--ui);font-weight:700;font-size:calc(var(--cw)*.15);line-height:1.08}
+.cv-block .a{position:absolute;left:9%;top:9%;font-family:var(--ui);font-size:calc(var(--cw)*.068)}
+.cv-split .g{position:absolute;left:0;right:0;top:0;height:60%;background:#BBBBB6;overflow:hidden}
+.cv-split .g span{position:absolute;right:-6%;bottom:-22%;font-size:calc(var(--cw)*.9);font-weight:700;line-height:1;color:var(--paper)}
+.cv-split .t{position:absolute;left:9%;right:9%;top:65%;font-size:calc(var(--cw)*.105);font-weight:700;line-height:1.2}
+.cv-split .a{position:absolute;left:9%;bottom:7%;font-size:calc(var(--cw)*.062);font-family:var(--ui);color:var(--ink-2)}
+.cv-stripe{background:repeating-linear-gradient(0deg,var(--ink) 0 2px,#E2E2DD 2px 7px)}
+.cv-stripe .box{position:absolute;left:12%;right:12%;top:30%;bottom:30%;background:#E2E2DD;border:1.5px solid var(--ink);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6%;text-align:center;padding:4%}
+.cv-stripe .t{font-size:calc(var(--cw)*.11);font-weight:700;line-height:1.15}
+.cv-stripe .a{font-size:calc(var(--cw)*.06);font-family:var(--ui)}
+
+.pager{height:44px;flex:none;display:flex;align-items:center;justify-content:center;gap:14px;font-size:13px;font-variant-numeric:tabular-nums}
+.pager button{width:44px;height:32px;border:1px solid var(--ink);border-radius:16px;display:grid;place-items:center}
+.pager button:disabled{border-color:var(--rule);color:var(--ink-3)}
+.pager .n{min-width:54px;text-align:center}
+
+/* lists */
+.page-title{padding:14px 24px 6px;font-size:22px;font-weight:700;line-height:1.3}
+.crumbs{padding:0 24px 8px;font-size:12.5px;color:var(--ink-2);display:flex;gap:6px;flex-wrap:wrap}
+.crumbs button{text-decoration:underline;text-underline-offset:3px}
+.list{flex:1;min-height:0;overflow:hidden;padding:0 24px}
+.row{width:100%;min-height:56px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--rule);padding:8px 0;text-align:left}
+.row .main{flex:1;min-width:0}
+.row .l1{font-size:15px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .l2{font-size:12px;color:var(--ink-2);margin-top:2px;font-variant-numeric:tabular-nums}
+.row .val{font-size:13px;color:var(--ink-2);white-space:nowrap}
+.row .chev{color:var(--ink-3)}
+.fmt{width:44px;height:32px;border:1px solid var(--ink);border-radius:4px;display:grid;place-items:center;font-size:10px;font-weight:700;letter-spacing:.04em;flex:none}
+.grp{font-size:12px;color:var(--ink-2);padding:18px 0 6px;border-bottom:1px solid var(--ink)}
+.grp:first-child{padding-top:6px}
+
+/* me */
+.me-stats{padding:4px 24px 14px;border-bottom:1px solid var(--ink)}
+.me-stats .hd{display:flex;justify-content:space-between;align-items:baseline}
+.me-stats .hd b{font-size:15px}
+.me-stats .hd span{font-size:13px;font-variant-numeric:tabular-nums}
+.week{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;height:118px;align-items:end;margin-top:12px}
+.week .d{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.week .bar{width:60%;background:var(--ink);border-radius:2px 2px 0 0}
+.week .bar.future{background:none;border:1px dashed var(--ink-3);border-bottom:0;height:6px}
+.week .d.today{color:var(--ink);font-weight:700}
+.me-sub{font-size:12px;color:var(--ink-2);margin-top:10px}
+
+/* subpage */
+.sub{position:absolute;inset:0;background:var(--paper);z-index:35;display:flex;flex-direction:column}
+.navbar{height:52px;margin-top:24px;display:grid;grid-template-columns:52px 1fr 52px;align-items:center;border-bottom:1px solid var(--ink);flex:none}
+.navbar h2{margin:0;font-size:16px;font-weight:700;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.navbar .iconbtn{margin-left:4px}
+.sub .list{padding-top:4px}
+.toggle{width:42px;height:26px;border-radius:13px;border:1.5px solid var(--ink);position:relative;flex:none}
+.toggle::after{content:"";position:absolute;top:3.5px;left:4px;width:16px;height:16px;border-radius:50%;background:var(--ink)}
+.toggle[aria-checked="true"]{background:var(--ink)}
+.toggle[aria-checked="true"]::after{left:19px;background:var(--paper)}
+.searchfield{margin:12px 24px 4px;height:42px;border:1.5px solid var(--ink);border-radius:21px;display:flex;align-items:center;gap:8px;padding:0 6px 0 14px;flex:none}
+.searchfield input{flex:1;min-width:0;border:0;background:none;font:inherit;font-size:15px;color:var(--ink);outline:none;height:100%}
+.searchfield input::placeholder{color:var(--ink-2)}
+.searchfield button.go{height:32px;padding:0 14px;border-radius:16px;background:var(--ink);color:var(--paper);font-size:13px}
+.res{display:block;width:100%;text-align:left;padding:12px 0;border-bottom:1px solid var(--rule)}
+.res .where{font-size:12px;color:var(--ink-2)}
+.res .snip{font-family:var(--serif);font-size:14.5px;line-height:1.6;margin-top:2px}
+.res .snip b{background:var(--ink);color:var(--paper);font-weight:400;padding:0 1px}
+.vocab{padding:12px 0;border-bottom:1px solid var(--rule)}
+.vocab .w{font-size:17px;font-weight:700;font-family:var(--serif)}
+.vocab .c{font-family:var(--serif);font-size:13.5px;color:var(--ink-2);margin-top:2px}
+.vocab .s{font-size:11.5px;color:var(--ink-2);margin-top:4px}
+
+/* reader */
+.reader{position:absolute;inset:0;background:var(--paper);z-index:10}
+.rhead{position:absolute;top:14px;left:var(--mx);right:var(--mx);font-size:12px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pagevp{position:absolute;top:44px;bottom:42px;left:var(--mx);right:var(--mx);overflow:hidden;touch-action:none}
+.flow{height:100%;column-fill:auto;font-family:var(--rf);font-size:var(--fs);line-height:var(--lh);text-align:justify;color:var(--ink);hanging-punctuation:allow-end}
+.flow p{margin:0 0 .45em;text-indent:2em}
+.flow [lang="en"]{font-family:var(--rf-en)}
+.flow [lang="en"] p{text-indent:1.5em;margin:0;hyphens:auto;-webkit-hyphens:auto}
+.flow [lang="en"] h2+p{text-indent:0}
+.flow .ch-title{font-size:1.5em;line-height:1.35;font-weight:700;margin:1.6em 0 1.3em;text-indent:0;break-after:avoid;text-align:left;text-wrap:balance}
+.measurevp{visibility:hidden;pointer-events:none;z-index:-1}
+.rscrim{position:absolute;inset:0;z-index:15}
+.rfoot{position:absolute;bottom:13px;left:var(--mx);right:var(--mx);display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.rfoot .r{display:flex;align-items:center;gap:8px}
+.dogear{position:absolute;top:0;right:0;width:30px;height:30px;background:var(--ink);clip-path:polygon(0 0,100% 0,100% 100%);z-index:2}
+mark.hl{background:none;color:inherit}
+mark.hl-marker{background:var(--mark)}
+mark.hl-line{text-decoration:underline 2px var(--ink);text-underline-offset:.3em;text-decoration-skip-ink:none}
+mark.hl-wave{text-decoration:underline wavy 1.3px var(--ink);text-underline-offset:.32em;text-decoration-skip-ink:none}
+mark.note-end::after{content:"";display:inline-block;width:.72em;height:.72em;margin-left:.12em;vertical-align:.45em;background:var(--ink);-webkit-mask:var(--note-glyph) center/contain no-repeat;mask:var(--note-glyph) center/contain no-repeat}
+::highlight(sel){background-color:#151515;color:#F1F1EC}
+::highlight(flash){background-color:#151515;color:#F1F1EC}
+
+.tb-top{position:absolute;top:0;left:0;right:0;height:56px;background:var(--paper);border-bottom:1px solid var(--ink);display:flex;align-items:center;padding:0 8px;z-index:20}
+.tb-top .sp{flex:1}
+.tb-bottom{position:absolute;bottom:0;left:0;right:0;height:76px;background:var(--paper);border-top:1px solid var(--ink);display:grid;grid-template-columns:repeat(4,1fr);z-index:20}
+.tb-bottom button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;font-size:12px}
+
+.scrim{position:absolute;inset:0;z-index:25}
+.sheet{position:absolute;left:-1px;right:-1px;bottom:-1px;z-index:30;background:var(--paper);border:1px solid var(--ink);border-radius:16px 16px 0 0;padding:0 24px 20px;max-height:84%;display:flex;flex-direction:column}
+.sheet-head{height:54px;display:flex;align-items:center;justify-content:space-between;flex:none}
+.sheet-head h3{margin:0;font-size:16px;font-weight:700}
+.sheet-head .iconbtn{margin-right:-12px}
+.srow{display:grid;grid-template-columns:56px 1fr;align-items:center;gap:10px;min-height:52px}
+.srow>.lab{font-size:13px;color:var(--ink-2)}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;border:1.5px solid var(--ink);border-radius:19px;height:38px;overflow:hidden}
+.seg button{font-size:13.5px;display:flex;align-items:center;justify-content:center;gap:6px}
+.seg button+button{border-left:1px solid var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.stepper{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;align-items:center;gap:8px}
+.stepper>button{height:38px;border:1.5px solid var(--ink);border-radius:19px;display:grid;place-items:center;font-family:var(--serif)}
+.stepper>button:disabled{border-color:var(--rule);color:var(--ink-3)}
+.ticks{position:relative;height:38px;display:flex;align-items:center;justify-content:space-between;padding:0 6px}
+.ticks::before{content:"";position:absolute;left:6px;right:6px;top:50%;border-top:1.5px solid var(--ink)}
+.ticks button{position:relative;flex:1 1 0;min-width:0;max-width:26px;height:38px;display:grid;place-items:center}
+.ticks button::after{content:"";width:7px;height:7px;border-radius:50%;background:var(--paper);border:1.5px solid var(--ink)}
+.ticks button.on::after{width:16px;height:16px;background:var(--ink)}
+.ticks button.past::after{background:var(--ink)}
+.fonts{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.fonts button{height:66px;border:1px solid var(--rule);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.fonts button[aria-pressed="true"]{border:2px solid var(--ink)}
+.fonts .smp{font-size:20px;line-height:1.2}
+.fonts .nm{font-size:11.5px;color:var(--ink-2)}
+.linkrow{display:flex;align-items:center;justify-content:space-between;height:48px;border-top:1px solid var(--rule);margin-top:10px;font-size:14px;width:100%}
+.btns{display:flex;gap:10px;margin-top:14px}
+.btn{height:40px;padding:0 16px;border:1.5px solid var(--ink);border-radius:20px;font-size:14px;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn.solid{background:var(--ink);color:var(--paper)}
+.btn.grow{flex:1}
+
+.drawer{position:absolute;top:0;bottom:0;left:0;width:min(86%,560px);z-index:30;background:var(--paper);border-right:1px solid var(--ink);display:flex;flex-direction:column}
+.dhead{display:flex;gap:14px;padding:22px 24px 16px;align-items:center}
+.dhead .cover{--cw:52px;border-radius:2px}
+.dhead .tt{font-size:17px;font-weight:700;line-height:1.3}
+.dhead .aa{font-size:13px;color:var(--ink-2)}
+.dhead .pp{font-size:12px;color:var(--ink-2);margin-top:4px;font-variant-numeric:tabular-nums}
+.tabs{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;border-bottom:1px solid var(--ink);margin:0 24px;flex:none}
+.tabs button{height:44px;font-size:14px;color:var(--ink-2);position:relative;text-align:center}
+.tabs button[aria-selected="true"]{color:var(--ink);font-weight:700}
+.tabs button[aria-selected="true"]::after{content:"";position:absolute;left:30%;right:30%;bottom:-1px;height:3px;background:var(--ink)}
+.tocrow{width:100%;min-height:50px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--rule);text-align:left;font-size:15px}
+.tocrow .tl{flex:1;min-width:0}
+.tocrow .pg{font-size:12.5px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.tocrow.cur{font-weight:700}
+.tocrow.cur .pg{color:var(--ink)}
+.tocrow.na{color:var(--ink-3)}
+.tag{font-size:11px;border:1px solid var(--ink);border-radius:9px;padding:0 7px;line-height:17px;font-weight:500}
+.note{display:block;width:100%;text-align:left;padding:12px 0;border-bottom:1px solid var(--rule)}
+.note .q{font-family:var(--serif);font-size:14.5px;line-height:1.65;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.note .q .sw{display:inline-block;width:18px;height:10px;margin-right:6px;vertical-align:1px}
+.note .t{font-size:13.5px;margin-top:6px;line-height:1.55}
+.note .t b{font-weight:700;margin-right:4px}
+.note .m{font-size:11.5px;color:var(--ink-2);margin-top:4px;font-variant-numeric:tabular-nums}
+.sw.marker{background:var(--mark)}
+.sw.line{border-bottom:2px solid var(--ink)}
+.sw.wave{background:var(--wave-glyph) left bottom/12px 5px repeat-x}
+.nothing{padding:40px 8px;text-align:center;color:var(--ink-2);font-size:14px;line-height:1.7}
+.nothing b{display:block;color:var(--ink);font-size:15px;margin-bottom:4px}
+
+.bubble{position:absolute;z-index:40;background:var(--ink);color:var(--paper);border-radius:10px;display:flex;flex-direction:column}
+.bubble::after{content:"";position:absolute;left:calc(var(--ax) - 7px);border:7px solid transparent}
+.bubble[data-place="above"]::after{top:100%;border-top-color:var(--ink)}
+.bubble[data-place="below"]::after{bottom:100%;border-bottom-color:var(--ink)}
+.bubble .brow{display:flex}
+.bubble .brow+.brow{border-top:1px solid var(--bubble-rule)}
+.bubble .brow button{height:44px;padding:0 13px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;flex:1}
+.bubble .brow button+button{border-left:1px solid var(--bubble-rule)}
+.bubble .styles button{gap:0}
+.bubble .styles .s{font-family:var(--serif);font-size:15px;padding:0 3px;line-height:1.4}
+.bubble .styles .s.marker{background:#8E8E8A}
+.bubble .styles .s.line{text-decoration:underline 2px var(--paper);text-underline-offset:4px}
+.bubble .styles .s.wave{text-decoration:underline wavy 1.3px var(--paper);text-underline-offset:4px}
+.bubble .styles button[aria-pressed="true"]{box-shadow:inset 0 0 0 2px var(--paper);border-radius:8px}
+
+.dict-w{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.dict-w .w{font-family:var(--serif);font-size:26px;font-weight:700;line-height:1.2}
+.dict-w .ph{font-size:13.5px;color:var(--ink-2)}
+.dict-m{font-size:12px;color:var(--ink-2);margin-top:4px}
+.dtabs{display:flex;gap:8px;margin:12px 0 4px}
+.sense{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;padding:10px 0;border-bottom:1px solid var(--rule)}
+.sense .pos{font-size:11px;border:1px solid var(--ink);border-radius:4px;padding:0 5px;line-height:18px;height:20px;margin-top:2px;font-style:italic}
+.sense .en{font-size:15px;line-height:1.5}
+.sense .zh{grid-column:2;font-size:14px;color:var(--ink-2)}
+.fine{font-size:11.5px;color:var(--ink-3);margin-top:10px}
+textarea.notein{width:100%;min-height:118px;border:1.5px solid var(--ink);border-radius:10px;padding:12px;font:inherit;font-size:15px;line-height:1.6;color:var(--ink);background:var(--paper);resize:none;outline:none}
+.quote{font-family:var(--serif);font-size:14px;color:var(--ink-2);line-height:1.6;margin-bottom:12px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.grid4{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.grid4 button{height:84px;border:1px solid var(--rule);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;font-size:13px}
+.kv{display:grid;grid-template-columns:72px 1fr;gap:10px;padding:9px 0;border-bottom:1px solid var(--rule);font-size:14px}
+.kv dt{color:var(--ink-2)}
+.kv dd{margin:0;word-break:break-all}
+.bookhead{display:flex;gap:14px;align-items:center;margin-bottom:6px}
+.bookhead .cover{--cw:56px}
+
+.zones{position:absolute;inset:0;z-index:42;display:grid;grid-template-columns:1fr 1fr 1fr}
+.zones div{border:2px dashed var(--ink);margin:6px;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;background:rgb(241 241 236 / .9);font-size:15px;font-weight:700}
+.zones div span{font-size:12px;font-weight:400;color:var(--ink-2)}
+.toast{position:absolute;left:50%;bottom:96px;transform:translateX(-50%);z-index:45;background:var(--ink);color:var(--paper);padding:10px 18px;border-radius:22px;font-size:14px;max-width:84%;text-align:center;line-height:1.45}
+
+.flash{position:absolute;inset:0;background:#000;z-index:55;opacity:0;pointer-events:none}
+.flash.on{opacity:1}
+.rf-layer{position:absolute;inset:0;z-index:60;pointer-events:none}
+.rf{position:absolute;border:2px dashed var(--signal);border-radius:2px;animation:rf 1.1s ease-out forwards}
+.rf i{position:absolute;left:-2px;top:-2px;transform:translateY(-100%);background:var(--signal);color:#fff;font-style:normal;font-size:11px;line-height:18px;padding:0 6px;border-radius:2px 2px 0 0;white-space:nowrap;font-variant-numeric:tabular-nums}
+.rf.in i{transform:none;border-radius:0 0 2px 0}
+@keyframes rf{0%,60%{opacity:1}100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.rf{animation:none;opacity:1}}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9.5 5.5l6.5 6.5-6.5 6.5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M7 3.5h10v17l-5-4-5 4z"/></symbol>
+  <symbol id="i-bookmark-on" viewBox="0 0 24 24"><path d="M7 3.5h10v17l-5-4-5 4z" fill="currentColor"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="19" cy="12" r="1.3" fill="currentColor"/></symbol>
+  <symbol id="i-toc" viewBox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="4.5" cy="6.5" r="1" fill="currentColor"/><circle cx="4.5" cy="12" r="1" fill="currentColor"/><circle cx="4.5" cy="17.5" r="1" fill="currentColor"/></symbol>
+  <symbol id="i-progress" viewBox="0 0 24 24"><path d="M3.5 12h17"/><circle cx="9" cy="12" r="2.8" fill="var(--paper,#fff)"/><path d="M3.5 8v8M20.5 8v8"/></symbol>
+  <symbol id="i-light" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/></symbol>
+  <symbol id="i-font" viewBox="0 0 24 24"><path d="M2.5 19L8 5h1l5.5 14M4.6 14h7.8"/><path d="M14.5 19l3.4-8.5h.7l3.4 8.5M15.8 16h4.9"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M6 12h12"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></symbol>
+  <symbol id="i-shelf" viewBox="0 0 24 24"><rect x="4" y="4.5" width="4" height="15" rx=".6"/><rect x="10" y="4.5" width="4" height="15" rx=".6"/><path d="M15.6 5.8l3.4-.9 3.3 13.6-3.4.9z"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 6.5a1 1 0 0 1 1-1h4.6l2 2h8.4a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.6"/><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="12" rx="1.5"/><path d="M15.5 8.5V5.5A1.5 1.5 0 0 0 14 4H6A1.5 1.5 0 0 0 4.5 5.5v10A1.5 1.5 0 0 0 6 17h2.5"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20.5h16"/><path d="M7 16.5l9.5-9.5 2.5 2.5-9.5 9.5H7z"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-8l-4 3.5V16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></symbol>
+  <symbol id="i-dict" viewBox="0 0 24 24"><path d="M3.5 5.5c3-1 6-1 8.5 1 2.5-2 5.5-2 8.5-1v13c-3-1-6-1-8.5 1-2.5-2-5.5-2-8.5-1z"/><path d="M12 6.5v13"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M9.5 7V4.5h5V7M7 7l1 12.5h8L17 7"/></symbol>
+  <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 15V4M8 8l4-4 4 4M5 13v6.5h14V13"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><circle cx="12" cy="7.8" r=".9" fill="currentColor"/></symbol>
+  <symbol id="i-zones" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M9.3 3v18M14.7 3v18" stroke-dasharray="2 2"/></symbol>
+  <symbol id="i-stats" viewBox="0 0 24 24"><path d="M6 19v-6M12 19V5M18 19v-9M3.5 19.5h17"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19 12a7 7 0 1 1-2.1-5"/><path d="M19.5 4v4h-4"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+</svg>
+
+<div class="stage">
+  <aside class="panel" aria-label="演示控制">
+    <section class="psec">
+      <h1>KOReader 墨水屏改版</h1>
+      <p class="lede">照着微信读书墨水屏版的交互重做的可点击原型。界面只用黑白灰，所有操作都能在设备屏幕上直接试。</p>
+    </section>
+    <section class="psec">
+      <h2>设备尺寸</h2>
+      <div class="seg-d" id="devSeg" role="group" aria-label="设备尺寸">
+        <button type="button" data-dev="6" aria-pressed="false">6 英寸</button>
+        <button type="button" data-dev="7" aria-pressed="true">7 英寸</button>
+        <button type="button" data-dev="10" aria-pressed="false">10.3 英寸</button>
+        <button type="button" data-dev="fit" class="fitbtn" aria-pressed="false">适配手机</button>
+      </div>
+      <p class="caption" id="devCap"></p>
+    </section>
+    <section class="psec">
+      <div class="switch-row">
+        <label for="rfSwitch">显示刷新区域</label>
+        <button type="button" class="pswitch" id="rfSwitch" role="switch" aria-checked="false"></button>
+      </div>
+      <p class="caption">打开后，每次操作都会框出这一下实际重绘的区域，标出刷新类型和面积占比。全刷会闪屏，每翻 6 页模拟一次；正文、界面、快速三种刷新不闪屏，只是画质和速度不同。</p>
+      <div class="switch-row" style="margin-top:14px">
+        <label for="nightSwitch">夜间模式（反色）</label>
+        <button type="button" class="pswitch" id="nightSwitch" role="switch" aria-checked="false"></button>
+      </div>
+      <ol class="rflog" id="rfLog" aria-live="polite"></ol>
+      <p class="rfsum" id="rfSum"></p>
+    </section>
+    <section class="psec">
+      <h2>直接跳到</h2>
+      <div class="jumps" id="jumps">
+        <button type="button" data-jump="shelf">书架</button>
+        <button type="button" data-jump="read">阅读页</button>
+        <button type="button" data-jump="toolbar">工具栏</button>
+        <button type="button" data-jump="type">排版面板</button>
+        <button type="button" data-jump="notes">目录 · 笔记</button>
+        <button type="button" data-jump="select">划线 · 查词</button>
+        <button type="button" data-jump="me">我的</button>
+        <button type="button" data-jump="settings">设置</button>
+      </div>
+    </section>
+    <section class="psec" aria-live="polite">
+      <h2 class="ctx-name" id="ctxName"></h2>
+      <p class="ctx-what" id="ctxWhat"></p>
+      <p class="ctx-path" id="ctxPath"></p>
+    </section>
+    <section class="psec">
+      <h2>怎么操作</h2>
+      <ul class="hints">
+        <li><b>点左侧 / 右侧</b>：上一页 / 下一页，也可以左右滑动或按方向键</li>
+        <li><b>点中间</b>：呼出工具栏，再点一下收起</li>
+        <li><b>长按文字</b>（或右键）：选词，按住拖动可以扩选</li>
+        <li><b>点已划线的文字</b>：改样式、写想法、删除</li>
+        <li><b>长按封面</b>：书籍操作</li>
+      </ul>
+    </section>
+    <section class="psec">
+      <p class="source">正文：朱自清《经典常谈》取自维基文库，梭罗 <i>Walden</i> 取自古登堡计划，均为公版。书架进度、阅读统计、词典释义和预置笔记都是演示数据。</p>
+    </section>
+  </aside>
+
+  <main class="device-area">
+    <div class="device-wrap" id="deviceWrap">
+      <div class="device" id="device">
+        <div class="screen" id="screen">
+          <div class="inner" id="inner">
+            <div class="sys" id="sys"><span class="clock"></span><span class="r"><span>Wi‑Fi 关</span><span class="batt" style="--b:76%"></span><span>76%</span></span></div>
+
+            <section class="view" id="v-shelf" aria-label="书架">
+              <div class="shelf-head">
+                <div class="search-row">
+                  <button type="button" class="searchbox" id="shelfSearch"><svg class="ic sm"><use href="#i-search"/></svg>搜索书架和文件</button>
+                  <button type="button" class="iconbtn" id="shelfManage" aria-label="书架管理"><svg class="ic"><use href="#i-sliders"/></svg></button>
+                </div>
+                <div class="chips" id="shelfChips" role="group" aria-label="筛选"></div>
+              </div>
+              <div class="grid" id="shelfGrid"></div>
+              <div class="pager" id="shelfPager"></div>
+            </section>
+
+            <section class="view" id="v-files" aria-label="文件" hidden>
+              <div class="page-title">文件</div>
+              <div class="crumbs" id="crumbs"></div>
+              <div class="list" id="fileList"></div>
+              <div class="pager" id="filePager"></div>
+            </section>
+
+            <section class="view" id="v-me" aria-label="我的" hidden>
+              <div class="page-title">我的</div>
+              <div class="me-stats" id="meStats"></div>
+              <div class="list" id="meList"></div>
+            </section>
+
+            <nav class="tabbar" id="tabbar" aria-label="主导航">
+              <button type="button" data-tab="shelf" aria-current="page"><svg class="ic"><use href="#i-shelf"/></svg>书架</button>
+              <button type="button" data-tab="files"><svg class="ic"><use href="#i-folder"/></svg>文件</button>
+              <button type="button" data-tab="me"><svg class="ic"><use href="#i-user"/></svg>我的</button>
+            </nav>
+
+            <section class="reader" id="reader" aria-label="阅读" hidden>
+              <div class="rhead" id="rhead"></div>
+              <div class="pagevp" id="pagevp"><div class="flow" id="flow"></div></div>
+              <div class="rfoot" id="rfoot"></div>
+              <div class="dogear" id="dogear" hidden></div>
+              <div class="rscrim" id="rscrim" hidden></div>
+              <div class="tb-top" id="tbTop" hidden>
+                <button type="button" class="iconbtn" data-act="exit" aria-label="返回书架"><svg class="ic"><use href="#i-back"/></svg></button>
+                <span class="sp"></span>
+                <button type="button" class="iconbtn" data-act="bookmark" aria-label="书签"><svg class="ic"><use href="#i-bookmark"/></svg></button>
+                <button type="button" class="iconbtn" data-act="search" aria-label="全书搜索"><svg class="ic"><use href="#i-search"/></svg></button>
+                <button type="button" class="iconbtn" data-act="more" aria-label="更多"><svg class="ic"><use href="#i-more"/></svg></button>
+              </div>
+              <div class="tb-bottom" id="tbBottom" hidden>
+                <button type="button" data-act="toc"><svg class="ic"><use href="#i-toc"/></svg>目录</button>
+                <button type="button" data-act="progress"><svg class="ic"><use href="#i-progress"/></svg>进度</button>
+                <button type="button" data-act="light"><svg class="ic"><use href="#i-light"/></svg>亮度</button>
+                <button type="button" data-act="type"><svg class="ic"><use href="#i-font"/></svg>字体</button>
+              </div>
+            </section>
+
+            <div class="pagevp measurevp" aria-hidden="true"><div class="flow" id="measure"></div></div>
+            <div class="scrim" id="scrim" hidden></div>
+            <div class="drawer" id="drawer" role="dialog" aria-label="目录" hidden></div>
+            <div class="sheet" id="sheet" role="dialog" hidden></div>
+            <div class="sub" id="sub" hidden></div>
+            <div class="zones" id="zones" hidden></div>
+            <div class="bubble" id="bubble" hidden></div>
+            <div class="toast" id="toast" role="status" hidden></div>
+          </div>
+          <div class="flash" id="flash"></div>
+          <div class="rf-layer" id="rfLayer"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script type="application/json" id="book-data">{"jdct": {"title": "经典常谈", "author": "朱自清", "toc": ["序", "说文解字第一", "周易第二", "尚书第三", "诗经第四", "三礼第五", "春秋三传第六", "四书第七", "战国策第八", "史记汉书第九", "诸子第十", "辞赋第十一", "诗第十二", "文第十三"], "chapters": [{"title": "序", "paras": ["在中等以上的教育里，经典训练应该是一个必要的项目。经典训练的价值不在实用，而在文化。有一位外国教授说过，阅读经典的用处，就在教人见识经典一番。这是很明达的议论。再说做一个有相当教育的国民，至少对于本国的经典，也有接触的义务。本书所谓经典是广义的用法，包括群经、先秦诸子、几种史书、一些集部；要读懂这些书，特别是经、子，得懂“小学”，就是文字学，所以《说文解字》等书也是经典的一部分。我国旧日的教育，可以说整个儿是读经的教育。经典训练成为教育的唯一的项目，自然偏枯失调；况且从幼童时代就开始，学生食而不化，也徒然摧残了他们的精力和兴趣。新式教育施行以后，读经渐渐废止。民国以来虽然还有一两回中小学读经运动，可是都失败了，大家认为是开倒车。另一方面，教育部制定的初中国文课程标准里却有“使学生从本国语言文字上了解固有文化”的话，高中的标准里更有“培养学生读解古书，欣赏中国文学名著之能力”的话。初高中的国文教材，从经典选录的也不少。可见读经的废止并不就是经典训练的废止，经典训练不但没有废止，而且扩大了范围，不以经为限，又按着学生程度选材，可以免掉他们囫囵吞枣的弊病。这实在是一种进步。", "我国经典，未经整理，读起来特别难，一般人往往望而生畏，结果是敬而远之。朱子似乎见到了这个，他注“四书”，一种作用就是使“四书”普及于一般人。他是成功的，他的“四书”注后来成了小学教科书。又如清初人选注的《史记菁华录》，价值和影响虽然远在“四书”注之下，可是也风行了几百年，帮助初学不少。但到了现在这时代，这些书都不适用了。我们知道清代“汉学家”对于经典的校勘和训诂贡献极大。我们理想中一般人的经典读本——有些该是全书，有些只该是选本、节本——应该尽可能的采取他们的结论；一面将本文分段，仔细的标点，并用白话文作简要的注释。每种读本还得有一篇切实而浅明的白话文导言。这需要见解、学力和经验，不是一个人一个时期所能成就的。商务印书馆编印的一些《学生国学丛书》，似乎就是这番用意，但离我们理想的标准还远着呢。理想的经典读本既然一时不容易出现，有些人便想着先从治标下手。顾颉刚先生用浅明的白话文译《尚书》，又用同样的文体写《汉代学术史略》，用意便在这里。这样办虽然不能教一般人直接亲近经典，却能启发他们的兴趣，引他们到经典的大路上去。这部小书也只是向这方面努力的工作。如果读者能把它当作一只船，航到经典的海里去，编撰者将自己庆幸，在经典训练上，尽了他做尖兵的一份儿。可是如果读者念了这部书，便以为已经受到了经典训练，不再想去见识经典，那就是以筌为鱼，未免辜负编撰者的本心了。", "这部书不是“国学概论”一类。照编撰者现在的意见，“概论”这名字容易教读者感到自己满足；“概论”里好像什么都有了，再用不着别的——其实什么都只有一点儿！“国学”这名字，和西洋人所谓“汉学”一般，都未免笼统的毛病。国立中央研究院的历史语言研究所分别标明历史和语言，不再浑称“国学”，确是正办。这部书以经典为主，以书为主，不以“经学”“史学”“诸子学”等作纲领。但《诗》《文》两篇，却还只能叙述源流；因为书太多了，没法子一一详论，而集部书的问题，也不像经、史、子的那样重要，在这儿也无需详论。书中各篇的排列，按照传统的经、史、子、集的顺序；并照传统的意见，将“小学”书放在最前头。各篇的讨论，尽量采择近人新说；这中间并无编撰者自己的创见，编撰者的工作只是编撰罢了。全篇的参考资料，开列在各篇后面；局部的，随处分别注明。也有袭用成说而没有注出的，那是为了节省读者的注意力；一般的读物和考据的著作不同，是无需乎那样严格的。末了儿，编撰者得谢谢杨振声先生，他鼓励编撰者写下这些篇常谈。还得谢谢雷海宗先生允许引用他还没有正式印行的《中国通史选读》讲义，陈梦家先生允许引用他的《中国文字学》稿本。还得谢谢董庶先生，他给我抄了全份清稿，让排印时不致有太多的错字。", "朱自清、三十一年二月、昆明西南联合大学。"]}, {"title": "说文解字第一", "paras": ["中国文字相传是黄帝的史官叫仓颉的造的。这仓颉据说有四只眼睛，他看见了地上的兽蹄儿、鸟爪儿印着的痕迹，灵感涌上心头，便造起文字来。文字的作用太伟大了，太奇妙了，造字真是一件神圣的工作。但是文字可以增进人的能力，也可以增进人的巧诈。仓颉泄漏了天机，却将人教坏了。所以他造字的时候，“天雨粟，鬼夜哭”。人有了文字，会变机灵了，会争着去作那容易赚钱的商人，辛辛苦苦去种地的便少了。天怕人不够吃的，所以降下米来让他们存着救急。鬼也怕这些机灵人用文字来制他们，所以夜里嚎哭；文字原是有巫术的作用的。但仓颉造字的传说，战国末期才有，那时人并不都相信，如《易·系辞》里就只说文字是“后世圣人”造出来的。这“后世圣人”不止一人，是许多人。我们知道，文字不断的在演变着；说是一人独创，是不可能的。《系辞》的话自然合理得多。", "“仓颉造字说”也不是凭空起来的。秦以前是文字发生与演化的时代，字体因世、因国而不同，官书虽是系统相承，民间书却极为庞杂。到了战国末期，政治方面，学术方面，都感到统一的需要了，鼓吹的也有人了；文字统一的需要，自然也在一般意识之中。这时候抬出一个造字的圣人，实在是统一文字的预备工夫，好教人知道“一个”圣人造的字当然是该一致的。《荀子·解蔽篇》说：“好书者众矣，而仓颉独传者，一也。”“一”是“专一”的意思，这儿只说仓颉是个整理文字的专家，并不曾说他是造字的人；可见得那时“仓颉造字说”还没有凝成定型。但是，仓颉究竟是什么人呢？照近人的解释，“仓颉”的字音近于“商契”，造字的也许指的是商契。商契是商民族的祖宗。“契”有“刀刻”的义；古代用刀笔刻字，文字有“书契”的名称。可能因为这点联系，商契便传为造字的圣人。事实上商契也许和造字全然无涉，但这个传说却暗示着文字起于夏、商之间。这个暗示也许是值得相信的。至于仓颉是黄帝的史官，始见于《说文序》。“仓颉造字说”大概凝定于汉初，那时还没有定出他是哪一代的人；《说文序》所称，显然是后来加添的枝叶了。", "识字是教育的初步。《周礼·保氏》说贵族子弟八岁入小学，先生教给他们识字。秦以前字体非常庞杂，贵族子弟所学的，大约只是官书罢了。秦始皇统一了天下，他也统一了文字；小篆成了国书，别体渐归淘汰，识字便简易多了。这时候贵族阶级已经没有了，所以渐渐注重一般的识字教育。到了汉代，考试史、尚书史（书记秘书）等官儿，都只凭识字的程度；识字教育更注重了。识字需要字书。相传最古的字书是《史籀篇》，是周宣王的太史籀作的。这部书已经佚去，但许慎《说文解字》里收了好些“籀文”，又称为“大篆”，字体和小篆差不多，和始皇以前三百年的碑碣器物上的秦篆简直一样。所以现在相信这只是始皇以前秦国的字书。“史籀”是“书记必读”的意思，只是书名，不是人名。", "始皇为了统一文字，教李斯作了《仓颉篇》七章，赵高作了《爰历篇》六章，胡毋敬作了《博学篇》七章。所选的字，大部分还是《史籀篇》里的，但字体以当时通用的小篆为准，便与“籀文”略有不同。这些是当时官定的标准字书。有了标准字书，文字统一就容易进行了。汉初，教书先生将这三篇合为一书，单称为《仓颉篇》。秦代那三种字书都不传了；汉代这个《仓颉篇》，现在残存着一部分。西汉时期还有些人作了些字书，所选的字大致和这个《仓颉篇》差不多。就中只有史游的《急就篇》还存留着。《仓颉》残篇四字一句，两句一韵。《急就篇》不分章而分部，前半三字一句，后半七字一句，两句一韵；所收的都是名姓、器物、官名等日常用字，没有说解。这些书和后世“日用杂字”相似，按事类收字——所谓分章或分部，都据事类而言。这些一面供教授学童用，一面供民众检阅用，所收约三千三百字，是通俗的字书。", "东汉和帝时，有个许慎，作了一部《说文解字》。这是一部划时代的字书。经典和别的字书里的字，他都搜罗在他的书里，所以有九千字。而且小篆之外，兼收籀文“古文”；“古文”是鲁恭王所得孔子宅“壁中书”及张仓所献《春秋左氏传》的字体，大概是晚周民间的别体字。许氏又分析偏旁，定出部首，将九千字分属五百四十部首。书中每字都有说解，用晚周人作的《尔雅》，扬雄的《方言》，以及经典的注文的体例。这部书意在帮助人通读古书，并非只供通俗之用，和秦代及西汉的字书是大不相同的。它保存了小篆和一些晚周文字，让后人可以溯源沿流；现在我们要认识商、周文字，探寻汉以来字体演变的轨迹，都得凭这部书。而且不但研究字形得靠它，研究字音、字义也得靠它。研究文字的形、音、义的，以前叫“小学”，现在叫文字学。从前学问限于经典，所以说研究学问必须从小学入手；现在学问的范围是广了，但要研究古典、古史、古文化，也还得从文字学入手。《说文解字》是文字学的古典，又是一切古典的工具或门径。", "《说文序》提起出土的古器物，说是书里也搜罗了古器物铭的文字，便是“古文”的一部分，但是汉代出土的古器物很少；而拓墨的法子到南北朝才有，当时也不会有拓本，那些铭文，许慎能见到的怕是更少。所以他的书里还只有秦篆和一些晚周民间书，再古的可以说是没有。到了宋代，古器物出土的多了，拓本也流行了，那时有了好些金石图录考释的书。“金”是铜器，铜器的铭文称为金文。铜器里钟鼎最是重器，所以也称为钟鼎文。这些铭文都是记事的。而宋以来发现的铜器大都是周代所作，所以金文多是两周的文字。清代古器物出土的更多，而光绪二十五年（公元一八九九）河南安阳发现了商代的甲骨，尤其是划时代的。甲是龟的腹甲，骨是牛胛骨。商人钻灼甲骨，以卜吉凶，卜完了就在上面刻字纪录。这称为甲骨文，又称为卜辞，是盘庚（约公元前一三〇〇年）以后的商代文字。这大概是最古的文字了。甲骨文、金文，以及《说文》里所谓“古文”，还有籀文，现在统统算作古文字，这些大部分是文字统一以前的官书。甲骨文是“契”的，金文是“铸”的。铸是先在模子上刻字，再倒铜。古代书写文字的方法，除“契”和“铸”外，还有“书”和“印”，因用的材料而异。“书”用笔，竹木简以及帛和纸上用“书”。“印”是在模子上刻字，印在陶器或封泥上。古代用竹木简最多，战国才有帛，纸是汉代才有的。笔出现于商代，却只用竹木削成。竹木简、帛、纸，都容易坏，汉以前的，已经荡然无存了。", "造字和用字有六个条例，称为“六书”。“六书”这个总名初见于《周礼》，但六书的各个的名字到汉人的书里才见。一是“象形”，象物形的大概，如“日”“月”等字。二是“指事”，用抽象的符号，指示那无形的事类，如“𠄞”（上）、“𠄟”（下）两个字，短画和长画都是抽象的符号，各代表着一个物类。“𠄞”指示甲物在乙物之上，“𠄟”指示甲物在乙物之下。这“上”和“下”两种关系便是无形的事类。又如“刃”字，在“刀”形上加一点，指示刃之所在，也是的。三是“会意”，会合两个或两个以上的字为一个字，这一个字的意义是那几个字的意义积成的，如“止”“戈”为“武”，“人”“言”为“信”等。四是“形声”，也是两个字合成一个字，但一个字是形，一个字是声；形是意符，声是音标。如“江”“河”两字，“氵”（水）是形，“工”“可”是声。但声也有兼义的。如“浅”“钱”“贱”三字，“水”“金”“贝”是形，同以“戋”为声；但水小为“浅”，金小为“钱”，贝小为“贱”，三字共有的这个“小”的意义，正是从“戋”字来的。象形、指事、会意、形声，都是造字的条例；形声最便，用处最大，所以我们的形声字最多。", "五是“转注”，就是互训。两个字或两个以上的字，意义全部相同或一部相同，可以互相解释的，便是转注字，也可以叫作同义字。如“考”“老”等字，又如“初”“哉”“首”“基”等字；前者同形同部，后者不同形不同部，却都可以“转注”。同义字的孳生，大概是各地方言不同和古今语言演变的缘故。六是“假借”，语言里有许多有音无形的字，借了别的同音的字，当作那个意义用。如代名词，“予”“汝”“彼”等，形况字“犹豫”“孟浪”“关关”“突如”等，虚助字“于”“以”“与”“而”“则”“然”“也”“乎”“哉”等，都是假借字。又如“令”，本义是“发号”，借为县令的“令”；“长”本义是“久远”，借为县长的“长”。“县令”“县长”是“令”“长”的引伸义。假借本因有音无字，但以后本来有字的也借用别的字。所以我们现在所用的字，本义的少，引伸义的多，一字数义，便是这样来的。这可见假借的用处也很广大。但一字借成数义，颇不容易分别。晋以来通行了四声，这才将同一字分读几个音，让意义分得开些。如“久远”的“长”平声，“县长”的“长”读上声之类。这样，一个字便变成几个字了。转注、假借都是用字的条例。", "象形字本于图画。初民常以画记名，以画记事，这便是象形的源头。但文字本于语言，语言发于声音，以某声命物，某声便是那物的名字，这是“名”；“名”该只指声音而言。画出那物形的大概，是象形字。“文字”与“字”都是通称；分析的说，象形的字该叫做“文”，“文”是“错画”的意思。“文”本于“名”，如先有“日”名，才会有“日”这个“文”；“名”就是“文”的声音。但物类无穷，不能一一造“文”，便只得用假借字。假借字以声为主，也可以叫做“名”。一字借为数字，后世用四声分别，古代却用偏旁分别，这便是形声字。如“𠀠”本象箕形，是“文”，它的“名”是“ㄐㄧ”。而日期的“期”，旗帜的“旗”，麒麟的“麒”等，在语言中与“𠀠”同声，却无专字，便都借用“𠀠”字。后来才加“月”为“期”，加“𭤨”为“旗”，加“鹿”为“麒”，一个字变成了几个字。严格的说，形声字才该叫做“字”，“字”是“孳乳而渐多”的意思。象形有抽象作用，如一画可以代表任何一物，“𠄞”（上）、“𠄟”（下）、“一”“二”“三”其实都可以说是象形。象形又有指示作用，如“刀”字上加一点，表明刃在那里。这样，旧时所谓指事字其实都可以归入象形字。象形还有会合作用，会合两个或两个以上的分子，表示一个意义；那么，旧时所谓会意字其实也可以归入象形字。但会合成功的不是“文”，也该是“字”。象形字、假借字、形声字，是文字发展的逻辑的程序，但甲骨文里三种字都已经有了。这里所说的程序，是近人新说，和“六书说”颇有出入。六书说原有些不完备、不清楚的地方，新说加以补充修正，似乎更可信些。", "秦以后只是书体演变的时代。演变的主因是应用，演变的方向是简易。始皇用小篆统一了文字，不久便又有了“隶书”。当时公事忙，文书多，书记虽遵用小篆，有些下行文书，却不免写得草率些。日子长了，这样写的人多了，便自然而然成了一体，称为“隶书”；因为是给徒隶等下级办公人看的。这种字体究竟和小篆差不多。到了汉末，才渐渐变了，椭圆的变为扁方的，“敛笔”变为“挑笔”。这是所谓汉隶，是隶书的标准。晋唐之间，又称为“八分书”。汉初还有草书，从隶书变化，更为简便。这从清末以来在新疆和敦煌发现的汉晋间的木简里最能见出。这种草书，各字分开，还带着挑笔，称为“章草”。魏晋之际，又嫌挑笔费事，改为敛笔，字字连书，以一行或一节为单位。这称为“今草”。隶书方整，去了挑笔，又变为“正书”。这起于魏代。晋唐之间，却称为“隶书”，而称汉隶为“八分书”。晋代也称为“楷书”。宋代又改称为“真书”。正书本也是扁方的，到陈隋的时候，渐渐变方了。到了唐代，又渐渐变长了。这是为了好看。正书简化，便成“行书”，起于晋代。大概正书不免于拘，草书不免于放，行书介乎两者之间，最为适用。但现在还通用着正书，而辅以行、草。一方面却提倡民间的“简笔字”，将正书、行书再行简化；这也还是求应用便利的缘故。", "【参考资料】《说文解字叙》。容庚《中国文字学》。陈梦家《中国文字学》稿本。"]}, {"title": "周易第二", "paras": ["在人家门头上，在小孩的帽饰上，我们常见到八卦那种东西。八卦是圣物，放在门头上，放在帽饰里，是可以辟邪的。辟邪还只是它的小神通，它的大神通在能够因往知来，预言吉凶。算命的，看相的，卜课的，都用得着它。他们普通只用五行生克的道理就够了，但要详细推算，就得用阴阳和八卦的道理。八卦及阴阳五行和我们非常熟习，这些道理直到现在还是我们大部分人的信仰，我们大部分人的日常生活不知不觉之中教这些道理支配着。行人不至，谋事未成，财运欠通，婚姻待决，子息不旺，乃至种种疾病疑难，许多人都会去求签问卜，算命看相，可见影响之大。讲五行的经典，现在有《尚书·洪范》；讲八卦的便是《周易》。", "八卦相传是伏羲氏画的。另一个传说却说不是他自出心裁画的。那时候有匹龙马从黄河里出来，背着一幅图，上面便是八卦，伏羲只照着描下来罢了。但这因为伏羲是圣人，那时代是圣世，天才派了龙马赐给他这件圣物。所谓“河图”，便是这个。那讲五行的《洪范》，据说也是大禹治水时在洛水中从一只神龟背上得着的，也出于天赐。所谓“洛书”，便是那个。但这些神怪的故事显然是八卦和五行的宣传家造出来抬高这两种学说的地位的。伏羲氏恐怕压根儿就没有这个人，他只是秦汉间儒家假托的圣王。至于八卦，大概是有了筮法以后才有的。商民族是用龟的腹甲或生的胛骨卜吉凶，他们先在甲骨上钻一下，再用火灼；甲骨经火，有裂痕，便是兆象，卜官细看兆象，断定吉凶；然后便将卜的人、卜的日子、卜的问句等用刀笔刻在甲骨上，这便是卜辞。卜辞里并没有阴阳的观念，也没有八卦的痕迹。", "卜法用牛骨最多，用龟甲是很少的。商代农业刚起头，游猎和畜牧还是主要的生活方式，那时牛骨头不缺少。到了周代，渐渐脱离游牧时代，进到农业社会了，牛骨头便没有那么容易得了。这时候却有了筮法，作为卜法的辅助。筮法只用些蓍草，那是不难得的。蓍草是一种长寿草，古人觉得这草和老年人一样，阅历多了，知道的也就多了，所以用它来占吉凶。筮的时候用它的秆子，方法已不能详知，大概是数的。取一把蓍草，数一下看是什么数目。看是奇数还是偶数，也许这便可以断定吉凶。古代人看见数目整齐而又有变化，认为是神秘的东西。数目的连续、循环以及奇偶，都引起人们的惊奇。那时候相信数目是有魔力的，所以巫术里用得着它。——我们一般人直到现在，还嫌恶奇数，喜欢偶数，该是那些巫术的遗迹。那时候又相信数目是有道理的，所以哲学里用得着它。我们现在还说，凡事都有定数，这就是前定的意思；这是很古的信仰了。人生有数，世界也有数，数是算好了的一笔账；用现在的话说，便是机械的。数又是宇宙的架子，如说太极生两仪，两仪生四象，就是一生二、二生四的意思。筮法可以说是一种巫术，是靠了数目来判断吉凶的。", "八卦的基础便是一、二、三的数目。整画“—”是一；断画“--”是二；三画叠而成卦是三。这样配出八个卦，便是☰☱☲☳☶☵☴☷；干、兑、离、震、艮、坎、巽、坤，是这些卦的名字。那整画、断画的排列，也许是在排列着蓍草时触悟出来的。八卦到底太简单了，后来便将这些卦重起来，两卦重作一个，按照算学里错列与组合的必然，成了六十四卦，就是《周易》里的卦数。蓍草的应用，也许起于民间；但八卦的创制，六十四卦的推演，巫与卜官大约是重要的脚色。古代巫与卜官同时也就是史官，一切的记载，一切的档案，都掌管在他们手里。他们是当时知识的权威，参加创卦或重卦的工作是可能的。筮法比卜法简便得多，但起初人们并不十分信任它。直到《春秋》时候，还有“筮短龟长”的话。那些时代，大概小事才用筮，大事还得用卜的。", "筮法袭用卜法的地方不少。卜法里的兆象，据说有一百二十体，每一体都有十条断定吉凶的“颂”辞。这些是现成的辞。但兆像是自然的灼出来的，有时不能凑合到那一百二十体里去，便得另造新辞。筮法里的六十四卦，就相当于一百二十体的兆象。那断定吉凶的辞，原叫作繇辞，“繇”是抽出来的意思。《周易》里一卦有六画，每画叫作一爻——六爻的次序是由下向上数的。繇辞有属于卦的总体的，有属于各爻的；所以后来分称为卦辞和爻辞。这种卦、爻辞也是卜筮官的占筮纪录，但和甲骨卜辞的性质不一样。", "从卦、爻辞里的历史故事和风俗制度看，我们知道这些是西周初叶的纪录，纪录里好些是不联贯的，大概是几次筮辞并列在一起的缘故。那时卜筮官将这些卦、爻辞按着卦、爻的顺序编辑起来，便成了《周易》这部书。“易”是“简易”的意思，是说筮法比卜法简易的意思。本来呢，卦数既然是一定的，每卦每爻的辞又是一定的，检查起来，引申推论起来，自然就“简易”了。不过这只在当时的卜筮官如此。他们熟习当时的背景，卦、爻辞虽“简”，他们却觉得“易”。到了后世就不然了，筮法久已失传，有些卦、爻辞简直就看不懂了。《周易》原只是当时一部切用的筮书。", "《周易》现在已经变成了儒家经典的第一部，但早期的儒家还没注意这部书。孔子是不讲怪、力、乱、神的。《论语》里虽有“五十以学《易》，可以无大过矣”的话，但另一个本子作“五一以学，亦可以无大过矣”；所以这句话是很可疑的。孔子只教学生读《诗》《书》和《春秋》，确没有教读《周易》。《孟子》称引《诗》《书》，也没说到《周易》。《周易》变成儒家的经典，是在战国末期。那时候阴阳家的学说盛行，儒家大约受了他们的影响，才研究起这部书来。那时候道家的学说也盛行，也从另一面影响了儒家。儒家就在这两家学说的影响之下，给《周易》的卦、爻辞作了种种新解释。这些新解释并非在忠实的、确切的解释卦、爻辞，其实倒是借着卦、爻辞发挥他们的哲学。这种新解释存下来的，便是所谓《易传》。", "《易传》中间较有系统的是彖辞和象辞。象辞断定一卦的涵义——“彖”就是“断”的意思。象辞推演卦和爻的象，这个“象”字相当于现在所谓“观念”。这个字后来成为解释《周易》的专门名词。但象辞断定的涵义，象辞推演的观念，其实不是真正从卦、爻里探究出来的；那些只是作传的人傅会在卦、爻上面的。这里面包含着多量的儒家伦理思想和政治哲学；象辞的话更有许多和《论语》相近的。但说到“天”的时候，不当作有人格的上帝，而只当作自然的道，却是道家的色彩了。这两种传似乎是编纂起来的，并非一人所作。此外有《文言》和《系辞》。《文言》解释乾坤两卦；《系辞》发挥宇宙观、人生观，偶然也有分别解释卦、爻的话。这些似乎都是抱残守缺，汇集众说而成。到了汉代，又新发现了《说卦》《序卦》《杂卦》三种传。《说卦》推演卦象，说明某卦的观念象征着自然界和人世间的某些事物，譬如乾卦象征着天，又象征着父之类。《序卦》说明六十四卦排列先后的道理。《杂卦》比较各卦意义的同异之处。这三种传据说是河内一个女子在什么地方找着的，后来称为《逸易》；其实也许就是汉代人作的。", "八卦原只是数目的巫术，这时候却变成数目的哲学了。那整画“—”是奇数，代表天，那断画“--”是偶数，代表地。奇数是阳数，偶数是阴数；阴阳的观念是从男女来的。有天地，不能没有万物，正和有男女就有子息一样，所以三画才能成一卦。卦是表示阴阳变化的，《周易》的“易”，也便是变化的意思。为什么要八个卦呢？这原是算学里错列与组合的必然，但这时候却想着是万象的分类。干是天，是父等；坤是地，是母等；震是雷，是长子等；巽是风，是长女等；坎是水，是心病等；离是火，是中女等；艮是山，是太监等；兑是泽，是少女等。这样，八卦便象征着也支配着整个的大自然，整个的人间世了。八卦重为六十四卦，卦是复合的，卦象也是复合的，作用便更复杂、更具体了。据说伏羲、神农、黄帝、尧、舜一班圣人看了六十四卦的象，悟出了种种道理，这才制造了器物，建立了制度、耒耜以及文字等等东西，“日中为市”等等制度，都是他们从六十四卦推演出来的。", "这个观象制器的故事，见于《系辞》。《系辞》是最重要的一部《易传》。这传里借着八卦和卦、爻辞发挥着的融合儒、道的哲学，和观象制器的故事，都大大的增加了《周易》的价值，抬高了它的地位。《周易》的地位抬高了，关于它的传说也就多了。《系辞》里只说伏羲作八卦；后来的传说却将重卦的，作卦、爻辞的，作《易传》的人，都补出来了。但这些传说都比较晚，所以有些参差，不尽能像“伏羲画卦说”那样成为定论。重卦的人，有说是伏羲的，有说是神农的，有说是文王的。卦、爻辞有说全是文王作的，有说爻辞是周公作的；有说全是孔子作的。《易传》却都说是孔子作的。这些都是圣人。《周易》的经传都出于圣人之手，所以和儒家所谓道统关系特别深切；这成了他们一部传道的书。所以到了汉代，便已跳到六经之首了。但另一面阴阳八卦与五行结合起来，三位一体的演变出后来医卜、星相种种迷信，种种花样，支配着一般民众，势力也非常雄厚。这里面儒家的影响却很少了，大部分还是《周易》原来的卜筮传统的力量。儒家的《周易》是哲学化了的：民众的《周易》倒是巫术的本来面目。", "【参考资料】顾颉刚《周易卦爻辞中的故事》（《古史辨》第三册上）。李镜池《易传探原》（同上）。余永梁《易卦爻辞的时代及其作者》（同上）。"]}]}, "walden": {"title": "Walden", "author": "Henry David Thoreau", "toc": ["Economy", "Where I Lived, and What I Lived For", "Reading", "Sounds", "Solitude", "Visitors", "The Bean-Field", "The Village", "The Ponds", "Baker Farm", "Higher Laws", "Brute Neighbors", "House-Warming", "Former Inhabitants; and Winter Visitors", "Winter Animals", "The Pond in Winter", "Spring", "Conclusion"], "chapters": [{"title": "Economy", "paras": ["When I wrote the following pages, or rather the bulk of them, I lived alone, in the woods, a mile from any neighbor, in a house which I had built myself, on the shore of Walden Pond, in Concord, Massachusetts, and earned my living by the labor of my hands only. I lived there two years and two months. At present I am a sojourner in civilized life again.", "I should not obtrude my affairs so much on the notice of my readers if very particular inquiries had not been made by my townsmen concerning my mode of life, which some would call impertinent, though they do not appear to me at all impertinent, but, considering the circumstances, very natural and pertinent. Some have asked what I got to eat; if I did not feel lonesome; if I was not afraid; and the like. Others have been curious to learn what portion of my income I devoted to charitable purposes; and some, who have large families, how many poor children I maintained. I will therefore ask those of my readers who feel no particular interest in me to pardon me if I undertake to answer some of these questions in this book. In most books, the I, or first person, is omitted; in this it will be retained; that, in respect to egotism, is the main difference. We commonly do not remember that it is, after all, always the first person that is speaking. I should not talk so much about myself if there were anybody else whom I knew as well. Unfortunately, I am confined to this theme by the narrowness of my experience. Moreover, I, on my side, require of every writer, first or last, a simple and sincere account of his own life, and not merely what he has heard of other men’s lives; some such account as he would send to his kindred from a distant land; for if he has lived sincerely, it must have been in a distant land to me. Perhaps these pages are more particularly addressed to poor students. As for the rest of my readers, they will accept such portions as apply to them. I trust that none will stretch the seams in putting on the coat, for it may do good service to him whom it fits.", "I would fain say something, not so much concerning the Chinese and Sandwich Islanders as you who read these pages, who are said to live in New England; something about your condition, especially your outward condition or circumstances in this world, in this town, what it is, whether it is necessary that it be as bad as it is, whether it cannot be improved as well as not. I have travelled a good deal in Concord; and everywhere, in shops, and offices, and fields, the inhabitants have appeared to me to be doing penance in a thousand remarkable ways. What I have heard of Brahmins sitting exposed to four fires and looking in the face of the sun; or hanging suspended, with their heads downward, over flames; or looking at the heavens over their shoulders “until it becomes impossible for them to resume their natural position, while from the twist of the neck nothing but liquids can pass into the stomach;” or dwelling, chained for life, at the foot of a tree; or measuring with their bodies, like caterpillars, the breadth of vast empires; or standing on one leg on the tops of pillars,—even these forms of conscious penance are hardly more incredible and astonishing than the scenes which I daily witness. The twelve labors of Hercules were trifling in comparison with those which my neighbors have undertaken; for they were only twelve, and had an end; but I could never see that these men slew or captured any monster or finished any labor. They have no friend Iolas to burn with a hot iron the root of the hydra’s head, but as soon as one head is crushed, two spring up.", "I see young men, my townsmen, whose misfortune it is to have inherited farms, houses, barns, cattle, and farming tools; for these are more easily acquired than got rid of. Better if they had been born in the open pasture and suckled by a wolf, that they might have seen with clearer eyes what field they were called to labor in. Who made them serfs of the soil? Why should they eat their sixty acres, when man is condemned to eat only his peck of dirt? Why should they begin digging their graves as soon as they are born? They have got to live a man’s life, pushing all these things before them, and get on as well as they can. How many a poor immortal soul have I met well nigh crushed and smothered under its load, creeping down the road of life, pushing before it a barn seventy-five feet by forty, its Augean stables never cleansed, and one hundred acres of land, tillage, mowing, pasture, and wood-lot! The portionless, who struggle with no such unnecessary inherited encumbrances, find it labor enough to subdue and cultivate a few cubic feet of flesh.", "But men labor under a mistake. The better part of the man is soon plowed into the soil for compost. By a seeming fate, commonly called necessity, they are employed, as it says in an old book, laying up treasures which moth and rust will corrupt and thieves break through and steal. It is a fool’s life, as they will find when they get to the end of it, if not before. It is said that Deucalion and Pyrrha created men by throwing stones over their heads behind them:—", "So much for a blind obedience to a blundering oracle, throwing the stones over their heads behind them, and not seeing where they fell.", "Most men, even in this comparatively free country, through mere ignorance and mistake, are so occupied with the factitious cares and superfluously coarse labors of life that its finer fruits cannot be plucked by them. Their fingers, from excessive toil, are too clumsy and tremble too much for that. Actually, the laboring man has not leisure for a true integrity day by day; he cannot afford to sustain the manliest relations to men; his labor would be depreciated in the market. He has no time to be anything but a machine. How can he remember well his ignorance—which his growth requires—who has so often to use his knowledge? We should feed and clothe him gratuitously sometimes, and recruit him with our cordials, before we judge of him. The finest qualities of our nature, like the bloom on fruits, can be preserved only by the most delicate handling. Yet we do not treat ourselves nor one another thus tenderly.", "Some of you, we all know, are poor, find it hard to live, are sometimes, as it were, gasping for breath. I have no doubt that some of you who read this book are unable to pay for all the dinners which you have actually eaten, or for the coats and shoes which are fast wearing or are already worn out, and have come to this page to spend borrowed or stolen time, robbing your creditors of an hour. It is very evident what mean and sneaking lives many of you live, for my sight has been whetted by experience; always on the limits, trying to get into business and trying to get out of debt, a very ancient slough, called by the Latins æs alienum, another’s brass, for some of their coins were made of brass; still living, and dying, and buried by this other’s brass; always promising to pay, promising to pay, tomorrow, and dying today, insolvent; seeking to curry favor, to get custom, by how many modes, only not state-prison offences; lying, flattering, voting, contracting yourselves into a nutshell of civility or dilating into an atmosphere of thin and vaporous generosity, that you may persuade your neighbor to let you make his shoes, or his hat, or his coat, or his carriage, or import his groceries for him; making yourselves sick, that you may lay up something against a sick day, something to be tucked away in an old chest, or in a stocking behind the plastering, or, more safely, in the brick bank; no matter where, no matter how much or how little.", "I sometimes wonder that we can be so frivolous, I may almost say, as to attend to the gross but somewhat foreign form of servitude called Negro Slavery, there are so many keen and subtle masters that enslave both north and south. It is hard to have a southern overseer; it is worse to have a northern one; but worst of all when you are the slave-driver of yourself. Talk of a divinity in man! Look at the teamster on the highway, wending to market by day or night; does any divinity stir within him? His highest duty to fodder and water his horses! What is his destiny to him compared with the shipping interests? Does not he drive for Squire Make-a-stir? How godlike, how immortal, is he? See how he cowers and sneaks, how vaguely all the day he fears, not being immortal nor divine, but the slave and prisoner of his own opinion of himself, a fame won by his own deeds. Public opinion is a weak tyrant compared with our own private opinion. What a man thinks of himself, that it is which determines, or rather indicates, his fate. Self-emancipation even in the West Indian provinces of the fancy and imagination,—what Wilberforce is there to bring that about? Think, also, of the ladies of the land weaving toilet cushions against the last day, not to betray too green an interest in their fates! As if you could kill time without injuring eternity.", "The mass of men lead lives of quiet desperation. What is called resignation is confirmed desperation. From the desperate city you go into the desperate country, and have to console yourself with the bravery of minks and muskrats. A stereotyped but unconscious despair is concealed even under what are called the games and amusements of mankind. There is no play in them, for this comes after work. But it is a characteristic of wisdom not to do desperate things.", "When we consider what, to use the words of the catechism, is the chief end of man, and what are the true necessaries and means of life, it appears as if men had deliberately chosen the common mode of living because they preferred it to any other. Yet they honestly think there is no choice left. But alert and healthy natures remember that the sun rose clear. It is never too late to give up our prejudices. No way of thinking or doing, however ancient, can be trusted without proof. What everybody echoes or in silence passes by as true to-day may turn out to be falsehood to-morrow, mere smoke of opinion, which some had trusted for a cloud that would sprinkle fertilizing rain on their fields. What old people say you cannot do you try and find that you can. Old deeds for old people, and new deeds for new. Old people did not know enough once, perchance, to fetch fresh fuel to keep the fire a-going; new people put a little dry wood under a pot, and are whirled round the globe with the speed of birds, in a way to kill old people, as the phrase is. Age is no better, hardly so well, qualified for an instructor as youth, for it has not profited so much as it has lost. One may almost doubt if the wisest man has learned any thing of absolute value by living. Practically, the old have no very important advice to give the young, their own experience has been so partial, and their lives have been such miserable failures, for private reasons, as they must believe; and it may be that they have some faith left which belies that experience, and they are only less young than they were. I have lived some thirty years on this planet, and I have yet to hear the first syllable of valuable or even earnest advice from my seniors. They have told me nothing, and probably cannot tell me any thing to the purpose. Here is life, an experiment to a great extent untried by me; but it does not avail me that they have tried it. If I have any experience which I think valuable, I am sure to reflect that this my Mentors said nothing about."]}, {"title": "Where I Lived, and What I Lived For", "paras": ["At a certain season of our life we are accustomed to consider every spot as the possible site of a house. I have thus surveyed the country on every side within a dozen miles of where I live. In imagination I have bought all the farms in succession, for all were to be bought, and I knew their price. I walked over each farmer’s premises, tasted his wild apples, discoursed on husbandry with him, took his farm at his price, at any price, mortgaging it to him in my mind; even put a higher price on it,—took everything but a deed of it,—took his word for his deed, for I dearly love to talk,—cultivated it, and him too to some extent, I trust, and withdrew when I had enjoyed it long enough, leaving him to carry it on. This experience entitled me to be regarded as a sort of real-estate broker by my friends. Wherever I sat, there I might live, and the landscape radiated from me accordingly. What is a house but a sedes, a seat?—better if a country seat. I discovered many a site for a house not likely to be soon improved, which some might have thought too far from the village, but to my eyes the village was too far from it. Well, there I might live, I said; and there I did live, for an hour, a summer and a winter life; saw how I could let the years run off, buffet the winter through, and see the spring come in. The future inhabitants of this region, wherever they may place their houses, may be sure that they have been anticipated. An afternoon sufficed to lay out the land into orchard, woodlot, and pasture, and to decide what fine oaks or pines should be left to stand before the door, and whence each blasted tree could be seen to the best advantage; and then I let it lie, fallow perchance, for a man is rich in proportion to the number of things which he can afford to let alone.", "My imagination carried me so far that I even had the refusal of several farms,—the refusal was all I wanted,—but I never got my fingers burned by actual possession. The nearest that I came to actual possession was when I bought the Hollowell place, and had begun to sort my seeds, and collected materials with which to make a wheelbarrow to carry it on or off with; but before the owner gave me a deed of it, his wife—every man has such a wife—changed her mind and wished to keep it, and he offered me ten dollars to release him. Now, to speak the truth, I had but ten cents in the world, and it surpassed my arithmetic to tell, if I was that man who had ten cents, or who had a farm, or ten dollars, or all together. However, I let him keep the ten dollars and the farm too, for I had carried it far enough; or rather, to be generous, I sold him the farm for just what I gave for it, and, as he was not a rich man, made him a present of ten dollars, and still had my ten cents, and seeds, and materials for a wheelbarrow left. I found thus that I had been a rich man without any damage to my poverty. But I retained the landscape, and I have since annually carried off what it yielded without a wheelbarrow. With respect to landscapes,—", "“I am monarch of all I survey, My right there is none to dispute.”", "I have frequently seen a poet withdraw, having enjoyed the most valuable part of a farm, while the crusty farmer supposed that he had got a few wild apples only. Why, the owner does not know it for many years when a poet has put his farm in rhyme, the most admirable kind of invisible fence, has fairly impounded it, milked it, skimmed it, and got all the cream, and left the farmer only the skimmed milk.", "The real attractions of the Hollowell farm, to me, were; its complete retirement, being, about two miles from the village, half a mile from the nearest neighbor, and separated from the highway by a broad field; its bounding on the river, which the owner said protected it by its fogs from frosts in the spring, though that was nothing to me; the gray color and ruinous state of the house and barn, and the dilapidated fences, which put such an interval between me and the last occupant; the hollow and lichen-covered apple trees, gnawed by rabbits, showing what kind of neighbors I should have; but above all, the recollection I had of it from my earliest voyages up the river, when the house was concealed behind a dense grove of red maples, through which I heard the house-dog bark. I was in haste to buy it, before the proprietor finished getting out some rocks, cutting down the hollow apple trees, and grubbing up some young birches which had sprung up in the pasture, or, in short, had made any more of his improvements. To enjoy these advantages I was ready to carry it on; like Atlas, to take the world on my shoulders,—I never heard what compensation he received for that,—and do all those things which had no other motive or excuse but that I might pay for it and be unmolested in my possession of it; for I knew all the while that it would yield the most abundant crop of the kind I wanted if I could only afford to let it alone. But it turned out as I have said.", "All that I could say, then, with respect to farming on a large scale, (I have always cultivated a garden,) was, that I had had my seeds ready. Many think that seeds improve with age. I have no doubt that time discriminates between the good and the bad; and when at last I shall plant, I shall be less likely to be disappointed. But I would say to my fellows, once for all, As long as possible live free and uncommitted. It makes but little difference whether you are committed to a farm or the county jail.", "Old Cato, whose “De Re Rusticâ” is my “Cultivator,” says, and the only translation I have seen makes sheer nonsense of the passage, “When you think of getting a farm, turn it thus in your mind, not to buy greedily; nor spare your pains to look at it, and do not think it enough to go round it once. The oftener you go there the more it will please you, if it is good.” I think I shall not buy greedily, but go round and round it as long as I live, and be buried in it first, that it may please me the more at last.", "The present was my next experiment of this kind, which I purpose to describe more at length; for convenience, putting the experience of two years into one. As I have said, I do not propose to write an ode to dejection, but to brag as lustily as chanticleer in the morning, standing on his roost, if only to wake my neighbors up.", "When first I took up my abode in the woods, that is, began to spend my nights as well as days there, which, by accident, was on Independence Day, or the Fourth of July, 1845, my house was not finished for winter, but was merely a defence against the rain, without plastering or chimney, the walls being of rough, weather-stained boards, with wide chinks, which made it cool at night. The upright white hewn studs and freshly planed door and window casings gave it a clean and airy look, especially in the morning, when its timbers were saturated with dew, so that I fancied that by noon some sweet gum would exude from them. To my imagination it retained throughout the day more or less of this auroral character, reminding me of a certain house on a mountain which I had visited the year before. This was an airy and unplastered cabin, fit to entertain a travelling god, and where a goddess might trail her garments. The winds which passed over my dwelling were such as sweep over the ridges of mountains, bearing the broken strains, or celestial parts only, of terrestrial music. The morning wind forever blows, the poem of creation is uninterrupted; but few are the ears that hear it. Olympus is but the outside of the earth every where.", "The only house I had been the owner of before, if I except a boat, was a tent, which I used occasionally when making excursions in the summer, and this is still rolled up in my garret; but the boat, after passing from hand to hand, has gone down the stream of time. With this more substantial shelter about me, I had made some progress toward settling in the world. This frame, so slightly clad, was a sort of crystallization around me, and reacted on the builder. It was suggestive somewhat as a picture in outlines. I did not need to go outdoors to take the air, for the atmosphere within had lost none of its freshness. It was not so much within doors as behind a door where I sat, even in the rainiest weather. The Harivansa says, “An abode without birds is like a meat without seasoning.” Such was not my abode, for I found myself suddenly neighbor to the birds; not by having imprisoned one, but having caged myself near them. I was not only nearer to some of those which commonly frequent the garden and the orchard, but to those wilder and more thrilling songsters of the forest which never, or rarely, serenade a villager,—the wood-thrush, the veery, the scarlet tanager, the field-sparrow, the whippoorwill, and many others.", "I was seated by the shore of a small pond, about a mile and a half south of the village of Concord and somewhat higher than it, in the midst of an extensive wood between that town and Lincoln, and about two miles south of that our only field known to fame, Concord Battle Ground; but I was so low in the woods that the opposite shore, half a mile off, like the rest, covered with wood, was my most distant horizon. For the first week, whenever I looked out on the pond it impressed me like a tarn high up on the side of a mountain, its bottom far above the surface of other lakes, and, as the sun arose, I saw it throwing off its nightly clothing of mist, and here and there, by degrees, its soft ripples or its smooth reflecting surface was revealed, while the mists, like ghosts, were stealthily withdrawing in every direction into the woods, as at the breaking up of some nocturnal conventicle. The very dew seemed to hang upon the trees later into the day than usual, as on the sides of mountains.", "This small lake was of most value as a neighbor in the intervals of a gentle rain storm in August, when, both air and water being perfectly still, but the sky overcast, mid-afternoon had all the serenity of evening, and the wood-thrush sang around, and was heard from shore to shore. A lake like this is never smoother than at such a time; and the clear portion of the air above it being shallow and darkened by clouds, the water, full of light and reflections, becomes a lower heaven itself so much the more important. From a hill top near by, where the wood had been recently cut off, there was a pleasing vista southward across the pond, through a wide indentation in the hills which form the shore there, where their opposite sides sloping toward each other suggested a stream flowing out in that direction through a wooded valley, but stream there was none. That way I looked between and over the near green hills to some distant and higher ones in the horizon, tinged with blue. Indeed, by standing on tiptoe I could catch a glimpse of some of the peaks of the still bluer and more distant mountain ranges in the north-west, those true-blue coins from heaven’s own mint, and also of some portion of the village. But in other directions, even from this point, I could not see over or beyond the woods which surrounded me. It is well to have some water in your neighborhood, to give buoyancy to and float the earth. One value even of the smallest well is, that when you look into it you see that earth is not continent but insular. This is as important as that it keeps butter cool. When I looked across the pond from this peak toward the Sudbury meadows, which in time of flood I distinguished elevated perhaps by a mirage in their seething valley, like a coin in a basin, all the earth beyond the pond appeared like a thin crust insulated and floated even by this small sheet of interverting water, and I was reminded that this on which I dwelt was but dry land.", "Though the view from my door was still more contracted, I did not feel crowded or confined in the least. There was pasture enough for my imagination. The low shrub-oak plateau to which the opposite shore arose, stretched away toward the prairies of the West and the steppes of Tartary, affording ample room for all the roving families of men. “There are none happy in the world but beings who enjoy freely a vast horizon,”—said Damodara, when his herds required new and larger pastures.", "Both place and time were changed, and I dwelt nearer to those parts of the universe and to those eras in history which had most attracted me. Where I lived was as far off as many a region viewed nightly by astronomers. We are wont to imagine rare and delectable places in some remote and more celestial corner of the system, behind the constellation of Cassiopeia’s Chair, far from noise and disturbance. I discovered that my house actually had its site in such a withdrawn, but forever new and unprofaned, part of the universe. If it were worth the while to settle in those parts near to the Pleiades or the Hyades, to Aldebaran or Altair, then I was really there, or at an equal remoteness from the life which I had left behind, dwindled and twinkling with as fine a ray to my nearest neighbor, and to be seen only in moonless nights by him. Such was that part of creation where I had squatted;—", "“There was a shepherd that did live, And held his thoughts as high As were the mounts whereon his flocks Did hourly feed him by.”", "What should we think of the shepherd’s life if his flocks always wandered to higher pastures than his thoughts?", "Every morning was a cheerful invitation to make my life of equal simplicity, and I may say innocence, with Nature herself. I have been as sincere a worshipper of Aurora as the Greeks. I got up early and bathed in the pond; that was a religious exercise, and one of the best things which I did. They say that characters were engraven on the bathing tub of king Tching-thang to this effect: “Renew thyself completely each day; do it again, and again, and forever again.” I can understand that. Morning brings back the heroic ages. I was as much affected by the faint hum of a mosquito making its invisible and unimaginable tour through my apartment at earliest dawn, when I was sitting with door and windows open, as I could be by any trumpet that ever sang of fame. It was Homer’s requiem; itself an Iliad and Odyssey in the air, singing its own wrath and wanderings. There was something cosmical about it; a standing advertisement, till forbidden, of the everlasting vigor and fertility of the world. The morning, which is the most memorable season of the day, is the awakening hour. Then there is least somnolence in us; and for an hour, at least, some part of us awakes which slumbers all the rest of the day and night. Little is to be expected of that day, if it can be called a day, to which we are not awakened by our Genius, but by the mechanical nudgings of some servitor, are not awakened by our own newly-acquired force and aspirations from within, accompanied by the undulations of celestial music, instead of factory bells, and a fragrance filling the air—to a higher life than we fell asleep from; and thus the darkness bear its fruit, and prove itself to be good, no less than the light. That man who does not believe that each day contains an earlier, more sacred, and auroral hour than he has yet profaned, has despaired of life, and is pursuing a descending and darkening way. After a partial cessation of his sensuous life, the soul of man, or its organs rather, are reinvigorated each day, and his Genius tries again what noble life it can make. All memorable events, I should say, transpire in morning time and in a morning atmosphere. The Vedas say, “All intelligences awake with the morning.” Poetry and art, and the fairest and most memorable of the actions of men, date from such an hour. All poets and heroes, like Memnon, are the children of Aurora, and emit their music at sunrise. To him whose elastic and vigorous thought keeps pace with the sun, the day is a perpetual morning. It matters not what the clocks say or the attitudes and labors of men. Morning is when I am awake and there is a dawn in me. Moral reform is the effort to throw off sleep. Why is it that men give so poor an account of their day if they have not been slumbering? They are not such poor calculators. If they had not been overcome with drowsiness, they would have performed something. The millions are awake enough for physical labor; but only one in a million is awake enough for effective intellectual exertion, only one in a hundred millions to a poetic or divine life. To be awake is to be alive. I have never yet met a man who was quite awake. How could I have looked him in the face?", "We must learn to reawaken and keep ourselves awake, not by mechanical aids, but by an infinite expectation of the dawn, which does not forsake us in our soundest sleep. I know of no more encouraging fact than the unquestionable ability of man to elevate his life by a conscious endeavor. It is something to be able to paint a particular picture, or to carve a statue, and so to make a few objects beautiful; but it is far more glorious to carve and paint the very atmosphere and medium through which we look, which morally we can do. To affect the quality of the day, that is the highest of arts. Every man is tasked to make his life, even in its details, worthy of the contemplation of his most elevated and critical hour. If we refused, or rather used up, such paltry information as we get, the oracles would distinctly inform us how this might be done.", "I went to the woods because I wished to live deliberately, to front only the essential facts of life, and see if I could not learn what it had to teach, and not, when I came to die, discover that I had not lived. I did not wish to live what was not life, living is so dear; nor did I wish to practise resignation, unless it was quite necessary. I wanted to live deep and suck out all the marrow of life, to live so sturdily and Spartan-like as to put to rout all that was not life, to cut a broad swath and shave close, to drive life into a corner, and reduce it to its lowest terms, and, if it proved to be mean, why then to get the whole and genuine meanness of it, and publish its meanness to the world; or if it were sublime, to know it by experience, and be able to give a true account of it in my next excursion. For most men, it appears to me, are in a strange uncertainty about it, whether it is of the devil or of God, and have somewhat hastily concluded that it is the chief end of man here to “glorify God and enjoy him forever.”", "Still we live meanly, like ants; though the fable tells us that we were long ago changed into men; like pygmies we fight with cranes; it is error upon error, and clout upon clout, and our best virtue has for its occasion a superfluous and evitable wretchedness. Our life is frittered away by detail. An honest man has hardly need to count more than his ten fingers, or in extreme cases he may add his ten toes, and lump the rest. Simplicity, simplicity, simplicity! I say, let your affairs be as two or three, and not a hundred or a thousand; instead of a million count half a dozen, and keep your accounts on your thumb nail. In the midst of this chopping sea of civilized life, such are the clouds and storms and quicksands and thousand-and-one items to be allowed for, that a man has to live, if he would not founder and go to the bottom and not make his port at all, by dead reckoning, and he must be a great calculator indeed who succeeds. Simplify, simplify. Instead of three meals a day, if it be necessary eat but one; instead of a hundred dishes, five; and reduce other things in proportion. Our life is like a German Confederacy, made up of petty states, with its boundary forever fluctuating, so that even a German cannot tell you how it is bounded at any moment. The nation itself, with all its so called internal improvements, which, by the way, are all external and superficial, is just such an unwieldy and overgrown establishment, cluttered with furniture and tripped up by its own traps, ruined by luxury and heedless expense, by want of calculation and a worthy aim, as the million households in the land; and the only cure for it as for them is in a rigid economy, a stern and more than Spartan simplicity of life and elevation of purpose. It lives too fast. Men think that it is essential that the Nation have commerce, and export ice, and talk through a telegraph, and ride thirty miles an hour, without a doubt, whether they do or not; but whether we should live like baboons or like men, is a little uncertain. If we do not get out sleepers, and forge rails, and devote days and nights to the work, but go to tinkering upon our lives to improve them, who will build railroads? And if railroads are not built, how shall we get to heaven in season? But if we stay at home and mind our business, who will want railroads? We do not ride on the railroad; it rides upon us. Did you ever think what those sleepers are that underlie the railroad? Each one is a man, an Irish-man, or a Yankee man. The rails are laid on them, and they are covered with sand, and the cars run smoothly over them. They are sound sleepers, I assure you. And every few years a new lot is laid down and run over; so that, if some have the pleasure of riding on a rail, others have the misfortune to be ridden upon. And when they run over a man that is walking in his sleep, a supernumerary sleeper in the wrong position, and wake him up, they suddenly stop the cars, and make a hue and cry about it, as if this were an exception. I am glad to know that it takes a gang of men for every five miles to keep the sleepers down and level in their beds as it is, for this is a sign that they may sometime get up again."]}]}}</script>
+<script>
+(() => {
+'use strict';
+const DATA = JSON.parse(document.getElementById('book-data').textContent);
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  if (attrs) for (const k in attrs) {
+    const v = attrs[k];
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, '');
+    else el.setAttribute(k, v);
+  }
+  for (const k of kids.flat(Infinity)) { if (k == null || k === false) continue; el.append(k.nodeType ? k : String(k)); }
+  return el;
+}
+function ic(name, cls) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const s = document.createElementNS(NS, 'svg');
+  s.setAttribute('class', 'ic' + (cls ? ' ' + cls : ''));
+  s.setAttribute('aria-hidden', 'true');
+  const u = document.createElementNS(NS, 'use');
+  u.setAttribute('href', '#i-' + name);
+  s.append(u);
+  return s;
+}
+
+/* ---------- data ---------- */
+const DEVICES = {
+  '6': { w: 536, h: 724, res: '1072 × 1448 像素 · 300 ppi · 按 536 × 724 dp 排版' },
+  '7': { w: 632, h: 840, res: '1264 × 1680 像素 · 300 ppi · 按 632 × 840 dp 排版' },
+  '10': { w: 936, h: 1248, res: '1404 × 1872 像素 · 227 ppi · 按 936 × 1248 dp 排版' },
+};
+const FS = [15, 16, 17, 18, 19, 20, 22, 24, 26, 28];
+const LH = { tight: 1.55, std: 1.8, loose: 2.1 };
+const MX = { narrow: 18, std: 28, wide: 44 };
+const FONTS = { serif: { name: '思源宋体', fam: 'var(--serif)', en: 'var(--serif-en)' }, sans: { name: '思源黑体', fam: 'var(--ui)', en: 'var(--sans-en)' } };
+
+const SHELF = [
+  { id: 'jdct', title: '经典常谈', author: '朱自清', lang: 'zh', fmt: 'EPUB', size: '412 KB', dir: '中文', cover: 'frame', status: 'reading', readable: true },
+  { id: 'walden', title: 'Walden', author: 'Henry David Thoreau', lang: 'en', fmt: 'EPUB', size: '636 KB', dir: 'English', cover: 'band', status: 'reading', readable: true },
+  { id: 'med', title: 'Meditations', author: 'Marcus Aurelius', lang: 'en', fmt: 'EPUB', size: '298 KB', dir: 'English', cover: 'block', status: 'reading', pct: 62 },
+  { id: 'zgzx', title: '中国哲学史大纲', author: '胡适', lang: 'zh', fmt: 'EPUB', size: '1.1 MB', dir: '中文', cover: 'split', status: 'reading', pct: 41 },
+  { id: 'lib', title: 'On Liberty', author: 'John Stuart Mill', lang: 'en', fmt: 'EPUB', size: '344 KB', dir: 'English', cover: 'stripe', status: 'reading', pct: 23 },
+  { id: 'war', title: 'The Art of War', author: 'Sun Tzu', lang: 'en', fmt: 'EPUB', size: '187 KB', dir: 'English', cover: 'frame', status: 'reading', pct: 15 },
+  { id: 'rjch', title: '人间词话', author: '王国维', lang: 'zh', fmt: 'AZW3', size: '205 KB', dir: '中文', cover: 'band', status: 'done' },
+  { id: 'self', title: 'Self-Reliance', author: 'Ralph Waldo Emerson', lang: 'en', fmt: 'EPUB', size: '121 KB', dir: 'English', cover: 'split', status: 'done' },
+  { id: 'ybs', title: '饮冰室文集', author: '梁启超', lang: 'zh', fmt: 'EPUB', size: '2.4 MB', dir: '中文', cover: 'block', status: 'done' },
+  { id: 'xsl', title: '中国小说史略', author: '鲁迅', lang: 'zh', fmt: 'EPUB', size: '690 KB', dir: '中文', cover: 'stripe', status: 'new' },
+  { id: 'origin', title: 'On the Origin of Species', author: 'Charles Darwin', lang: 'en', fmt: 'PDF', size: '3.8 MB', dir: 'English', cover: 'frame', status: 'new' },
+  { id: 'llx', title: '中国伦理学史', author: '蔡元培', lang: 'zh', fmt: 'TXT', size: '316 KB', dir: '中文', cover: 'frame', status: 'new' },
+];
+const BY = Object.fromEntries(SHELF.map((b, i) => [b.id, Object.assign(b, { order: i })]));
+
+const DICT = {
+  sojourner: ['/ˈsɒdʒənə(r)/', [['n.', 'a person who stays in a place for a while and then moves on', '旅居者；暂住者']]],
+  obtrude: ['/əbˈtruːd/', [['v.', 'to force your opinions or affairs on people who have not asked for them', '强加于人；硬要别人注意']]],
+  impertinent: ['/ɪmˈpɜːtɪnənt/', [['adj.', 'rude and not showing proper respect', '无礼的；冒失的'], ['adj.', '(formal) not relevant to the matter in hand', '不相干的；不切题的']]],
+  deliberately: ['/dɪˈlɪbərətli/', [['adv.', 'consciously and intentionally; on purpose', '故意地；有意地'], ['adv.', 'in a slow, careful and unhurried way', '从容地；审慎地']]],
+  desperation: ['/ˌdespəˈreɪʃn/', [['n.', 'the state of having lost all hope, often leading to reckless action', '绝望；铤而走险']]],
+  resignation: ['/ˌrezɪɡˈneɪʃn/', [['n.', 'the act of giving up a job or position', '辞职'], ['n.', 'patient acceptance of something unpleasant that cannot be changed', '听天由命；无奈的接受']]],
+  frivolous: ['/ˈfrɪvələs/', [['adj.', 'having no serious purpose or value', '无意义的；琐碎的'], ['adj.', '(of a person) silly and not serious', '轻浮的']]],
+  catechism: ['/ˈkætəkɪzəm/', [['n.', 'a summary of religious teaching in the form of questions and answers', '教理问答']]],
+  essential: ['/ɪˈsenʃl/', [['adj.', 'absolutely necessary; extremely important', '必不可少的'], ['adj.', 'relating to the most basic nature of something', '本质的；基本的']]],
+  marrow: ['/ˈmærəʊ/', [['n.', 'the soft fatty substance inside bones', '骨髓'], ['n.', 'the innermost, most essential part of something', '精华；核心']]],
+  superfluous: ['/suːˈpɜːfluəs/', [['adj.', 'more than is needed or wanted', '多余的；不必要的']]],
+  simplicity: ['/sɪmˈplɪsəti/', [['n.', 'the quality of being easy to understand or do', '简单'], ['n.', 'the quality of being plain, without unnecessary decoration', '简朴；朴素']]],
+  penance: ['/ˈpenəns/', [['n.', 'punishment you accept to show you are sorry for doing wrong', '苦行；赎罪']]],
+  civilized: ['/ˈsɪvəlaɪzd/', [['adj.', 'having a highly developed society and culture', '文明的；开化的']]],
+  labor: ['/ˈleɪbə(r)/', [['n.', 'work, especially hard physical work', '劳动；劳作'], ['v.', 'to work hard; to try very hard to do something difficult', '努力工作；艰难地进行']]],
+  spartan: ['/ˈspɑːtn/', [['adj.', '(of a way of life) simple and strict, without comfort or luxury', '简朴的；艰苦的']]],
+  fain: ['/feɪn/', [['adv.', '(old use) willingly; gladly', '（古）乐意地']]],
+  rout: ['/raʊt/', [['n.', 'a complete defeat in which the losers run away', '溃败'], ['v.', 'to defeat someone completely', '击溃']]],
+  '经典': ['jīng diǎn', [['名', '传统的具有权威性的著作'], ['名', '各宗教宣扬教义的根本性著作'], ['形', '著作具有权威性的；事物最有代表性的']]],
+  '训练': ['xùn liàn', [['动', '有计划、有步骤地使具有某种特长或技能']]],
+  '文化': ['wén huà', [['名', '人类在社会历史发展过程中所创造的物质财富和精神财富的总和，特指精神财富，如文学、艺术、教育、科学等'], ['名', '运用文字的能力及一般知识']]],
+  '囫囵吞枣': ['hú lún tūn zǎo', [['成', '把枣整个儿吞下去，不加咀嚼，不辨滋味。比喻对事物不加分析思考，笼统接受']]],
+  '偏枯': ['piān kū', [['名', '中医指半身不遂'], ['形', '比喻发展不平衡，偏于一方面']]],
+  '开倒车': ['kāi dào chē', [['惯', '比喻违反前进方向，向后退']]],
+  '明达': ['míng dá', [['形', '对事理有明确透彻的认识；通达']]],
+  '小学': ['xiǎo xué', [['名', '对儿童、少年实施初等教育的学校'], ['名', '旧时指研究文字、训诂、音韵的学问']]],
+  '文字学': ['wén zì xué', [['名', '语言学的一个分支，研究文字的起源、发展、性质、体系以及形、音、义的关系等']]],
+  '卜筮': ['bǔ shì', [['动', '古时预测吉凶，用龟甲称卜，用蓍草称筮，合称卜筮']]],
+  '八卦': ['bā guà', [['名', '《周易》中的八种基本图形，用“—”和“--”符号组成，名称是乾、坤、震、巽、坎、离、艮、兑'], ['名', '比喻没有根据的传闻']]],
+  '仓颉': ['Cāng Jié', [['名', '传说中黄帝的史官，汉字的创造者']]],
+  '许慎': ['Xǔ Shèn', [['名', '东汉经学家、文字学家，著有《说文解字》']]],
+  '六书': ['liù shū', [['名', '古人分析汉字造字方法归纳出的六种条例：象形、指事、会意、形声、转注、假借']]],
+  '象形': ['xiàng xíng', [['名', '六书之一，描摹事物形状的造字方法，如“日”“月”']]],
+  '形声': ['xíng shēng', [['名', '六书之一，由表示意义的形旁和表示读音的声旁组成新字，如“江”“河”']]],
+};
+
+const SETTINGS = [
+  { g: '阅读', rows: [
+    { k: '翻页与点击区域', v: '左 1/3 上一页', d: 'tap' },
+    { k: '全刷频率', v: '每 6 页', d: 'refresh' },
+    { k: '页脚信息', v: '章节进度 · 时间 · 电量', d: 'footer' },
+    { k: '读完一本书后', v: '询问', d: 'end' },
+  ] },
+  { g: '屏幕', rows: [
+    { k: '刷新与残影', v: '标准', d: 'refresh' },
+    { k: '休眠屏保', v: '当前书封面', d: 'saver' },
+    { k: '夜间模式', toggle: 'night' },
+  ] },
+  { g: '网络与同步', rows: [
+    { k: 'Wi‑Fi', v: '已关闭', d: 'wifi' },
+    { k: '阅读进度同步', v: '未登录', d: 'sync' },
+    { k: '无线传书与书库', v: 'Calibre · OPDS', d: 'transfer' },
+  ] },
+  { g: '设备', rows: [
+    { k: '实体按键', v: '翻页键', d: 'keys' },
+    { k: '手势', v: '12 个已启用', d: 'gesture' },
+    { k: '电源与休眠', v: '15 分钟后休眠', d: 'power' },
+  ] },
+  { g: '高级', rows: [
+    { k: '插件', v: '37 个', d: 'plugins' },
+    { k: '全部设置（原版菜单）', d: 'all' },
+  ] },
+];
+const DETAILS = {
+  tap: ['翻页与点击区域', [['点击翻页', '左 1/3 上一页 · 右 2/3 下一页'], ['左手模式', 'toggle'], ['滑动翻页', 'toggle:on'], ['长按选词时长', '0.5 秒'], ['预览点击区域', 'zones']]],
+  refresh: ['刷新与残影', [['全刷频率', '每 6 页'], ['打开菜单时闪刷', 'toggle'], ['翻页使用快速刷新', 'toggle'], ['夜间模式下每页全刷', 'toggle:on'], ['图片页全刷', 'toggle:on']]],
+  footer: ['页脚信息', [['章节进度', 'toggle:on'], ['时间', 'toggle:on'], ['电量', 'toggle:on'], ['本章剩余时间', 'toggle'], ['全书百分比', 'toggle'], ['书名', 'toggle']]],
+  end: ['读完一本书后', [['询问', '已选'], ['标记为读完并回到书架', ''], ['打开下一本', '']]],
+  saver: ['休眠屏保', [['显示内容', '当前书封面'], ['显示阅读进度', 'toggle:on'], ['唤醒后解锁', 'toggle']]],
+  wifi: ['Wi‑Fi', [['Wi‑Fi', 'toggle'], ['需要联网时自动开启', 'toggle:on'], ['空闲后自动关闭', '5 分钟']]],
+  sync: ['阅读进度同步', [['同步服务器', 'KOSync 默认服务器'], ['账号', '未登录'], ['打开书时拉取进度', 'toggle:on'], ['关闭书时推送进度', 'toggle:on']]],
+  transfer: ['无线传书与书库', [['Calibre 无线连接', '未启用'], ['接收文件夹', '/Books'], ['OPDS 书库', '未添加'], ['云存储（Dropbox · WebDAV · FTP）', '未添加']]],
+  keys: ['实体按键', [['翻页键方向', '标准'], ['长按翻页键', '跳到下一章'], ['返回键', '返回上一层']]],
+  gesture: ['手势', [['左下角上滑', '调亮度'], ['右下角上滑', '调色温'], ['双指捏合', '字号'], ['左边缘下滑', '目录'], ['两指点按', '书签']]],
+  power: ['电源与休眠', [['自动休眠', '15 分钟'], ['自动关机', '3 天'], ['合盖休眠', 'toggle:on']]],
+  plugins: ['插件', [['阅读统计', 'toggle:on'], ['生词本', 'toggle:on'], ['进度同步（KOSync）', 'toggle:on'], ['Calibre', 'toggle:on'], ['笔记导出', 'toggle:on'], ['云存储', 'toggle'], ['新闻下载（RSS）', 'toggle'], ['SSH 服务器', 'toggle'], ['终端', 'toggle'], ['还有 28 个', '']]],
+  all: ['全部设置（原版菜单）', [['导航', '目录 · 书签 · 书籍地图 · 页面浏览 · 跳转'], ['排版', '样式 · 字体 · 排版规则 · 缩放 · 高亮选项'], ['设置', '前光 · 网络 · 屏幕 · 手势 · 设备 · 状态栏'], ['工具', '计时 · Calibre · 导出 · 统计 · 同步 · 云存储'], ['搜索', '词典 · 维基百科 · 文件搜索 · OPDS'], ['文件管理', '历史 · 收藏 · 书单 · 默认文件夹'], ['主菜单', '帮助 · 关于 · 重启 · 退出']]],
+  typeAdv: ['更多排版', [['字重', '+0'], ['两端对齐', 'toggle:on'], ['自动断字', '按书籍语言'], ['段首缩进', '2 字符'], ['段间距', '0.45 行'], ['使用书籍内嵌字体', 'toggle:on'], ['使用书籍内嵌样式', 'toggle:on'], ['样式微调（CSS）', '3 项已启用'], ['渲染模式', '网页级']]],
+  fonts: ['更多字体', [['思源宋体', '需放入 /fonts'], ['思源黑体', '随应用附带'], ['Noto Serif', '随应用附带'], ['Noto Sans', '随应用附带'], ['FreeSerif', '随应用附带'], ['从 /fonts 文件夹添加', '放入 .ttf / .otf 后重启']]],
+};
+
+const CONTEXT = {
+  shelf: ['书架', '替代文件浏览器首页和封面浏览插件。默认按最近阅读排序，列表分页而不是滚动。', 'apps/filemanager/filemanager.lua · plugins/coverbrowser.koplugin'],
+  files: ['文件', '保留 KOReader 的文件夹浏览，降为第二个标签页。', 'ui/widget/filechooser.lua'],
+  me: ['我的', '阅读统计、笔记、生词本和设置的入口，取代原来的“主菜单”。', 'plugins/statistics.koplugin · plugins/vocabbuilder.koplugin'],
+  reader: ['阅读页', '只留正文、页眉章节名和页脚进度。点左右翻页，点中间呼出工具栏。', 'apps/reader/modules/readerview.lua · apps/reader/modules/readerfooter.lua'],
+  toolbar: ['工具栏', '替代原来顶部 7 个图标标签页的菜单。底部 4 个常用入口，其余在右上角“更多”里。', 'apps/reader/modules/readermenu.lua · ui/widget/touchmenu.lua'],
+  toc: ['目录 · 书签 · 笔记', '一个抽屉里放三类导航，替代分散的目录、书签浏览器和高亮列表。', 'apps/reader/modules/readertoc.lua · apps/reader/modules/readerbookmark.lua'],
+  progress: ['进度', '按章节跳转和拖动定位，带“返回上次位置”。', 'ui/widget/skimtowidget.lua · apps/reader/modules/readerlink.lua'],
+  light: ['亮度', '前光亮度和色温，加上自动色温和夜间模式开关。', 'ui/widget/frontlightwidget.lua · plugins/autowarmth.koplugin'],
+  type: ['排版面板', '替代底部配置条。只放字号、字体、行距、边距，高级选项收进“更多排版”。', 'ui/widget/configdialog.lua · ui/data/creoptions.lua'],
+  sel: ['划线气泡', '长按选词后的操作：复制、划线、写想法、查词、搜索。', 'apps/reader/modules/readerhighlight.lua'],
+  hl: ['已划线文字', '点一下已有划线：改样式、写想法、复制、查询、删除。', 'apps/reader/modules/readerhighlight.lua · apps/reader/modules/readerannotation.lua'],
+  dict: ['查词', '离线 StarDict 词典优先，维基百科作为第二个来源。可直接加入生词本。', 'ui/widget/dictquicklookup.lua · apps/reader/modules/readerdictionary.lua'],
+  note: ['写想法', '给划线加笔记，保存在书的 .sdr 目录里。', 'apps/reader/modules/readerannotation.lua'],
+  search: ['全书搜索', '搜索结果分页列出，点一条直接跳过去，原位置记入“返回上次位置”。', 'apps/reader/modules/readersearch.lua'],
+  more: ['更多', '低频但重要的功能：书籍详情、点击区域、导出笔记、阅读统计、全部设置。', 'apps/reader/modules/readermenu.lua'],
+  settings: ['设置', '把原版 7 个标签页的设置重组成 5 组，原版菜单仍可从“全部设置”进入。', 'ui/elements/reader_menu_order.lua · ui/elements/filemanager_menu_order.lua'],
+  notesAll: ['笔记', '所有书的划线和想法，按书分组，可以导出。', 'plugins/exporter.koplugin'],
+  vocab: ['生词本', '查过的词和出处句子，可以复习。', 'plugins/vocabbuilder.koplugin'],
+  bookact: ['书籍操作', '长按封面出现，替代原来的文件长按对话框。', 'apps/filemanager/filemanager.lua'],
+  info: ['书籍详情', '格式、路径、语言和阅读数据。', 'apps/filemanager/filemanagerbookinfo.lua'],
+  zones: ['点击区域', '把翻页区域画出来，方便调整左手模式等设置。', 'apps/reader/modules/readerpaging.lua · plugins/gestures.koplugin'],
+  export: ['导出笔记', '导出目标对应 exporter 插件里已有的格式和服务。', 'plugins/exporter.koplugin/target/'],
+  manage: ['书架管理', '排序方式和批量管理。', 'plugins/coverbrowser.koplugin'],
+};
+
+/* ---------- state ---------- */
+const today = new Date();
+const S = {
+  dev: '7', scale: 1, tab: 'shelf', filter: 'all', sort: 'recent', pg: {}, path: [],
+  rf: false, night: false, light: { level: 15, warm: 4, auto: true },
+  type: { fs: 19, font: 'serif', lh: 'std', mx: 'std' },
+  hlStyle: 'marker', turns: 0,
+  reader: null, pos: { jdct: { ch: 1, page: 1 }, walden: { ch: 0, page: 2 } },
+  ui: null, sel: null, hls: [], bms: [], lastLoc: null, subStack: [], log: [], area: 0, ops: 0,
+  vocab: [
+    { w: 'sojourner', c: 'At present I am a sojourner in civilized life again.', b: 'Walden', t: '10 月 19 日' },
+    { w: '囫囵吞枣', c: '又按着学生程度选材，可以免掉他们囫囵吞枣的弊病。', b: '经典常谈', t: '10 月 18 日' },
+  ],
+  geo: null,
+};
+
+const screen = $('#screen'), inner = $('#inner'), flow = $('#flow'), measure = $('#measure'), pagevp = $('#pagevp');
+
+/* ---------- refresh accounting (signature) ---------- */
+// KOReader refresh types, named by waveform rather than area: only "full" flashes.
+const RF_NAME = { partial: '正文刷新', ui: '界面刷新', fast: '快速刷新', full: '全刷闪屏' };
+function localRect(el) {
+  const sr = screen.getBoundingClientRect(), r = el.getBoundingClientRect();
+  return { x: (r.left - sr.left) / S.scale, y: (r.top - sr.top) / S.scale, w: r.width / S.scale, h: r.height / S.scale };
+}
+function paint(targets, type, label) {
+  const d = DEVICES[S.dev];
+  const rects = (Array.isArray(targets) ? targets : [targets]).filter(Boolean)
+    .map(t => (t.nodeType ? localRect(t) : t))
+    .map(r => ({ x: Math.max(0, r.x), y: Math.max(0, r.y), w: Math.min(d.w, r.x + r.w) - Math.max(0, r.x), h: Math.min(d.h, r.y + r.h) - Math.max(0, r.y) }))
+    .filter(r => r.w > 0 && r.h > 0);
+  if (!rects.length) return;
+  const area = Math.min(1, rects.reduce((a, r) => a + r.w * r.h, 0) / (d.w * d.h));
+  S.log.unshift({ label, type, area });
+  S.log.length = Math.min(S.log.length, 7);
+  S.ops++; S.area += area;
+  renderLog();
+  if (!S.rf) return;
+  if (type === 'full') {
+    const f = $('#flash');
+    f.classList.add('on');
+    setTimeout(() => f.classList.remove('on'), 110);
+  }
+  const layer = $('#rfLayer');
+  rects.forEach((r, i) => {
+    const box = h('div', { class: 'rf' + (r.y < 22 ? ' in' : ''), style: `left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px` });
+    if (i === 0) box.append(h('i', null, `${RF_NAME[type]} · ${Math.round(area * 100)}%`));
+    layer.append(box);
+    setTimeout(() => box.remove(), 1200);
+  });
+}
+function renderLog() {
+  const ol = $('#rfLog');
+  ol.replaceChildren(...(S.log.length ? S.log.map(e => h('li', null, h('span', null, e.label), h('span', { class: 't' }, RF_NAME[e.type]), h('span', { class: 'a' }, Math.round(e.area * 100) + '%'))) : [h('li', null, h('span', { class: 'empty' }, '还没有操作。点一下设备屏幕试试。'))]));
+  $('#rfSum').textContent = S.ops ? `共 ${S.ops} 次刷新，平均每次重绘 ${Math.round(S.area / S.ops * 100)}% 的屏幕。` : '';
+}
+
+/* ---------- context panel ---------- */
+function ctx(key) {
+  const c = CONTEXT[key];
+  if (!c) return;
+  $('#ctxName').textContent = c[0];
+  $('#ctxWhat').textContent = c[1];
+  // Break long paths only after "/", never inside a file name.
+  $('#ctxPath').replaceChildren(...c[2].split(' · ').flatMap((p, i) => {
+    const segs = (/^(apps|ui)\//.test(p) ? 'frontend/' + p : p).split('/');
+    return [i ? h('br') : null, ...segs.flatMap((s, j) => (j < segs.length - 1 ? [s + '/', h('wbr')] : [s]))];
+  }).filter(Boolean));
+}
+
+/* ---------- device sizing ---------- */
+function setDevice(id) {
+  S.dev = id;
+  if (id === 'fit') {
+    // Phone viewports: draw the screen at 1:1 dp so text stays legible, like a 5–6" reader.
+    const w = Math.round(Math.min(536, $('.device-area').getBoundingClientRect().width - 16));
+    const fh = Math.round(Math.max(w * 1.34, Math.min(window.innerHeight - 48, w * 2)));
+    DEVICES.fit = { w, h: fh, res: `按手机屏幕 1:1 显示 · ${w} × ${fh} dp，接近手机尺寸的墨水屏阅读器` };
+  }
+  $('#device').classList.toggle('fit', id === 'fit');
+  const d = DEVICES[id];
+  screen.style.setProperty('--sw', d.w + 'px');
+  screen.style.setProperty('--sh', d.h + 'px');
+  $$('#devSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.dev === id)));
+  $('#devCap').textContent = d.res;
+  fit();
+  S.pg = {};
+  relayoutAll();
+}
+function fit() {
+  const d = DEVICES[S.dev], dev = $('#device'), wrap = $('#deviceWrap');
+  const fitMode = S.dev === 'fit';
+  const dw = d.w + (fitMode ? 16 : 44), dh = d.h + (fitMode ? 32 : 80);
+  const area = $('.device-area').getBoundingClientRect();
+  const narrow = window.innerWidth <= 900;
+  const availW = area.width;
+  const availH = narrow ? window.innerHeight * 0.92 : window.innerHeight - 56;
+  S.scale = fitMode ? 1 : Math.min(availW / dw, availH / dh, 1.25);
+  dev.style.transform = `scale(${S.scale})`;
+  wrap.style.width = dw * S.scale + 'px';
+  wrap.style.height = dh * S.scale + 'px';
+}
+function relayoutAll() {
+  applyTypeVars();
+  Object.keys(DATA).forEach(id => { buildBook(id); measureBook(id); });
+  if (S.reader) { layoutReader(); }
+  renderTab();
+  if (S.subStack.length) renderSub();
+}
+
+/* ---------- toast ---------- */
+let toastT;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.hidden = false;
+  paint(t, 'fast', '提示');
+  clearTimeout(toastT);
+  toastT = setTimeout(() => { t.hidden = true; }, 2000);
+}
+
+/* ---------- covers ---------- */
+function cover(b, cw) {
+  const el = h('div', { class: 'cover cv-' + b.cover + (b.lang === 'en' ? ' en' : ''), style: cw ? `--cw:${cw}px` : null, 'aria-hidden': 'true' });
+  if (b.cover === 'frame') el.append(h('div', { class: 'in', style: `--n:${[...b.title].length}` }, h('div', { class: 't' }, b.title), h('div', { class: 'a' }, b.author)));
+  else if (b.cover === 'band') el.append(h('div', { class: 't' }, b.title), h('div', { class: 'r' }), h('div', { class: 'a' }, b.author));
+  else if (b.cover === 'block') el.append(h('div', { class: 'a' }, b.author), h('div', { class: 't' }, b.title));
+  else if (b.cover === 'split') el.append(h('div', { class: 'g' }, h('span', null, b.title[0])), h('div', { class: 't' }, b.title), h('div', { class: 'a' }, b.author));
+  else el.append(h('div', { class: 'box' }, h('div', { class: 't' }, b.title), h('div', { class: 'a' }, b.author)));
+  return el;
+}
+function pct(b) {
+  if (b.readable && DATA[b.id].pages) return bookPct(b.id);
+  return b.status === 'done' ? 100 : b.status === 'new' ? 0 : b.pct;
+}
+function metaText(b) {
+  if (b.status === 'done') return '已读完';
+  if (b.status === 'new') return '未读';
+  return `读到 ${pct(b)}%`;
+}
+
+/* ---------- pager ---------- */
+function pager(el, n, p, go) {
+  el.replaceChildren(
+    h('button', { type: 'button', 'aria-label': '上一页', disabled: p <= 0, onclick: () => go(p - 1) }, ic('back', 'sm')),
+    h('span', { class: 'n' }, `${p + 1} / ${n}`),
+    h('button', { type: 'button', 'aria-label': '下一页', disabled: p >= n - 1, onclick: () => go(p + 1) }, ic('chev', 'sm')),
+  );
+  el.style.visibility = n > 1 ? 'visible' : 'hidden';
+}
+// Split a fixed-height list into pages by measured row heights: e-ink lists page, they never scroll.
+function paged(listEl, pagerEl, items, key, label) {
+  listEl.replaceChildren(...items);
+  if (!items.length) { pager(pagerEl, 1, 0, () => {}); return; }
+  const H = listEl.clientHeight;
+  const pages = [[]];
+  let acc = 0;
+  for (const el of items) {
+    const hh = el.offsetHeight;
+    if (acc + hh > H + 0.5 && pages[pages.length - 1].length) { pages.push([]); acc = 0; }
+    pages[pages.length - 1].push(el);
+    acc += hh;
+  }
+  for (let i = 0; i < pages.length - 1; i++) {
+    const pg = pages[i];
+    if (pg.length > 1 && pg[pg.length - 1].classList.contains('grp')) pages[i + 1].unshift(pg.pop());
+  }
+  const n = pages.length;
+  const show = p => {
+    S.pg[key] = p;
+    items.forEach(el => { el.hidden = true; });
+    pages[p].forEach(el => { el.hidden = false; });
+    pager(pagerEl, n, p, np => { show(np); paint(listEl, 'ui', label || '列表翻页'); });
+  };
+  show(Math.min(S.pg[key] || 0, n - 1));
+}
+
+/* ---------- tabs ---------- */
+function setTab(tab, silent) {
+  S.tab = tab;
+  $$('#tabbar button').forEach(b => { if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+  ['shelf', 'files', 'me'].forEach(t => { $('#v-' + t).hidden = t !== tab; });
+  renderTab();
+  ctx(tab);
+  if (!silent) paint($('#v-' + tab), 'ui', '切换标签');
+}
+function renderTab() {
+  if (S.tab === 'shelf') renderShelf();
+  else if (S.tab === 'files') renderFiles();
+  else renderMe();
+}
+
+/* shelf */
+function shelfBooks() {
+  let list = SHELF.filter(b => !b.removed);
+  if (S.filter !== 'all') list = list.filter(b => b.status === S.filter);
+  if (S.sort === 'title') list = [...list].sort((a, b) => a.title.localeCompare(b.title, 'zh-CN'));
+  else if (S.sort === 'author') list = [...list].sort((a, b) => a.author.localeCompare(b.author, 'zh-CN'));
+  else list = [...list].sort((a, b) => a.order - b.order);
+  return list;
+}
+function renderShelf() {
+  const all = SHELF.filter(b => !b.removed);
+  const counts = { all: all.length, reading: all.filter(b => b.status === 'reading').length, new: all.filter(b => b.status === 'new').length, done: all.filter(b => b.status === 'done').length };
+  const names = { all: '全部', reading: '在读', new: '未读', done: '读完' };
+  $('#shelfChips').replaceChildren(...Object.keys(names).map(k => h('button', {
+    type: 'button', class: 'chip', 'aria-pressed': String(S.filter === k),
+    onclick: () => { S.filter = k; S.pg.shelf = 0; renderShelf(); paint([$('#shelfChips'), $('#shelfGrid'), $('#shelfPager')], 'ui', '筛选书架'); },
+  }, names[k], h('span', { class: 'n' }, counts[k]))));
+
+  const grid = $('#shelfGrid');
+  const books = shelfBooks();
+  grid.replaceChildren();
+  const cs = getComputedStyle(grid);
+  const W = grid.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const Hh = grid.clientHeight - parseFloat(cs.paddingTop);
+  const cols = W < 520 ? 3 : W < 760 ? 4 : 5;
+  const gap = 20, textH = 60, rowGap = 18;
+  let cw = Math.floor((W - gap * (cols - 1)) / cols);
+  let rows = Math.floor((Hh + rowGap) / (cw * 4 / 3 + textH + rowGap));
+  if (rows < 2) {
+    // Shrink covers to fit a second row, but never below 3/4 of the column width.
+    const shrunk = Math.floor(((Hh + rowGap) / 2 - textH - rowGap) * 3 / 4);
+    if (shrunk >= cw * 0.75) { rows = 2; cw = shrunk; } else rows = 1;
+  }
+  grid.style.setProperty('--cols', cols);
+  grid.style.setProperty('--cw', cw + 'px');
+  const per = rows * cols, n = Math.max(1, Math.ceil(books.length / per));
+  const p = Math.min(S.pg.shelf || 0, n - 1);
+  S.pg.shelf = p;
+  if (!books.length) grid.append(h('div', { class: 'empty-state' }, '这里还没有书。'));
+  books.slice(p * per, p * per + per).forEach(b => grid.append(bookCell(b, cw)));
+  pager($('#shelfPager'), n, p, np => { S.pg.shelf = np; renderShelf(); paint(grid, 'ui', '书架翻页'); });
+}
+function bookCell(b, cw) {
+  let lp, moved = false;
+  const el = h('button', { type: 'button', class: 'book', 'aria-label': `${b.title}，${b.author}，${metaText(b)}` },
+    cover(b, cw), h('div', { class: 'bt' }, b.title), h('div', { class: 'bm' }, metaText(b)));
+  el.addEventListener('pointerdown', () => { moved = false; lp = setTimeout(() => { moved = true; bookActions(b); }, 480); });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(t => el.addEventListener(t, () => clearTimeout(lp)));
+  el.addEventListener('contextmenu', e => { e.preventDefault(); clearTimeout(lp); moved = true; bookActions(b); });
+  el.addEventListener('click', () => { if (moved) return; openBook(b.id); });
+  return el;
+}
+
+/* files */
+function renderFiles() {
+  const crumbs = $('#crumbs');
+  const parts = ['内部存储', 'Books', ...S.path];
+  crumbs.replaceChildren(...parts.flatMap((p, i) => {
+    const last = i === parts.length - 1;
+    const node = last || i === 0 ? h('span', null, p) : h('button', { type: 'button', onclick: () => { S.path = S.path.slice(0, i - 1); S.pg.files = 0; renderFiles(); paint($('#v-files'), 'ui', '返回上级'); } }, p);
+    return i ? [h('span', { 'aria-hidden': 'true' }, '/'), node] : [node];
+  }));
+  let items;
+  if (!S.path.length) {
+    const dirs = [['中文', SHELF.filter(b => b.dir === '中文').length], ['English', SHELF.filter(b => b.dir === 'English').length], ['下载', 0]];
+    items = dirs.map(([d, n]) => h('button', { type: 'button', class: 'row', onclick: () => { S.path = [d]; S.pg.files = 0; renderFiles(); paint($('#v-files'), 'ui', '打开文件夹'); } },
+      ic('folder'), h('div', { class: 'main' }, h('div', { class: 'l1' }, d), h('div', { class: 'l2' }, n ? `${n} 本` : '空')), ic('chev', 'sm chev')));
+  } else {
+    const books = SHELF.filter(b => b.dir === S.path[0]);
+    items = books.length ? books.map(b => h('button', { type: 'button', class: 'row', onclick: () => openBook(b.id) },
+      h('span', { class: 'fmt' }, b.fmt), h('div', { class: 'main' }, h('div', { class: 'l1' }, `${b.title}.${b.fmt.toLowerCase()}`), h('div', { class: 'l2' }, `${b.author} · ${b.size}`)), h('span', { class: 'val' }, metaText(b))))
+      : [h('div', { class: 'nothing' }, h('b', null, '这个文件夹是空的'), '用 USB 或 Calibre 无线传书把书放进来。')];
+  }
+  paged($('#fileList'), $('#filePager'), items, 'files', '文件翻页');
+}
+
+/* me */
+function renderMe() {
+  const week = [42, 65, 18, 38];
+  const days = ['一', '二', '三', '四', '五', '六', '日'];
+  const max = 80, total = week.reduce((a, b) => a + b, 0);
+  $('#meStats').replaceChildren(
+    h('div', { class: 'hd' }, h('b', null, '本周阅读'), h('span', null, `${Math.floor(total / 60)} 小时 ${total % 60} 分`)),
+    h('div', { class: 'week', role: 'img', 'aria-label': `本周每日阅读分钟数：${week.map((m, i) => `周${days[i]} ${m}`).join('，')}` }, days.map((d, i) => {
+      const m = week[i];
+      return h('div', { class: 'd' + (i === 3 ? ' today' : '') },
+        m != null ? h('span', null, m) : h('span', null, ' '),
+        m != null ? h('div', { class: 'bar', style: `height:${Math.max(3, m / max * 78)}px` }) : h('div', { class: 'bar future' }),
+        i === 3 ? '今天' : d);
+    })),
+    h('div', { class: 'me-sub' }, '连续阅读 4 天 · 今年读完 3 本 · 数据来自阅读统计插件（示例）'),
+  );
+  const rows = [
+    ['笔记', `${S.hls.length} 条划线和想法`, () => pushSub('notesAll')],
+    ['生词本', `${S.vocab.length} 个词`, () => pushSub('vocab')],
+    ['同步与传书', 'KOSync · Calibre · OPDS', () => pushSub('detail', 'transfer')],
+    ['设置', '阅读 · 屏幕 · 网络 · 设备', () => pushSub('settings')],
+  ];
+  $('#meList').replaceChildren(...rows.map(([k, v, fn]) => h('button', { type: 'button', class: 'row', onclick: fn },
+    h('div', { class: 'main' }, h('div', { class: 'l1' }, k), h('div', { class: 'l2' }, v)), ic('chev', 'sm chev'))));
+}
+
+/* ---------- book actions / info ---------- */
+function bookActions(b) {
+  ctx('bookact');
+  openSheet(b.title, body => {
+    body.append(h('div', { class: 'bookhead' }, cover(b, 56), h('div', null, h('div', { style: 'font-weight:700;font-size:15px' }, b.title), h('div', { style: 'font-size:13px;color:var(--ink-2)' }, `${b.author} · ${metaText(b)}`))));
+    const acts = [
+      [b.status === 'new' ? '开始阅读' : '继续阅读', () => { closeSheet(true); openBook(b.id); }],
+      ['书籍详情', () => bookInfo(b)],
+      [b.status === 'done' ? '标记为在读' : '标记为已读完', () => { b.status = b.status === 'done' ? 'reading' : 'done'; if (b.status === 'reading' && !b.pct) b.pct = 1; closeSheet(); renderShelf(); toast(b.status === 'done' ? '已标记为读完' : '已标记为在读'); }],
+      ['从书架移除', () => { b.removed = true; closeSheet(); renderShelf(); toast(`已移除。文件还在 /Books/${b.dir}`); }],
+    ];
+    acts.forEach(([k, fn]) => body.append(h('button', { type: 'button', class: 'row', onclick: fn }, h('div', { class: 'main' }, h('div', { class: 'l1' }, k)), ic('chev', 'sm chev'))));
+  });
+}
+function bookInfo(b) {
+  ctx('info');
+  const readable = b.readable && DATA[b.id];
+  openSheet('书籍详情', body => {
+    body.append(h('div', { class: 'bookhead' }, cover(b, 56), h('div', null, h('div', { style: 'font-weight:700;font-size:15px' }, b.title), h('div', { style: 'font-size:13px;color:var(--ink-2)' }, b.author))));
+    const kv = [['格式', b.fmt], ['大小', b.size], ['位置', `/内部存储/Books/${b.dir}/${b.title}.${b.fmt.toLowerCase()}`], ['语言', b.lang === 'zh' ? '中文' : '英文'], ['进度', metaText(b)]];
+    if (readable) kv.push(['划线', `${S.hls.filter(x => x.book === b.id).length} 条`], ['章节', `${DATA[b.id].toc.length} 章，演示收录前 ${DATA[b.id].chapters.length} 章`]);
+    body.append(h('dl', { style: 'margin:0' }, kv.map(([k, v]) => h('div', { class: 'kv' }, h('dt', null, k), h('dd', null, v)))));
+  });
+}
+
+/* ---------- reader ---------- */
+function buildBook(id) {
+  const d = DATA[id];
+  if (d.dom) return;
+  const lang = BY[id].lang === 'zh' ? 'zh-CN' : 'en';
+  d.dom = d.chapters.map(c => {
+    const div = h('div', { class: 'chapter', lang });
+    div.append(h('h2', { class: 'ch-title' }, c.title));
+    c.paras.forEach(p => div.append(h('p', null, p)));
+    return div;
+  });
+  d.pages = d.chapters.map(() => 1);
+}
+function geo() {
+  const d = DEVICES[S.dev];
+  // Big panels get wider margins so a line stays near 38 CJK characters.
+  const mx = MX[S.type.mx] + (d.w > 800 ? 72 : 0);
+  const W = d.w - mx * 2, G = 48;
+  return { mx, W, G, step: W + G };
+}
+function applyTypeVars() {
+  const g = geo();
+  screen.style.setProperty('--mx', g.mx + 'px');
+  screen.style.setProperty('--fs', S.type.fs + 'px');
+  screen.style.setProperty('--lh', LH[S.type.lh]);
+  screen.style.setProperty('--rf', FONTS[S.type.font].fam);
+  screen.style.setProperty('--rf-en', FONTS[S.type.font].en);
+  [flow, measure].forEach(f => { f.style.width = g.W + 'px'; f.style.columnWidth = g.W + 'px'; f.style.columnGap = g.G + 'px'; });
+  S.geo = g;
+}
+function countPages(el) {
+  const g = S.geo;
+  return Math.max(1, Math.round((el.scrollWidth + g.G) / g.step));
+}
+function measureBook(id) {
+  const d = DATA[id];
+  d.pages = d.dom.map(ch => { measure.replaceChildren(ch.cloneNode(true)); return countPages(measure); });
+  measure.replaceChildren();
+}
+function layoutReader() {
+  const r = S.reader;
+  const d = DATA[r.id];
+  const ratio = d.pages[r.ch] > 1 ? r.page / d.pages[r.ch] : 0;
+  applyTypeVars();
+  measureBook(r.id);
+  r.page = Math.min(d.pages[r.ch] - 1, Math.round(ratio * d.pages[r.ch]));
+  applyPage();
+}
+function mountChapter() {
+  flow.replaceChildren(DATA[S.reader.id].dom[S.reader.ch]);
+}
+function applyPage() {
+  const r = S.reader, d = DATA[r.id];
+  flow.style.transform = `translateX(${-r.page * S.geo.step}px)`;
+  $('#rhead').textContent = r.page === 0 ? d.title : d.chapters[r.ch].title;
+  $('#rfoot').replaceChildren(
+    h('span', null, `本章 ${r.page + 1} / ${d.pages[r.ch]}`),
+    h('span', { class: 'r' }, h('span', null, bookPct(r.id) + '%'), h('span', null, clock()), h('span', { class: 'batt', style: '--b:76%' })));
+  $('#dogear').hidden = !isBookmarked();
+  S.pos[r.id] = { ch: r.ch, page: r.page };
+}
+function bookPct(id) {
+  const d = DATA[id];
+  const pos = S.reader && S.reader.id === id ? S.reader : S.pos[id];
+  const loaded = d.pages.reduce((a, b) => a + b, 0);
+  const avg = loaded / d.pages.length;
+  const total = loaded + avg * (d.toc.length - d.chapters.length);
+  const before = d.pages.slice(0, pos.ch).reduce((a, b) => a + b, 0) + pos.page + 1;
+  return Math.max(1, Math.round(before / total * 100));
+}
+function clock() {
+  const t = new Date();
+  return `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+}
+function openBook(id) {
+  const b = BY[id];
+  if (!b.readable) { toast(`演示版只收录了《经典常谈》和 Walden 的正文`); return; }
+  closeAll(true);
+  S.subStack = []; $('#sub').hidden = true;
+  buildBook(id);
+  const pos = S.pos[id];
+  S.reader = { id, ch: pos.ch, page: pos.page };
+  $('#reader').hidden = false;
+  $('#tabbar').hidden = true;
+  mountChapter();
+  layoutReader();
+  b.order = -Date.now();
+  if (b.status === 'new') b.status = 'reading';
+  ctx('reader');
+  paint(screen, 'full', '打开书');
+}
+function exitReader() {
+  closeAll(true);
+  S.reader = null;
+  $('#reader').hidden = true;
+  $('#tabbar').hidden = false;
+  setTab('shelf', true);
+  paint(screen, 'full', '回到书架');
+}
+function turn(dir) {
+  const r = S.reader, d = DATA[r.id];
+  const np = r.page + dir;
+  if (np < 0) {
+    if (r.ch === 0) { toast('已经是第一页'); return; }
+    r.ch--; mountChapter(); r.page = d.pages[r.ch] - 1;
+  } else if (np >= d.pages[r.ch]) {
+    if (r.ch === d.chapters.length - 1) { toast('演示版到这里结束，后面的章节没有收录'); return; }
+    r.ch++; mountChapter(); r.page = 0;
+  } else r.page = np;
+  applyPage();
+  S.turns++;
+  paint(screen, S.turns % 6 === 0 ? 'full' : 'partial', dir > 0 ? '下一页' : '上一页');
+}
+function jumpTo(ch, page, remember = true) {
+  const r = S.reader;
+  if (remember) S.lastLoc = { ch: r.ch, page: r.page };
+  if (r.ch !== ch) { r.ch = ch; mountChapter(); }
+  r.page = Math.max(0, Math.min(page, DATA[r.id].pages[ch] - 1));
+  applyPage();
+}
+function pageOfRect(rect) {
+  const fr = flow.getBoundingClientRect();
+  const x = (rect.left - fr.left) / S.scale;
+  return Math.floor((x + 2) / S.geo.step);
+}
+
+/* bookmarks */
+function isBookmarked() {
+  const r = S.reader;
+  if (!r) return false;
+  const pages = DATA[r.id].pages[r.ch];
+  return S.bms.some(b => b.book === r.id && b.ch === r.ch && Math.round(b.ratio * pages) === r.page);
+}
+function pageSnippet() {
+  const vr = pagevp.getBoundingClientRect();
+  const c = caretAt(vr.left + 4 * S.scale, vr.top + 4 * S.scale);
+  if (!c || c.node.nodeType !== 3) return '';
+  return c.node.data.slice(c.offset, c.offset + 40);
+}
+function toggleBookmark() {
+  const r = S.reader, pages = DATA[r.id].pages[r.ch];
+  if (isBookmarked()) {
+    S.bms = S.bms.filter(b => !(b.book === r.id && b.ch === r.ch && Math.round(b.ratio * pages) === r.page));
+    toast('已删除书签');
+  } else {
+    S.bms.push({ book: r.id, ch: r.ch, ratio: r.page / pages, snip: pageSnippet(), t: '刚刚' });
+    toast('已添加书签');
+  }
+  applyPage();
+  syncBookmarkIcon();
+  paint([$('#dogear'), $('#tbTop')], 'fast', '书签');
+}
+function syncBookmarkIcon() {
+  const btn = $('#tbTop [data-act="bookmark"]');
+  btn.replaceChildren(ic(isBookmarked() ? 'bookmark-on' : 'bookmark'));
+  btn.setAttribute('aria-pressed', String(isBookmarked()));
+}
+
+/* ---------- reader input ---------- */
+let pd = null, lpTimer = null;
+function caretAt(x, y) {
+  if (document.caretPositionFromPoint) { const p = document.caretPositionFromPoint(x, y); return p && { node: p.offsetNode, offset: p.offset }; }
+  if (document.caretRangeFromPoint) { const r = document.caretRangeFromPoint(x, y); return r && { node: r.startContainer, offset: r.startOffset }; }
+  return null;
+}
+function wordAt(x, y) {
+  const c = caretAt(x, y);
+  if (!c || c.node.nodeType !== 3 || !flow.contains(c.node)) return null;
+  const text = c.node.data, lang = BY[S.reader.id].lang;
+  let off = Math.min(c.offset, text.length - 1);
+  if (window.Intl && Intl.Segmenter) {
+    for (const s of new Intl.Segmenter(lang, { granularity: 'word' }).segment(text)) {
+      if (off >= s.index && off < s.index + s.segment.length) {
+        if (!s.isWordLike) return null;
+        const r = document.createRange(); r.setStart(c.node, s.index); r.setEnd(c.node, s.index + s.segment.length); return r;
+      }
+    }
+    return null;
+  }
+  const re = lang === 'zh' ? /[一-鿿]/ : /[A-Za-z'-]/;
+  if (!re.test(text[off])) return null;
+  let a = off, b = off + 1;
+  if (lang !== 'zh') { while (a > 0 && re.test(text[a - 1])) a--; while (b < text.length && re.test(text[b])) b++; }
+  const r = document.createRange(); r.setStart(c.node, a); r.setEnd(c.node, b); return r;
+}
+function showSel(range) {
+  if (window.CSS && CSS.highlights) CSS.highlights.set('sel', new Highlight(range));
+  else { const s = getSelection(); s.removeAllRanges(); s.addRange(range); }
+}
+function clearSel() {
+  if (window.CSS && CSS.highlights) CSS.highlights.delete('sel'); else getSelection().removeAllRanges();
+  S.sel = null;
+}
+function startSelection(x, y) {
+  const r = wordAt(x, y);
+  if (!r) return false;
+  S.sel = { anchor: r.cloneRange(), range: r };
+  showSel(r);
+  S.ui = 'selecting';
+  return true;
+}
+function extendSelection(x, y) {
+  const c = caretAt(x, y);
+  if (!c || !flow.contains(c.node) || c.node.nodeType !== 3) return;
+  const a = S.sel.anchor, r = document.createRange();
+  r.setStart(a.startContainer, a.startOffset); r.setEnd(a.endContainer, a.endOffset);
+  const cmp = r.comparePoint(c.node, c.offset);
+  if (cmp < 0) r.setStart(c.node, c.offset); else if (cmp > 0) r.setEnd(c.node, c.offset);
+  S.sel.range = r;
+  showSel(r);
+}
+pagevp.addEventListener('pointerdown', e => {
+  if (!S.reader || S.ui) return;
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  pd = { x: e.clientX, y: e.clientY, sel: false, target: e.target };
+  try { pagevp.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointers can't be captured */ }
+  lpTimer = setTimeout(() => { if (pd && startSelection(pd.x, pd.y)) pd.sel = true; }, 450);
+});
+pagevp.addEventListener('pointermove', e => {
+  if (!pd) return;
+  if (pd.sel) { extendSelection(e.clientX, e.clientY); return; }
+  if (Math.hypot(e.clientX - pd.x, e.clientY - pd.y) > 10 * S.scale) clearTimeout(lpTimer);
+});
+pagevp.addEventListener('pointerup', e => {
+  clearTimeout(lpTimer);
+  if (!pd) return;
+  const p = pd; pd = null;
+  if (p.sel) { selBubble(); return; }
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  if (Math.abs(dx) > 40 * S.scale && Math.abs(dx) > Math.abs(dy)) { turn(dx < 0 ? 1 : -1); return; }
+  if (Math.hypot(dx, dy) > 10 * S.scale) return;
+  const mark = p.target.closest && p.target.closest('mark.hl');
+  if (mark) { hlBubble(mark.dataset.id); return; }
+  tapZone(e.clientX);
+});
+pagevp.addEventListener('pointercancel', () => { clearTimeout(lpTimer); pd = null; });
+pagevp.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  if (!S.reader || S.ui) return;
+  if (startSelection(e.clientX, e.clientY)) selBubble();
+});
+function tapZone(clientX) {
+  const sr = screen.getBoundingClientRect();
+  const fx = (clientX - sr.left) / sr.width;
+  if (fx < 1 / 3) turn(-1);
+  else if (fx > 2 / 3) turn(1);
+  else showToolbar();
+}
+// Taps on the running head / footer strips also count as page zones.
+['#rhead', '#rfoot'].forEach(sel => $(sel).addEventListener('click', e => { if (!S.ui) tapZone(e.clientX); }));
+$('#reader').addEventListener('click', e => {
+  if (e.target === $('#reader') && !S.ui) tapZone(e.clientX);
+});
+
+/* ---------- overlays ---------- */
+function setScrim(on) { $('#scrim').hidden = !on; }
+$('#scrim').addEventListener('click', () => closeAll());
+function showToolbar() {
+  S.ui = 'toolbar';
+  $('#tbTop').hidden = false; $('#tbBottom').hidden = false; $('#rscrim').hidden = false;
+  syncBookmarkIcon();
+  ctx('toolbar');
+  paint([$('#tbTop'), $('#tbBottom')], 'ui', '呼出工具栏');
+}
+function hideToolbar(silent) {
+  if ($('#tbTop').hidden) return;
+  const rects = [localRect($('#tbTop')), localRect($('#tbBottom'))];
+  $('#tbTop').hidden = true; $('#tbBottom').hidden = true; $('#rscrim').hidden = true;
+  if (!silent) paint(rects, 'ui', '收起工具栏');
+}
+$('#rscrim').addEventListener('click', () => closeAll());
+function closeAll(silent) {
+  const painted = [];
+  if (!$('#sheet').hidden) { painted.push(localRect($('#sheet'))); $('#sheet').hidden = true; }
+  if (!$('#drawer').hidden) { painted.push(localRect($('#drawer'))); $('#drawer').hidden = true; }
+  if (!$('#bubble').hidden) { painted.push(localRect($('#bubble'))); $('#bubble').hidden = true; }
+  if (!$('#zones').hidden) { painted.push(localRect($('#zones'))); $('#zones').hidden = true; }
+  if (!$('#tbTop').hidden) { painted.push(localRect($('#tbTop')), localRect($('#tbBottom'))); }
+  hideToolbar(true);
+  if (S.sel) { clearSel(); }
+  setScrim(false);
+  S.ui = null;
+  if (S.reader) ctx('reader'); else ctx(S.subStack.length ? S.subStack[S.subStack.length - 1].ctx : S.tab);
+  if (!silent && painted.length) paint(painted, 'ui', '关闭');
+}
+function openSheet(title, build, opts = {}) {
+  const sheet = $('#sheet');
+  const before = sheet.hidden ? null : localRect(sheet);
+  hideToolbar(true);
+  $('#drawer').hidden = true; $('#bubble').hidden = true;
+  const body = h('div', { class: 'sheet-body' });
+  sheet.replaceChildren(
+    h('div', { class: 'sheet-head' }, h('h3', null, title), h('button', { type: 'button', class: 'iconbtn', 'aria-label': '关闭', onclick: () => closeAll() }, ic('close'))),
+    body);
+  sheet.setAttribute('aria-label', title);
+  build(body);
+  sheet.hidden = false;
+  setScrim(true);
+  S.ui = 'sheet';
+  paint(before ? [before, sheet] : sheet, 'ui', opts.label || '打开' + title);
+}
+function closeSheet(silent) {
+  if ($('#sheet').hidden) return;
+  const r = localRect($('#sheet'));
+  $('#sheet').hidden = true;
+  setScrim(false); S.ui = null;
+  if (!silent) paint(r, 'ui', '关闭面板');
+}
+
+/* toolbar actions */
+$('#tbTop').addEventListener('click', e => act(e.target.closest('[data-act]')));
+$('#tbBottom').addEventListener('click', e => act(e.target.closest('[data-act]')));
+function act(btn) {
+  if (!btn) return;
+  const a = btn.dataset.act;
+  if (a === 'exit') exitReader();
+  else if (a === 'bookmark') toggleBookmark();
+  else if (a === 'search') { closeAll(true); pushSub('search', ''); }
+  else if (a === 'more') moreSheet();
+  else if (a === 'toc') openDrawer('toc');
+  else if (a === 'progress') progressSheet();
+  else if (a === 'light') lightSheet();
+  else if (a === 'type') typeSheet();
+}
+
+/* drawer: 目录 / 书签 / 笔记 */
+function openDrawer(tab) {
+  hideToolbar(true);
+  $('#sheet').hidden = true; $('#bubble').hidden = true;
+  const r = S.reader, d = DATA[r.id], b = BY[r.id];
+  const drawer = $('#drawer');
+  const nHl = S.hls.filter(x => x.book === r.id).length, nBm = S.bms.filter(x => x.book === r.id).length;
+  const tabs = [['toc', '目录'], ['bm', `书签 ${nBm || ''}`], ['notes', `笔记 ${nHl || ''}`]];
+  const list = h('div', { class: 'list' }), pg = h('div', { class: 'pager' });
+  drawer.replaceChildren(
+    h('div', { class: 'dhead' }, cover(b, 52), h('div', null, h('div', { class: 'tt' }, d.title), h('div', { class: 'aa' }, d.author), h('div', { class: 'pp' }, `已读 ${bookPct(r.id)}% · 共 ${d.toc.length} 章`))),
+    h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, n]) => h('button', { type: 'button', role: 'tab', 'aria-selected': String(k === tab), onclick: () => { openDrawer(k); } }, n.trim()))),
+    list, pg);
+  drawer.hidden = false;
+  setScrim(true);
+  S.ui = 'drawer';
+  ctx('toc');
+  let items = [];
+  if (tab === 'toc') {
+    let start = 1;
+    items = d.toc.map((t, i) => {
+      const loaded = i < d.chapters.length;
+      const pageNo = loaded ? start : null;
+      if (loaded) start += d.pages[i];
+      const cur = i === r.ch;
+      return h('button', { type: 'button', class: 'tocrow' + (cur ? ' cur' : '') + (loaded ? '' : ' na'), 'aria-current': cur ? 'true' : null,
+        onclick: () => { if (!loaded) { toast('演示版只收录了前 ' + d.chapters.length + ' 章'); return; } closeAll(true); jumpTo(i, 0); paint(screen, 'partial', '跳到章节'); } },
+      h('span', { class: 'tl' }, t), cur ? h('span', { class: 'tag' }, '在读') : null, h('span', { class: 'pg' }, loaded ? pageNo : '未收录'));
+    });
+  } else if (tab === 'bm') {
+    const bms = S.bms.filter(x => x.book === r.id);
+    items = bms.length ? bms.map(bm => h('button', { type: 'button', class: 'note', onclick: () => { closeAll(true); jumpTo(bm.ch, Math.round(bm.ratio * d.pages[bm.ch])); paint(screen, 'partial', '跳到书签'); } },
+      h('div', { class: 'q' }, bm.snip ? bm.snip + '…' : d.chapters[bm.ch].title), h('div', { class: 'm' }, `${d.chapters[bm.ch].title} · 第 ${Math.round(bm.ratio * d.pages[bm.ch]) + 1} 页 · ${bm.t}`)))
+      : [h('div', { class: 'nothing' }, h('b', null, '还没有书签'), '阅读时呼出工具栏，点右上角的书签图标。')];
+  } else {
+    items = notesItems(r.id, true);
+    if (!items.length) items = [h('div', { class: 'nothing' }, h('b', null, '还没有笔记'), '长按文字选中后，点“划线”或“写想法”。')];
+  }
+  paged(list, pg, items, 'drawer-' + tab, '目录翻页');
+  paint(drawer, 'ui', tab === 'toc' ? '打开目录' : '切换到' + (tab === 'bm' ? '书签' : '笔记'));
+}
+function notesItems(bookId, inBook) {
+  const d = DATA[bookId];
+  const hls = S.hls.filter(x => x.book === bookId).sort((a, b) => a.ch - b.ch || a.seq - b.seq);
+  const out = [];
+  let lastCh = -1;
+  hls.forEach(x => {
+    if (x.ch !== lastCh) { out.push(h('div', { class: 'grp' }, d.chapters[x.ch].title)); lastCh = x.ch; }
+    out.push(h('button', { type: 'button', class: 'note', onclick: () => gotoHighlight(x, inBook) },
+      h('div', { class: 'q' }, h('span', { class: 'sw ' + x.style, 'aria-hidden': 'true' }), x.text),
+      x.note ? h('div', { class: 't' }, h('b', null, '想法'), x.note) : null,
+      h('div', { class: 'm' }, x.t)));
+  });
+  return out;
+}
+function gotoHighlight(x, inBook) {
+  if (!inBook || !S.reader || S.reader.id !== x.book) {
+    S.subStack = []; $('#sub').hidden = true;
+    openBook(x.book);
+  }
+  closeAll(true);
+  const r = S.reader;
+  if (r.ch !== x.ch) { r.ch = x.ch; mountChapter(); r.page = 0; applyPage(); }
+  const mark = flow.querySelector(`mark[data-id="${x.id}"]`);
+  if (mark) jumpTo(x.ch, pageOfRect(mark.getClientRects()[0]));
+  paint(screen, 'partial', '跳到笔记');
+}
+
+/* progress */
+function progressSheet() {
+  ctx('progress');
+  const r = S.reader, d = DATA[r.id];
+  const total = d.pages.reduce((a, b) => a + b, 0);
+  const globalPage = d.pages.slice(0, r.ch).reduce((a, b) => a + b, 0) + r.page;
+  openSheet('进度', body => {
+    body.append(h('div', { style: 'font-size:15px;font-weight:500' }, d.chapters[r.ch].title),
+      h('div', { style: 'font-size:12.5px;color:var(--ink-2);margin-top:2px;font-variant-numeric:tabular-nums' }, `本章第 ${r.page + 1} / ${d.pages[r.ch]} 页 · 全书 ${bookPct(r.id)}%`));
+    const bar = h('div', { style: 'position:relative;height:44px;margin:16px 0 4px;cursor:pointer', role: 'slider', 'aria-label': '阅读位置', 'aria-valuemin': '1', 'aria-valuemax': String(total), 'aria-valuenow': String(globalPage + 1), tabindex: '0' });
+    bar.append(h('div', { style: 'position:absolute;left:0;right:0;top:21px;border-top:1.5px solid var(--ink)' }));
+    bar.append(h('div', { style: `position:absolute;left:0;width:${(globalPage + 1) / total * 100}%;top:19px;height:6px;background:var(--ink);border-radius:3px` }));
+    let acc = 0;
+    d.pages.forEach((p, i) => { if (i) bar.append(h('div', { style: `position:absolute;left:${acc / total * 100}%;top:12px;height:20px;border-left:1.5px solid var(--ink)` })); acc += p; });
+    bar.append(h('div', { style: `position:absolute;left:calc(${(globalPage + 0.5) / total * 100}% - 11px);top:11px;width:22px;height:22px;border-radius:50%;background:var(--paper);border:2px solid var(--ink)` }));
+    bar.addEventListener('click', e => {
+      const br = bar.getBoundingClientRect();
+      let gp = Math.floor((e.clientX - br.left) / br.width * total);
+      gp = Math.max(0, Math.min(total - 1, gp));
+      let ch = 0;
+      while (gp >= d.pages[ch]) { gp -= d.pages[ch]; ch++; }
+      jumpTo(ch, gp);
+      progressSheet();
+      paint([screen], 'partial', '拖动定位');
+    });
+    body.append(bar);
+    const chBtn = (label, ch, dis) => h('button', { type: 'button', class: 'btn grow', disabled: dis, style: dis ? 'border-color:var(--rule);color:var(--ink-3)' : null, onclick: () => { jumpTo(ch, 0); progressSheet(); paint(screen, 'partial', label); } }, label);
+    body.append(h('div', { class: 'btns' }, chBtn('上一章', r.ch - 1, r.ch === 0), chBtn('下一章', r.ch + 1, r.ch >= d.chapters.length - 1)));
+    if (S.lastLoc) {
+      const L = S.lastLoc;
+      body.append(h('button', { type: 'button', class: 'linkrow', onclick: () => { const cur = { ch: r.ch, page: r.page }; jumpTo(L.ch, L.page, false); S.lastLoc = cur; progressSheet(); paint(screen, 'partial', '返回上次位置'); } },
+        h('span', null, `返回上次位置：${d.chapters[L.ch].title} 第 ${L.page + 1} 页`), ic('chev', 'sm chev')));
+    }
+  }, { label: '打开进度' });
+}
+
+/* light */
+function lightSheet() {
+  ctx('light');
+  openSheet('亮度', body => {
+    body.append(sliderRow('亮度', 'level', 24, v => `${Math.round(v / 24 * 100)}%`));
+    body.append(sliderRow('色温', 'warm', 10, v => (v === 0 ? '冷' : v === 10 ? '暖' : String(v))));
+    body.append(toggleRow('按时间自动调节色温', S.light.auto, v => { S.light.auto = v; }));
+    body.append(toggleRow('夜间模式（黑底白字）', S.night, v => { setNight(v); }));
+  }, { label: '打开亮度' });
+}
+function sliderRow(label, key, max, fmt) {
+  const steps = 9;
+  const v = S.light[key];
+  const idx = Math.round(v / max * (steps - 1));
+  const row = h('div', { class: 'srow' }, h('span', { class: 'lab' }, `${label} ${fmt(v)}`));
+  const st = h('div', { class: 'stepper' },
+    h('button', { type: 'button', 'aria-label': label + '减', disabled: v <= 0, onclick: () => setLight(key, Math.max(0, v - Math.ceil(max / 8)), max) }, ic('minus', 'sm')),
+    h('div', { class: 'ticks' }, Array.from({ length: steps }, (_, i) => h('button', { type: 'button', 'aria-label': `${label} ${i + 1}`, class: i === idx ? 'on' : i < idx ? 'past' : '', onclick: () => setLight(key, Math.round(i / (steps - 1) * max), max) }))),
+    h('button', { type: 'button', 'aria-label': label + '加', disabled: v >= max, onclick: () => setLight(key, Math.min(max, v + Math.ceil(max / 8)), max) }, ic('plus', 'sm')));
+  row.append(st);
+  return row;
+}
+function setLight(key, v) {
+  S.light[key] = v;
+  applyLight();
+  lightSheet();
+}
+function applyLight() {
+  screen.style.setProperty('--warm-a', (S.light.warm / 10 * 0.16 * (0.4 + S.light.level / 24 * 0.6)).toFixed(3));
+}
+function toggleRow(label, on, fn) {
+  const t = h('button', { type: 'button', class: 'toggle', role: 'switch', 'aria-checked': String(on), 'aria-label': label });
+  t.addEventListener('click', () => { const v = t.getAttribute('aria-checked') !== 'true'; t.setAttribute('aria-checked', String(v)); fn(v); paint(t, 'fast', label); });
+  return h('div', { class: 'row', style: 'border-bottom:0;border-top:1px solid var(--rule)' }, h('div', { class: 'main' }, h('div', { class: 'l1', style: 'font-size:14.5px' }, label)), t);
+}
+function setNight(v) {
+  S.night = v;
+  screen.classList.toggle('night', v);
+  $('#nightSwitch').setAttribute('aria-checked', String(v));
+  paint(screen, 'full', v ? '夜间模式' : '日间模式');
+}
+
+/* type */
+function typeSheet() {
+  ctx('type');
+  openSheet('字体与排版', body => {
+    const i = FS.indexOf(S.type.fs);
+    body.append(h('div', { class: 'srow' }, h('span', { class: 'lab' }, `字号 ${S.type.fs}`),
+      h('div', { class: 'stepper' },
+        h('button', { type: 'button', 'aria-label': '字号减小', disabled: i <= 0, onclick: () => setType('fs', FS[i - 1]) }, h('span', { style: 'font-size:13px' }, 'A')),
+        h('div', { class: 'ticks' }, FS.map((f, j) => h('button', { type: 'button', 'aria-label': `字号 ${f}`, class: j === i ? 'on' : j < i ? 'past' : '', onclick: () => setType('fs', f) }))),
+        h('button', { type: 'button', 'aria-label': '字号增大', disabled: i >= FS.length - 1, onclick: () => setType('fs', FS[i + 1]) }, h('span', { style: 'font-size:20px' }, 'A')))));
+    body.append(h('div', { class: 'srow' }, h('span', { class: 'lab' }, '字体'),
+      h('div', { class: 'fonts' },
+        Object.entries(FONTS).map(([k, f]) => h('button', { type: 'button', 'aria-pressed': String(S.type.font === k), onclick: () => setType('font', k) }, h('span', { class: 'smp', style: `font-family:${f.fam}` }, '永 Aa'), h('span', { class: 'nm' }, f.name))),
+        h('button', { type: 'button', onclick: () => { closeAll(true); pushSub('detail', 'fonts'); } }, ic('plus'), h('span', { class: 'nm' }, '更多字体')))));
+    body.append(h('div', { class: 'srow' }, h('span', { class: 'lab' }, '行距'), seg([['tight', '紧凑'], ['std', '标准'], ['loose', '宽松']], S.type.lh, v => setType('lh', v))));
+    body.append(h('div', { class: 'srow' }, h('span', { class: 'lab' }, '边距'), seg([['narrow', '窄'], ['std', '标准'], ['wide', '宽']], S.type.mx, v => setType('mx', v))));
+    body.append(h('button', { type: 'button', class: 'linkrow', onclick: () => { closeAll(true); pushSub('detail', 'typeAdv'); } }, h('span', null, '更多排版：字重、断字、缩进、样式微调'), ic('chev', 'sm chev')));
+  }, { label: '打开排版' });
+}
+function seg(opts, cur, fn) {
+  return h('div', { class: 'seg', role: 'group' }, opts.map(([k, n]) => h('button', { type: 'button', 'aria-pressed': String(cur === k), onclick: () => fn(k) }, n)));
+}
+function setType(key, v) {
+  S.type[key] = v;
+  layoutReader();
+  typeSheet();
+  const sheetR = localRect($('#sheet'));
+  paint([{ x: 0, y: 0, w: DEVICES[S.dev].w, h: sheetR.y }], 'partial', '重新排版');
+}
+
+/* more */
+function moreSheet() {
+  ctx('more');
+  const b = BY[S.reader.id];
+  openSheet('更多', body => {
+    const items = [
+      ['info', '书籍详情', () => bookInfo(b)],
+      ['zones', '点击区域', () => showZones()],
+      ['export', '导出笔记', () => exportSheet()],
+      ['stats', '阅读统计', () => { closeAll(true); exitReader(); setTab('me'); }],
+      ['refresh', '刷新与残影', () => { closeAll(true); pushSub('detail', 'refresh'); }],
+      ['sliders', '全部设置', () => { closeAll(true); pushSub('settings'); }],
+    ];
+    body.append(h('div', { class: 'grid4' }, items.map(([i, n, fn]) => h('button', { type: 'button', onclick: fn }, ic(i), n))));
+  }, { label: '打开更多' });
+}
+function showZones() {
+  closeAll(true);
+  ctx('zones');
+  const z = $('#zones');
+  z.replaceChildren(
+    h('div', null, '上一页', h('span', null, '点击左侧 1/3')),
+    h('div', null, '工具栏', h('span', null, '点击中间')),
+    h('div', null, '下一页', h('span', null, '点击右侧 1/3')));
+  z.hidden = false;
+  S.ui = 'zones';
+  z.onclick = () => closeAll();
+  paint(z, 'ui', '点击区域');
+}
+function exportSheet() {
+  ctx('export');
+  const n = S.hls.filter(x => x.book === S.reader.id).length;
+  openSheet('导出笔记', body => {
+    body.append(h('div', { style: 'font-size:13px;color:var(--ink-2);margin-bottom:4px' }, `本书 ${n} 条划线和想法`));
+    [['Markdown', '保存到 /Books/笔记导出'], ['HTML', '保存到 /Books/笔记导出'], ['纯文本', '保存到 /Books/笔记导出'], ['JSON', '保存到 /Books/笔记导出'], ['Kindle 剪贴板格式', 'My Clippings.txt'], ['Readwise', '需要联网'], ['Joplin', '需要联网'], ['Nextcloud 笔记', '需要联网'], ['纸间书摘 xmnote', '需要联网']]
+      .forEach(([k, v]) => body.append(h('button', { type: 'button', class: 'row', onclick: () => { closeSheet(); toast(v === '需要联网' ? `${k} 需要先连接 Wi‑Fi` : `已导出 ${n} 条为 ${k}（演示）`); } }, h('div', { class: 'main' }, h('div', { class: 'l1' }, k), h('div', { class: 'l2' }, v)), ic('chev', 'sm chev'))));
+  }, { label: '打开导出' });
+}
+
+/* ---------- selection bubble ---------- */
+function onPage(clientRects) {
+  const vr = pagevp.getBoundingClientRect();
+  return clientRects.filter(r => r.width && r.right > vr.left && r.left < vr.right);
+}
+function placeBubble(bubble, clientRects) {
+  const d = DEVICES[S.dev];
+  const rs = onPage(clientRects).map(r => localRect({ getBoundingClientRect: () => r }));
+  if (!rs.length) { bubble.hidden = true; return; }
+  bubble.hidden = false;
+  bubble.style.left = '0px'; bubble.style.top = '0px';
+  const bw = bubble.offsetWidth, bh = bubble.offsetHeight;
+  const top0 = Math.min(...rs.map(r => r.y)), bot0 = Math.max(...rs.map(r => r.y + r.h));
+  const above = top0 - bh - 12 > 8;
+  const anchor = above ? rs[0] : rs[rs.length - 1];
+  const mid = anchor.x + anchor.w / 2;
+  const left = Math.max(10, Math.min(d.w - bw - 10, mid - bw / 2));
+  bubble.style.left = left + 'px';
+  bubble.style.top = (above ? top0 - bh - 10 : bot0 + 10) + 'px';
+  bubble.dataset.place = above ? 'above' : 'below';
+  bubble.style.setProperty('--ax', Math.max(14, Math.min(bw - 14, mid - left)) + 'px');
+}
+function selBubble() {
+  const range = S.sel && S.sel.range;
+  if (!range) return;
+  const text = range.toString().trim();
+  if (!text) { closeAll(true); return; }
+  ctx('sel');
+  S.ui = 'sel';
+  setScrim(true);
+  const bubble = $('#bubble');
+  bubble.replaceChildren(h('div', { class: 'brow' },
+    h('button', { type: 'button', onclick: () => { copyText(text); closeAll(); } }, '复制'),
+    h('button', { type: 'button', onclick: () => { const x = addHighlight(range, S.hlStyle); clearSel(); hlBubble(x.id, '划线'); } }, '划线'),
+    h('button', { type: 'button', onclick: () => { const x = addHighlight(range, S.hlStyle); clearSel(); noteSheet(x.id); } }, '写想法'),
+    h('button', { type: 'button', onclick: () => { clearSel(); dictSheet(text); } }, '查询'),
+    h('button', { type: 'button', onclick: () => { closeAll(true); pushSub('search', text); } }, '搜索')));
+  placeBubble(bubble, [...range.getClientRects()]);
+  paint([bubble, ...onPage([...range.getClientRects()]).slice(0, 3).map(r => localRect({ getBoundingClientRect: () => r }))], 'fast', '选词');
+}
+function copyText(t) {
+  try { navigator.clipboard.writeText(t).then(() => toast('已复制'), () => toast('已复制到 KOReader 剪贴板')); } catch (e) { toast('已复制到 KOReader 剪贴板'); }
+}
+let hlSeq = 0;
+function textNodesIn(range) {
+  const root = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentNode;
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const out = [];
+  let n;
+  while ((n = w.nextNode())) if (range.intersectsNode(n)) out.push(n);
+  return out;
+}
+function wrapRange(range, id, style) {
+  const nodes = textNodesIn(range);
+  const sc = range.startContainer, so = range.startOffset, ec = range.endContainer, eo = range.endOffset;
+  const marks = [];
+  nodes.forEach(n => {
+    const s = n === sc ? so : 0, e = n === ec ? eo : n.data.length;
+    if (e <= s || !n.data.slice(s, e).trim()) return;
+    let t = n;
+    if (s > 0) t = t.splitText(s);
+    if (e - s < t.data.length) t.splitText(e - s);
+    const m = h('mark', { class: 'hl hl-' + style, 'data-id': id });
+    t.parentNode.insertBefore(m, t);
+    m.append(t);
+    marks.push(m);
+  });
+  return marks;
+}
+function addHighlight(range, style, meta = {}) {
+  const r = S.reader || { id: meta.book, ch: meta.ch };
+  const id = 'h' + (++hlSeq);
+  const text = range.toString().replace(/\s+/g, ' ').trim();
+  wrapRange(range, id, style);
+  const x = { id, book: meta.book || r.id, ch: meta.ch != null ? meta.ch : r.ch, text, style, note: meta.note || '', t: meta.t || fmtDate(new Date()), seq: hlSeq };
+  S.hls.push(x);
+  syncNoteMarker(x);
+  return x;
+}
+function fmtDate(t) { return `${t.getMonth() + 1} 月 ${t.getDate()} 日 ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`; }
+function marksOf(id) { return [...DATA[S.hls.find(x => x.id === id).book].dom.flatMap(ch => [...ch.querySelectorAll(`mark[data-id="${id}"]`)])]; }
+function syncNoteMarker(x) {
+  const ms = marksOf(x.id);
+  ms.forEach((m, i) => m.classList.toggle('note-end', !!x.note && i === ms.length - 1));
+}
+function hlBubble(id, label) {
+  const x = S.hls.find(y => y.id === id);
+  if (!x) return;
+  ctx('hl');
+  S.ui = 'hl';
+  setScrim(true);
+  const bubble = $('#bubble');
+  const styles = [['marker', '马克笔'], ['line', '直线'], ['wave', '波浪线']];
+  bubble.replaceChildren(
+    h('div', { class: 'brow styles' }, styles.map(([k, n]) => h('button', { type: 'button', 'aria-pressed': String(x.style === k), 'aria-label': n, onclick: () => { restyle(x, k); hlBubble(id, '换样式'); } }, h('span', { class: 's ' + k }, '文')))),
+    h('div', { class: 'brow' },
+      h('button', { type: 'button', onclick: () => noteSheet(id) }, x.note ? '改想法' : '写想法'),
+      h('button', { type: 'button', onclick: () => { copyText(x.text); closeAll(true); } }, '复制'),
+      h('button', { type: 'button', onclick: () => dictSheet(x.text) }, '查询'),
+      h('button', { type: 'button', onclick: () => { removeHighlight(id); closeAll(true); toast('已删除划线'); } }, '删除')));
+  const rects = onPage(marksOf(id).filter(m => flow.contains(m)).flatMap(m => [...m.getClientRects()]));
+  placeBubble(bubble, rects);
+  paint([bubble, ...rects.slice(0, 3).map(r => localRect({ getBoundingClientRect: () => r }))], 'fast', label || '点划线');
+}
+function restyle(x, k) {
+  x.style = k; S.hlStyle = k;
+  marksOf(x.id).forEach(m => { m.classList.remove('hl-marker', 'hl-line', 'hl-wave'); m.classList.add('hl-' + k); });
+}
+function removeHighlight(id) {
+  marksOf(id).forEach(m => { const p = m.parentNode; while (m.firstChild) p.insertBefore(m.firstChild, m); m.remove(); p.normalize(); });
+  S.hls = S.hls.filter(x => x.id !== id);
+}
+
+/* note editor */
+function noteSheet(id) {
+  const x = S.hls.find(y => y.id === id);
+  ctx('note');
+  $('#bubble').hidden = true;
+  openSheet(x.note ? '修改想法' : '写想法', body => {
+    const ta = h('textarea', { class: 'notein', id: 'noteInput', placeholder: '写下你的想法…', 'aria-label': '想法' });
+    ta.value = x.note;
+    body.append(h('div', { class: 'quote' }, x.text), ta,
+      h('div', { class: 'btns' },
+        h('button', { type: 'button', class: 'btn grow', onclick: () => closeAll() }, '取消'),
+        h('button', { type: 'button', class: 'btn solid grow', onclick: () => { x.note = ta.value.trim(); syncNoteMarker(x); closeAll(true); paint(screen, 'partial', '保存想法'); toast(x.note ? '想法已保存' : '已清空想法'); } }, '保存')));
+    setTimeout(() => ta.focus({ preventScroll: true }), 0);
+  }, { label: '写想法' });
+}
+
+/* dictionary */
+function lookup(q) {
+  const raw = q.trim();
+  const en = /[A-Za-z]/.test(raw) && !/[一-鿿]/.test(raw);
+  if (en) {
+    const w = raw.toLowerCase().replace(/[^a-z'-]/g, '');
+    for (const c of [w, w.replace(/'s$/, ''), w.replace(/s$/, ''), w.replace(/ed$/, ''), w.replace(/ing$/, '')]) if (DICT[c]) return { key: c, e: DICT[c] };
+    return null;
+  }
+  if (DICT[raw]) return { key: raw, e: DICT[raw] };
+  const keys = Object.keys(DICT).filter(k => /[一-鿿]/.test(k) && raw.includes(k)).sort((a, b) => b.length - a.length);
+  return keys.length ? { key: keys[0], e: DICT[keys[0]], fuzzy: true } : null;
+}
+function dictSheet(q, tab = 'dict') {
+  ctx('dict');
+  $('#bubble').hidden = true;
+  const hit = lookup(q);
+  const shown = hit ? hit.key : q.trim();
+  openSheet('查词', body => {
+    body.append(h('div', { class: 'dict-w' }, h('span', { class: 'w' }, shown.length > 16 ? shown.slice(0, 16) + '…' : shown), hit ? h('span', { class: 'ph' }, hit.e[0]) : null));
+    if (hit && hit.fuzzy) body.append(h('div', { class: 'dict-m' }, `选中的是“${q.trim().slice(0, 12)}”，按最长匹配查到“${hit.key}”`));
+    body.append(h('div', { class: 'dtabs' }, [['dict', '词典'], ['wiki', '维基百科']].map(([k, n]) => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(k === tab), onclick: () => dictSheet(q, k) }, n))));
+    if (tab === 'wiki') {
+      body.append(h('div', { class: 'nothing' }, h('b', null, '需要联网'), '维基百科是在线查询。打开 Wi‑Fi 后再试一次。'),
+        h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn solid grow', onclick: () => toast('演示版没有联网') }, '打开 Wi‑Fi')));
+      return;
+    }
+    if (!hit) {
+      body.append(h('div', { class: 'nothing' }, h('b', null, q.trim().length > 20 ? '选中的文字太长，不能查词' : `本地词典里没有“${shown}”`), q.trim().length > 20 ? '试试全书搜索。' : '可以试试维基百科，或者在设置里添加更多 StarDict 词典。'));
+    } else {
+      hit.e[1].forEach(([pos, a, b]) => body.append(h('div', { class: 'sense' }, h('span', { class: 'pos' }, pos), h('span', { class: 'en' }, a), b ? h('span', { class: 'zh' }, b) : null)));
+    }
+    const inVocab = S.vocab.some(v => v.w === shown);
+    body.append(h('div', { class: 'btns' },
+      hit ? h('button', { type: 'button', class: 'btn grow' + (inVocab ? ' solid' : ''), 'aria-pressed': String(inVocab), onclick: () => {
+        if (inVocab) S.vocab = S.vocab.filter(v => v.w !== shown);
+        else S.vocab.unshift({ w: shown, c: contextSentence(shown), b: S.reader ? DATA[S.reader.id].title : '', t: '刚刚' });
+        dictSheet(q, tab); toast(inVocab ? '已从生词本移除' : '已加入生词本');
+      } }, inVocab ? '已在生词本' : '加入生词本') : null,
+      h('button', { type: 'button', class: 'btn grow', onclick: () => { closeAll(true); pushSub('search', shown); } }, '全书搜索')));
+    body.append(h('div', { class: 'fine' }, '示例词典（StarDict 格式）· 演示数据'));
+  }, { label: '查词' });
+}
+function contextSentence(w) {
+  if (!S.reader) return '';
+  const t = flow.textContent;
+  const i = t.toLowerCase().indexOf(w.toLowerCase());
+  if (i < 0) return '';
+  const s = Math.max(t.lastIndexOf('。', i), t.lastIndexOf('. ', i), 0);
+  const e = [t.indexOf('。', i), t.indexOf('. ', i)].filter(n => n > 0);
+  return t.slice(s ? s + 1 : 0, (e.length ? Math.min(...e) : i + 60) + 1).trim();
+}
+
+/* ---------- full-screen subpages ---------- */
+function pushSub(kind, arg) {
+  closeAll(true);
+  S.subStack.push({ kind, arg, ctx: { settings: 'settings', detail: 'settings', notesAll: 'notesAll', vocab: 'vocab', search: 'search' }[kind] });
+  renderSub();
+  paint(screen, 'ui', '打开' + subTitle(S.subStack[S.subStack.length - 1]));
+}
+function popSub() {
+  S.subStack.pop();
+  if (S.subStack.length) renderSub();
+  else { $('#sub').hidden = true; ctx(S.reader ? 'reader' : S.tab); if (!S.reader) renderTab(); }
+  paint(screen, 'ui', '返回');
+}
+function subTitle(s) {
+  return { settings: '设置', notesAll: '笔记', vocab: '生词本', search: '全书搜索' }[s.kind] || (DETAILS[s.arg] || [''])[0];
+}
+function renderSub() {
+  const s = S.subStack[S.subStack.length - 1];
+  const sub = $('#sub');
+  sub.hidden = false;
+  ctx(s.ctx);
+  const list = h('div', { class: 'list' }), pg = h('div', { class: 'pager' });
+  const sys = $('#sys').cloneNode(true);
+  sys.removeAttribute('id');
+  sub.replaceChildren(sys, h('div', { class: 'navbar' }, h('button', { type: 'button', class: 'iconbtn', 'aria-label': '返回', onclick: popSub }, ic('back')), h('h2', null, subTitle(s)), h('span')));
+  let items = [];
+  if (s.kind === 'settings') {
+    SETTINGS.forEach(g => {
+      items.push(h('div', { class: 'grp' }, g.g));
+      g.rows.forEach(r => {
+        if (r.toggle) {
+          const t = h('button', { type: 'button', class: 'toggle', role: 'switch', 'aria-checked': String(S.night), 'aria-label': r.k });
+          t.addEventListener('click', () => { const v = !S.night; t.setAttribute('aria-checked', String(v)); setNight(v); });
+          items.push(h('div', { class: 'row' }, h('div', { class: 'main' }, h('div', { class: 'l1' }, r.k)), t));
+        } else items.push(h('button', { type: 'button', class: 'row', onclick: () => pushSub('detail', r.d) }, h('div', { class: 'main' }, h('div', { class: 'l1' }, r.k)), r.v ? h('span', { class: 'val' }, r.v) : null, ic('chev', 'sm chev')));
+      });
+    });
+  } else if (s.kind === 'detail') {
+    const [, rows] = DETAILS[s.arg];
+    items = rows.map(([k, v]) => {
+      if (v === 'zones') return h('button', { type: 'button', class: 'row', onclick: () => { if (S.reader) { S.subStack = []; $('#sub').hidden = true; showZones(); } else toast('打开一本书后可以预览'); } }, h('div', { class: 'main' }, h('div', { class: 'l1' }, k)), ic('chev', 'sm chev'));
+      if (v.startsWith('toggle')) {
+        const t = h('button', { type: 'button', class: 'toggle', role: 'switch', 'aria-checked': String(v === 'toggle:on'), 'aria-label': k });
+        t.addEventListener('click', () => { t.setAttribute('aria-checked', String(t.getAttribute('aria-checked') !== 'true')); paint(t, 'fast', k); });
+        return h('div', { class: 'row' }, h('div', { class: 'main' }, h('div', { class: 'l1' }, k)), t);
+      }
+      if (s.arg === 'all') return h('button', { type: 'button', class: 'row', onclick: () => toast('原版菜单保持不变，作为兜底入口') }, h('div', { class: 'main' }, h('div', { class: 'l1' }, k), h('div', { class: 'l2' }, v)), ic('chev', 'sm chev'));
+      return h('div', { class: 'row' }, h('div', { class: 'main' }, h('div', { class: 'l1' }, k)), v ? h('span', { class: 'val' }, v) : null);
+    });
+  } else if (s.kind === 'notesAll') {
+    const books = [...new Set(S.hls.map(x => x.book))];
+    books.forEach(id => { items.push(h('div', { class: 'grp' }, `${DATA[id].title} · ${S.hls.filter(x => x.book === id).length} 条`)); items.push(...notesItems(id, false).filter(el => !el.classList.contains('grp'))); });
+    if (!items.length) items = [h('div', { class: 'nothing' }, h('b', null, '还没有笔记'), '在书里长按文字，点“划线”或“写想法”。')];
+  } else if (s.kind === 'vocab') {
+    items = S.vocab.length ? S.vocab.map(v => h('div', { class: 'vocab' }, h('div', { class: 'w' }, v.w), v.c ? h('div', { class: 'c' }, v.c) : null, h('div', { class: 's' }, [v.b && `《${v.b}》`, v.t].filter(Boolean).join(' · '))))
+      : [h('div', { class: 'nothing' }, h('b', null, '生词本是空的'), '查词时点“加入生词本”。')];
+  } else if (s.kind === 'search') {
+    renderSearch(sub, list, pg, s);
+    return;
+  }
+  sub.append(list, pg);
+  paged(list, pg, items, 'sub-' + s.kind + (s.arg || ''), '列表翻页');
+}
+function renderSearch(sub, list, pg, s) {
+  const input = h('input', { type: 'search', id: 'searchInput', value: s.arg || '', placeholder: S.reader ? '在本书中搜索' : '搜索书名或作者', 'aria-label': '搜索内容', enterkeyhint: 'search' });
+  const form = h('form', { class: 'searchfield', role: 'search' }, ic('search', 'sm'), input, h('button', { type: 'submit', class: 'go' }, '搜索'));
+  form.addEventListener('submit', e => { e.preventDefault(); s.arg = input.value; S.pg['search'] = 0; renderSub(); paint(list, 'ui', '搜索'); });
+  const info = h('div', { class: 'crumbs', style: 'padding-top:6px' });
+  sub.append(form, info, list, pg);
+  const q = (s.arg || '').trim();
+  let items = [];
+  if (!q) { info.textContent = S.reader ? `在《${DATA[S.reader.id].title}》已收录的章节里搜索` : ''; paged(list, pg, [h('div', { class: 'nothing' }, h('b', null, '输入要找的词或句子'), '中文按字匹配，英文不区分大小写。')], 'search'); return; }
+  if (S.reader) {
+    const d = DATA[S.reader.id];
+    let count = 0;
+    d.dom.forEach((ch, ci) => {
+      const text = ch.textContent, lower = text.toLowerCase(), ql = q.toLowerCase();
+      let i = lower.indexOf(ql);
+      while (i >= 0 && count < 60) {
+        const at = i;
+        const pre = text.slice(Math.max(0, at - 18), at), hit = text.slice(at, at + q.length), post = text.slice(at + q.length, at + q.length + 24);
+        items.push(h('button', { type: 'button', class: 'res', onclick: () => gotoMatch(ci, at, q.length) },
+          h('div', { class: 'where' }, d.chapters[ci].title), h('div', { class: 'snip' }, (at > 18 ? '…' : '') + pre, h('b', null, hit), post + '…')));
+        count++;
+        i = lower.indexOf(ql, at + ql.length);
+      }
+    });
+    info.textContent = items.length ? `在已收录的 ${d.chapters.length} 章里找到 ${items.length >= 60 ? '60+' : items.length} 处` : '';
+    if (!items.length) items = [h('div', { class: 'nothing' }, h('b', null, `没有找到“${q}”`), '换个说法试试，或者检查有没有错字。')];
+  } else {
+    const hits = SHELF.filter(b => !b.removed && (b.title.toLowerCase().includes(q.toLowerCase()) || b.author.toLowerCase().includes(q.toLowerCase())));
+    info.textContent = hits.length ? `找到 ${hits.length} 本` : '';
+    items = hits.length ? hits.map(b => h('button', { type: 'button', class: 'row', onclick: () => openBook(b.id) }, h('span', { class: 'fmt' }, b.fmt), h('div', { class: 'main' }, h('div', { class: 'l1' }, b.title), h('div', { class: 'l2' }, b.author)), h('span', { class: 'val' }, metaText(b))))
+      : [h('div', { class: 'nothing' }, h('b', null, `书架和文件里没有“${q}”`), '试试书名里的一个词，或作者名。')];
+  }
+  paged(list, pg, items, 'search', '结果翻页');
+}
+function rangeAt(root, start, len) {
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let n, pos = 0, r = document.createRange(), started = false;
+  while ((n = w.nextNode())) {
+    const L = n.data.length;
+    if (!started && start < pos + L) { r.setStart(n, start - pos); started = true; }
+    if (started && start + len <= pos + L) { r.setEnd(n, start + len - pos); return r; }
+    pos += L;
+  }
+  return null;
+}
+function gotoMatch(ci, at, len) {
+  S.subStack = []; $('#sub').hidden = true;
+  ctx('reader');
+  const r = S.reader;
+  S.lastLoc = { ch: r.ch, page: r.page };
+  if (r.ch !== ci) { r.ch = ci; mountChapter(); r.page = 0; applyPage(); }
+  const range = rangeAt(DATA[r.id].dom[ci], at, len);
+  if (range) {
+    jumpTo(ci, pageOfRect(range.getClientRects()[0]), false);
+    if (window.CSS && CSS.highlights) { CSS.highlights.set('flash', new Highlight(range)); setTimeout(() => CSS.highlights.delete('flash'), 1600); }
+  }
+  paint(screen, 'partial', '跳到搜索结果');
+}
+
+/* ---------- shelf header actions ---------- */
+$('#shelfSearch').addEventListener('click', () => pushSub('search', ''));
+$('#shelfManage').addEventListener('click', () => {
+  ctx('manage');
+  openSheet('书架管理', body => {
+    body.append(h('div', { class: 'srow' }, h('span', { class: 'lab' }, '排序'), seg([['recent', '最近阅读'], ['title', '书名'], ['author', '作者']], S.sort, v => { S.sort = v; S.pg.shelf = 0; renderShelf(); $('#shelfManage').click(); paint($('#shelfGrid'), 'ui', '重新排序'); })));
+    body.append(h('button', { type: 'button', class: 'linkrow', onclick: () => { closeSheet(); toast('长按封面可以管理单本书'); } }, h('span', null, '批量管理'), ic('chev', 'sm chev')));
+  }, { label: '书架管理' });
+});
+$('#tabbar').addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (b && b.dataset.tab !== S.tab) setTab(b.dataset.tab); });
+
+/* ---------- panel controls ---------- */
+$('#devSeg').addEventListener('click', e => { const b = e.target.closest('[data-dev]'); if (b) { closeAll(true); setDevice(b.dataset.dev); paint(screen, 'full', '切换设备'); } });
+$('#rfSwitch').addEventListener('click', () => { S.rf = !S.rf; $('#rfSwitch').setAttribute('aria-checked', String(S.rf)); });
+$('#nightSwitch').addEventListener('click', () => setNight(!S.night));
+$('#jumps').addEventListener('click', e => {
+  const b = e.target.closest('[data-jump]');
+  if (!b) return;
+  const j = b.dataset.jump;
+  closeAll(true);
+  if (S.subStack.length) { S.subStack = []; $('#sub').hidden = true; }
+  if (['shelf', 'me', 'settings'].includes(j)) {
+    if (S.reader) exitReader();
+    if (j === 'settings') { setTab('me', true); pushSub('settings'); }
+    else setTab(j);
+    return;
+  }
+  if (!S.reader || S.reader.id !== 'jdct') openBook('jdct');
+  if (j === 'toolbar') showToolbar();
+  else if (j === 'type') typeSheet();
+  else if (j === 'notes') openDrawer('notes');
+  else if (j === 'select') demoSelect();
+});
+function demoSelect() {
+  const r = S.reader;
+  const root = DATA[r.id].dom[r.ch], zh = BY[r.id].lang === 'zh';
+  const text = zh ? root.textContent : root.textContent.toLowerCase();
+  for (const k of Object.keys(DICT).filter(k => /[一-鿿]/.test(k) === zh)) {
+    for (let i = text.indexOf(k); i >= 0; i = text.indexOf(k, i + 1)) {
+      const range = rangeAt(root, i, k.length);
+      if (range && onPage([...range.getClientRects()]).length) {
+        S.sel = { anchor: range.cloneRange(), range };
+        showSel(range);
+        selBubble();
+        return;
+      }
+    }
+  }
+  const vr = pagevp.getBoundingClientRect();
+  for (let k = 0; k < 40; k++) {
+    const x = vr.left + vr.width * (0.3 + (k % 5) * 0.1), y = vr.top + vr.height * (0.35 + Math.floor(k / 5) * 0.06);
+    const range = wordAt(x, y);
+    if (range && range.toString().length >= 2) {
+      S.sel = { anchor: range.cloneRange(), range };
+      showSel(range);
+      selBubble();
+      return;
+    }
+  }
+  toast('长按正文里的任意词试试');
+}
+document.addEventListener('keydown', e => {
+  if (e.target.matches && e.target.matches('input, textarea')) return;
+  if (e.key === 'Escape') { if (S.ui) closeAll(); else if (S.subStack.length) popSub(); return; }
+  if (!S.reader || S.ui || S.subStack.length) return;
+  if (['ArrowRight', 'PageDown', ' '].includes(e.key)) { e.preventDefault(); turn(1); }
+  else if (['ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); turn(-1); }
+});
+
+/* ---------- seed demo annotations ---------- */
+function seed() {
+  const plan = [
+    ['jdct', 0, '经典训练的价值不在实用，而在文化。', 'marker', ''],
+    ['jdct', 1, '文字原是有巫术的作用的。', 'line', '“天雨粟，鬼夜哭”：文字一出现就被当成有魔力的东西。'],
+    ['jdct', 1, '说是一人独创，是不可能的。', 'marker', ''],
+    ['walden', 0, 'The mass of men lead lives of quiet desperation.', 'line', ''],
+    ['walden', 1, 'I went to the woods because I wished to live deliberately', 'wave', '这句可以抄在扉页上。'],
+  ];
+  plan.forEach(([book, ch, text, style, note], i) => {
+    buildBook(book);
+    const root = DATA[book].dom[ch];
+    const at = root.textContent.indexOf(text);
+    if (at < 0) return;
+    const range = rangeAt(root, at, text.length);
+    if (range) addHighlight(range, style, { book, ch, note, t: `10 月 ${17 + i} 日` });
+  });
+  S.bms.push({ book: 'jdct', ch: 0, ratio: 0, snip: '在中等以上的教育里，经典训练应该是一个必要的项目', t: '10 月 17 日' });
+}
+
+/* ---------- boot ---------- */
+function tick() { $$('.clock').forEach(c => { c.textContent = clock(); }); }
+document.documentElement.style.setProperty('--note-glyph', `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 3h18v14H10l-5 4v-4H3z"/></svg>')}")`);
+document.documentElement.style.setProperty('--wave-glyph', `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 5"><path d="M0 3.5q3-3 6 0t6 0" fill="none" stroke="#151515" stroke-width="1.3"/></svg>')}")`);
+seed();
+tick(); setInterval(tick, 20000);
+applyLight();
+renderLog();
+setDevice(window.innerWidth <= 600 ? 'fit' : '7');
+setTab('shelf', true);
+ctx('shelf');
+const ready = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
+ready.then(() => { relayoutAll(); });
+let fl;
+if (document.fonts) document.fonts.addEventListener('loadingdone', () => { clearTimeout(fl); fl = setTimeout(relayoutAll, 60); });
+let rz;
+window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { if (S.dev === 'fit') setDevice('fit'); else { fit(); relayoutAll(); } }, 120); });
+})();
+</script>

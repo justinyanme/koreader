@@ -1,0 +1,464 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-22T08:59:59+00:00",
+  "title": "Design System: KOReader e-ink redesign",
+  "extensions": {
+    "scope": "Inside the simulated e-ink screen (.screen) of design/demo/index.html. Units are dp (1 CSS px = 1 dp, Screen:scaleBySize in KOReader). Desk, bezel, control column and the orange signal (#D9481F) are demo chrome, not product tokens.",
+    "tokenHome": {
+      "existing": "frontend/ui/size.lua (border, margin, padding, radius, line, item, span)",
+      "missing": "colors and type sizes have no tokens in KOReader yet",
+      "borderMap": {
+        "1px": "Size.border.default",
+        "1.5px": "Size.border.button / Size.border.window",
+        "2px": "Size.border.thick"
+      },
+      "radiusGaps": "pill (half height) and sheet 16dp have no size.lua entry; size.lua radius.window/button = 7"
+    },
+    "colorMeta": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "canonical": "#F1F1EC",
+        "panelGray16": "0xEE",
+        "tonalRamp": [
+          "#111111",
+          "#333333",
+          "#555555",
+          "#777777",
+          "#999999",
+          "#BBBBBB",
+          "#DDDDDD",
+          "#EEEEEE"
+        ]
+      },
+      "ink": {
+        "role": "primary",
+        "displayName": "Ink",
+        "canonical": "#151515",
+        "panelGray16": "0x11",
+        "tonalRamp": [
+          "#111111",
+          "#333333",
+          "#555555",
+          "#777777",
+          "#999999",
+          "#BBBBBB",
+          "#DDDDDD",
+          "#EEEEEE"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Pencil Gray",
+        "canonical": "#565653",
+        "panelGray16": "0x55",
+        "tonalRamp": [
+          "#111111",
+          "#333333",
+          "#555555",
+          "#777777",
+          "#999999",
+          "#BBBBBB",
+          "#DDDDDD",
+          "#EEEEEE"
+        ]
+      },
+      "ink-3": {
+        "role": "neutral",
+        "displayName": "Faded Gray",
+        "canonical": "#9A9A96",
+        "panelGray16": "0x99",
+        "tonalRamp": [
+          "#111111",
+          "#333333",
+          "#555555",
+          "#777777",
+          "#999999",
+          "#BBBBBB",
+          "#DDDDDD",
+          "#EEEEEE"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Rule Gray",
+        "canonical": "#C4C4BF",
+        "panelGray16": "0xCC",
+        "tonalRamp": [
+          "#111111",
+          "#333333",
+          "#555555",
+          "#777777",
+          "#999999",
+          "#BBBBBB",
+          "#DDDDDD",
+          "#EEEEEE"
+        ]
+      },
+      "mark": {
+        "role": "neutral",
+        "displayName": "Marker Gray",
+        "canonical": "#C6C6C1",
+        "panelGray16": "0xCC",
+        "tonalRamp": [
+          "#111111",
+          "#333333",
+          "#555555",
+          "#777777",
+          "#999999",
+          "#BBBBBB",
+          "#DDDDDD",
+          "#EEEEEE"
+        ]
+      },
+      "bubble-rule": {
+        "role": "neutral",
+        "displayName": "Bubble Rule",
+        "canonical": "#4A4A47",
+        "panelGray16": "0x44",
+        "tonalRamp": [
+          "#111111",
+          "#333333",
+          "#555555",
+          "#777777",
+          "#999999",
+          "#BBBBBB",
+          "#DDDDDD",
+          "#EEEEEE"
+        ]
+      },
+      "marker-on-ink": {
+        "role": "neutral",
+        "displayName": "Marker-on-Ink",
+        "canonical": "#8E8E8A",
+        "panelGray16": "0x88",
+        "tonalRamp": [
+          "#111111",
+          "#333333",
+          "#555555",
+          "#777777",
+          "#999999",
+          "#BBBBBB",
+          "#DDDDDD",
+          "#EEEEEE"
+        ]
+      },
+      "cover-stock": {
+        "role": "neutral",
+        "displayName": "Cover Stock",
+        "canonical": "#E2E2DD",
+        "panelGray16": "0xDD",
+        "tonalRamp": [
+          "#111111",
+          "#333333",
+          "#555555",
+          "#777777",
+          "#999999",
+          "#BBBBBB",
+          "#DDDDDD",
+          "#EEEEEE"
+        ]
+      },
+      "cover-tint": {
+        "role": "neutral",
+        "displayName": "Cover Tint",
+        "canonical": "#BBBBB6",
+        "panelGray16": "0xBB",
+        "tonalRamp": [
+          "#111111",
+          "#333333",
+          "#555555",
+          "#777777",
+          "#999999",
+          "#BBBBBB",
+          "#DDDDDD",
+          "#EEEEEE"
+        ]
+      },
+      "cover-gray": {
+        "role": "neutral",
+        "displayName": "Cover Gray",
+        "canonical": "#8B8B87",
+        "panelGray16": "0x88",
+        "tonalRamp": [
+          "#111111",
+          "#333333",
+          "#555555",
+          "#777777",
+          "#999999",
+          "#BBBBBB",
+          "#DDDDDD",
+          "#EEEEEE"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "reading": {
+        "displayName": "Reading",
+        "purpose": "Book text. User scale 15/16/17/18/19/20/22/24/26/28 dp; line-height 1.55/1.8/2.1; justified; CJK indent 2em, gap .45em."
+      },
+      "reading-latin": {
+        "displayName": "Reading (Latin)",
+        "purpose": "English book text in Noto Serif (or Noto Sans when sans chosen); indent 1.5em, no paragraph gap, hyphenated."
+      },
+      "reading-chapter": {
+        "displayName": "Chapter title",
+        "purpose": "Chapter titles in the flow."
+      },
+      "headword": {
+        "displayName": "Headword",
+        "purpose": "Dictionary entry word."
+      },
+      "headline": {
+        "displayName": "Page title",
+        "purpose": "Top-level page titles (文件, 我的)."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Nav bar and sheet headers."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Screen default; list row first lines."
+      },
+      "excerpt": {
+        "displayName": "Excerpt",
+        "purpose": "Quoted book text in notes and search results."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Chips, segments, buttons, cover titles."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Status bar, page header/footer, meta lines; tabular figures."
+      },
+      "micro": {
+        "displayName": "Micro",
+        "purpose": "Tab bar labels, tags."
+      }
+    },
+    "shadows": [],
+    "borders": [
+      {
+        "name": "rule-structural",
+        "value": "1px solid #151515",
+        "purpose": "Tab bar, toolbars, sheet, drawer, nav bar, group header edges."
+      },
+      {
+        "name": "rule-divider",
+        "value": "1px solid #C4C4BF",
+        "purpose": "Between list rows; resting tile border."
+      },
+      {
+        "name": "outline-interactive",
+        "value": "1.5px solid #151515",
+        "purpose": "Search field, segmented control, stepper, outline button, toggle, textarea."
+      },
+      {
+        "name": "outline-selected",
+        "value": "2px solid #151515",
+        "purpose": "Selected font tile; tap-zone outlines."
+      }
+    ],
+    "motion": [],
+    "refreshTypes": [
+      {
+        "name": "partial",
+        "purpose": "Page turn, reflow after type change, jumps to chapter/bookmark/note/search hit."
+      },
+      {
+        "name": "ui",
+        "purpose": "Toolbars, sheets, drawer, tab switch, list paging, filters."
+      },
+      {
+        "name": "fast",
+        "purpose": "Toggles, selection and bubble, bookmark dog-ear, hints."
+      },
+      {
+        "name": "full",
+        "purpose": "Open book, back to shelf, night mode, every 6th page turn. Only type that flashes."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "6in",
+        "value": "536x724dp"
+      },
+      {
+        "name": "7in",
+        "value": "632x840dp"
+      },
+      {
+        "name": "10.3in",
+        "value": "936x1248dp"
+      }
+    ],
+    "icons": {
+      "style": "line",
+      "viewBox": "24",
+      "strokeWidth": 1.7,
+      "strokeWidthCurrent": 2.2,
+      "sizes": [
+        24,
+        18,
+        15
+      ],
+      "cap": "round",
+      "join": "round"
+    }
+  },
+  "components": [
+    {
+      "name": "Filter Chips",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Single-choice filters; selected is an ink-filled pill.",
+      "html": "<div class=\"ds-chips\"><button class=\"ds-chip\" aria-pressed=\"true\">全部 <span class=\"n\">12</span></button><button class=\"ds-chip\">在读 <span class=\"n\">6</span></button><button class=\"ds-chip\">未读 <span class=\"n\">3</span></button></div>",
+      "css": ".ds-chips{display:flex;gap:8px;background:#F1F1EC;padding:12px} .ds-chip{font-family:'Noto Sans SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;color:#151515;height:30px;padding:0 13px;border:1px solid #151515;border-radius:15px;background:#F1F1EC;font-size:13px;display:inline-flex;align-items:center;gap:4px;font-variant-numeric:tabular-nums;cursor:pointer} .ds-chip .n{opacity:.75} .ds-chip[aria-pressed=\"true\"]{background:#151515;color:#F1F1EC} .ds-chip:focus-visible{outline:2px solid #151515;outline-offset:-3px}"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Default action in sheets; 1.5px ink pill.",
+      "html": "<button class=\"ds-btn\">上一章</button>",
+      "css": ".ds-btn{font-family:'Noto Sans SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;color:#151515;height:40px;padding:0 16px;border:1.5px solid #151515;border-radius:20px;background:#F1F1EC;font-size:14px;display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer} .ds-btn:disabled{border-color:#C4C4BF;color:#9A9A96} .ds-btn:focus-visible{outline:2px solid #151515;outline-offset:-3px}"
+    },
+    {
+      "name": "Solid Button",
+      "kind": "button",
+      "refersTo": "button-solid",
+      "description": "The one committing action in a sheet.",
+      "html": "<button class=\"ds-btn-solid\">保存</button>",
+      "css": ".ds-btn-solid{font-family:'Noto Sans SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;height:40px;padding:0 16px;border:1.5px solid #151515;border-radius:20px;background:#151515;color:#F1F1EC;font-size:14px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer} .ds-btn-solid:focus-visible{outline:2px solid #151515;outline-offset:2px}"
+    },
+    {
+      "name": "Segmented Control",
+      "kind": "custom",
+      "refersTo": "segmented",
+      "description": "Single choice inside sheets; ink rules between segments, ink-filled selection.",
+      "html": "<div class=\"ds-seg\"><button>紧凑</button><button aria-pressed=\"true\">标准</button><button>宽松</button></div>",
+      "css": ".ds-seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;border:1.5px solid #151515;border-radius:19px;height:38px;overflow:hidden;background:#F1F1EC;width:320px} .ds-seg button{font-family:'Noto Sans SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;color:#151515;font-size:13.5px;background:none;border:0;cursor:pointer} .ds-seg button+button{border-left:1px solid #151515} .ds-seg button[aria-pressed=\"true\"]{background:#151515;color:#F1F1EC} .ds-seg button:focus-visible{outline:2px solid #151515;outline-offset:-3px}"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "searchfield",
+      "description": "Pill field with 1.5px ink outline and inset solid go pill.",
+      "html": "<form class=\"ds-search\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"11\" cy=\"11\" r=\"6.5\"/><path d=\"M16 16l4.5 4.5\"/></svg><input placeholder=\"搜索全书\"><button type=\"button\">搜索</button></form>",
+      "css": ".ds-search{height:42px;border:1.5px solid #151515;border-radius:21px;display:flex;align-items:center;gap:8px;padding:0 6px 0 14px;background:#F1F1EC;color:#151515;width:340px} .ds-search input{flex:1;min-width:0;border:0;background:none;font-family:'Noto Sans SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:15px;color:#151515;outline:none;height:100%} .ds-search input::placeholder{color:#565653} .ds-search button{font-family:'Noto Sans SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;height:32px;padding:0 14px;border:0;border-radius:16px;background:#151515;color:#F1F1EC;font-size:13px;cursor:pointer} .ds-search:focus-within{outline:2px solid #151515;outline-offset:2px}"
+    },
+    {
+      "name": "Bottom Sheet",
+      "kind": "card",
+      "refersTo": "sheet",
+      "description": "The single home for adjustments: paper plane, 1px ink border, 16dp top corners.",
+      "html": "<div class=\"ds-sheet\"><div class=\"hd\"><h3>字体与排版</h3><button aria-label=\"关闭\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M6 6l12 12M18 6L6 18\"/></svg></button></div><div class=\"row\"><span class=\"lab\">行距</span><span>1.8</span></div><div class=\"link\">更多排版<span>›</span></div></div>",
+      "css": ".ds-sheet{font-family:'Noto Sans SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;color:#151515;background:#F1F1EC;border:1px solid #151515;border-bottom:0;border-radius:16px 16px 0 0;padding:0 24px 20px;width:420px} .ds-sheet .hd{height:54px;display:flex;align-items:center;justify-content:space-between} .ds-sheet h3{margin:0;font-size:16px;font-weight:700} .ds-sheet .hd button{width:44px;height:44px;margin-right:-12px;border:0;background:none;color:#151515;display:grid;place-items:center;cursor:pointer} .ds-sheet .row{display:grid;grid-template-columns:56px 1fr;align-items:center;gap:10px;min-height:52px;font-size:15px} .ds-sheet .lab{font-size:13px;color:#565653} .ds-sheet .link{display:flex;justify-content:space-between;align-items:center;height:48px;border-top:1px solid #C4C4BF;margin-top:10px;font-size:14px}"
+    },
+    {
+      "name": "Selection Bubble",
+      "kind": "custom",
+      "refersTo": "selection-bubble",
+      "description": "Solid ink action bar over selected text, paper labels, arrow to the selection.",
+      "html": "<div class=\"ds-bubble\"><div class=\"brow\"><button>复制</button><button>划线</button><button>写想法</button><button>查询</button><button>搜索</button></div></div>",
+      "css": ".ds-bubble{position:relative;display:inline-flex;flex-direction:column;background:#151515;color:#F1F1EC;border-radius:10px;margin-bottom:8px} .ds-bubble::after{content:\"\";position:absolute;left:calc(50% - 7px);top:100%;border:7px solid transparent;border-top-color:#151515} .ds-bubble .brow{display:flex} .ds-bubble button{font-family:'Noto Sans SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;height:44px;padding:0 13px;font-size:14px;background:none;border:0;color:inherit;white-space:nowrap;cursor:pointer} .ds-bubble button+button{border-left:1px solid #4A4A47} .ds-bubble button:focus-visible{outline:2px solid #F1F1EC;outline-offset:-4px}"
+    },
+    {
+      "name": "Tab Bar",
+      "kind": "nav",
+      "refersTo": "tabbar",
+      "description": "Library navigation: line icon over label, current tab ink and bold with heavier stroke.",
+      "html": "<nav class=\"ds-tabbar\"><button aria-current=\"page\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"4\" y=\"4.5\" width=\"4\" height=\"15\" rx=\".6\"/><rect x=\"10\" y=\"4.5\" width=\"4\" height=\"15\" rx=\".6\"/><path d=\"M15.6 5.8l3.4-.9 3.3 13.6-3.4.9z\"/></svg>书架</button><button><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3.5 6.5a1 1 0 0 1 1-1h4.6l2 2h8.4a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z\"/></svg>文件</button><button><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"8.5\" r=\"3.6\"/><path d=\"M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5\"/></svg>我的</button></nav>",
+      "css": ".ds-tabbar{height:56px;border-top:1px solid #151515;display:grid;grid-template-columns:repeat(3,1fr);background:#F1F1EC;width:420px} .ds-tabbar button{font-family:'Noto Sans SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;color:#565653;background:none;border:0;cursor:pointer} .ds-tabbar button[aria-current=\"page\"]{color:#151515;font-weight:700} .ds-tabbar button:focus-visible{outline:2px solid #151515;outline-offset:-3px}"
+    },
+    {
+      "name": "Reader Bottom Toolbar",
+      "kind": "nav",
+      "refersTo": "reader-toolbar-bottom",
+      "description": "Center-tap toolbar: four line icons with labels under them.",
+      "html": "<div class=\"ds-tb\"><button><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M9 6.5h11M9 12h11M9 17.5h11\"/><circle cx=\"4.5\" cy=\"6.5\" r=\"1\" fill=\"currentColor\"/><circle cx=\"4.5\" cy=\"12\" r=\"1\" fill=\"currentColor\"/><circle cx=\"4.5\" cy=\"17.5\" r=\"1\" fill=\"currentColor\"/></svg>目录</button><button><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3.5 12h17\"/><circle cx=\"9\" cy=\"12\" r=\"2.8\" fill=\"#F1F1EC\"/><path d=\"M3.5 8v8M20.5 8v8\"/></svg>进度</button><button><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4\"/></svg>亮度</button><button><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M2.5 19L8 5h1l5.5 14M4.6 14h7.8\"/><path d=\"M14.5 19l3.4-8.5h.7l3.4 8.5M15.8 16h4.9\"/></svg>字体</button></div>",
+      "css": ".ds-tb{height:76px;border-top:1px solid #151515;display:grid;grid-template-columns:repeat(4,1fr);background:#F1F1EC;width:420px} .ds-tb button{font-family:'Noto Sans SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;font-size:12px;color:#151515;background:none;border:0;cursor:pointer} .ds-tb button:focus-visible{outline:2px solid #151515;outline-offset:-3px}"
+    },
+    {
+      "name": "List Row and Pager",
+      "kind": "custom",
+      "refersTo": "list-row",
+      "description": "56dp rows with rule-gray dividers; lists page with pill pager instead of scrolling.",
+      "html": "<div class=\"ds-list\"><div class=\"ds-row\"><div class=\"m\"><div class=\"l1\">经典常谈</div><div class=\"l2\">EPUB · 412 KB</div></div><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M9.5 5.5l6.5 6.5-6.5 6.5\"/></svg></div><div class=\"ds-row\"><div class=\"m\"><div class=\"l1\">Walden</div><div class=\"l2\">EPUB · 636 KB</div></div><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M9.5 5.5l6.5 6.5-6.5 6.5\"/></svg></div><div class=\"ds-pager\"><button disabled><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M15 5l-7 7 7 7\"/></svg></button><span>1 / 3</span><button><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M9.5 5.5l6.5 6.5-6.5 6.5\"/></svg></button></div></div>",
+      "css": ".ds-list{font-family:'Noto Sans SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;color:#151515;background:#F1F1EC;padding:0 24px;width:420px} .ds-row{min-height:56px;display:flex;align-items:center;gap:14px;border-bottom:1px solid #C4C4BF;padding:8px 0} .ds-row .m{flex:1} .ds-row .l1{font-size:15px;line-height:1.35} .ds-row .l2{font-size:12px;color:#565653;margin-top:2px;font-variant-numeric:tabular-nums} .ds-row svg{color:#9A9A96} .ds-pager{height:44px;display:flex;align-items:center;justify-content:center;gap:14px;font-size:13px;font-variant-numeric:tabular-nums} .ds-pager button{width:44px;height:32px;border:1px solid #151515;border-radius:16px;background:none;color:#151515;display:grid;place-items:center;cursor:pointer} .ds-pager button:disabled{border-color:#C4C4BF;color:#9A9A96;cursor:default} .ds-pager button:focus-visible{outline:2px solid #151515;outline-offset:-3px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Ink on Paper, One Sheet at a Time",
+    "overview": "The page owns the screen. Chrome appears only when asked for: a center tap brings a calm black-on-paper toolbar, and every adjustment lives in one bottom sheet that rises over the page. The world is a paper ground and an ink black, with grays only where they carry a job: secondary text, dividers, disabled states and the marker highlight. Structure comes from 1px ink rules and sheet edges, never from shadow or motion. WeChat Read's e-ink edition is the pinned look and interaction model; deviating from it is a defect unless KOReader has a capability with no WeChat Read equivalent.\n\nDensity is calm and touch-first. Targets are at least 44dp, rows are 56dp, and the screen gutter is 24dp. Long lists paginate with a pager instead of scrolling, because scrolling on e-ink means a repaint storm. Every interaction is designed around the area it repaints and the KOReader refresh type it needs (partial, ui, fast, full). Only `full` flashes.\n\nNight mode is a pixel inversion of the whole screen, the same as KOReader's. There is no second palette.",
+    "keyCharacteristics": [
+      "Paper ground, ink black, grays only for secondary text, rules, disabled states and highlights; monochrome is a confirmed constraint",
+      "1px ink rules and 1.5px ink outlines carry all structure; no shadows anywhere",
+      "Black-filled pill is the selected state for chips and segmented controls",
+      "Solid black selection bubble with paper labels",
+      "Bottom sheets with a 1px ink border and 16dp top corners hold every adjustment",
+      "Paginated lists with a pill pager; no scrolling surfaces",
+      "Line icons with the label under the icon in tab bars and toolbars",
+      "Typographic grayscale covers when a book has no cover image",
+      "Every interaction maps to one KOReader refresh type"
+    ],
+    "rules": [
+      {
+        "name": "The Monochrome Rule",
+        "body": "Color never carries meaning. Every state reads in black, white and gray, because every target panel is monochrome.",
+        "section": "colors"
+      },
+      {
+        "name": "The Job-Only Gray Rule",
+        "body": "A gray must do a named job (secondary text, divider, disabled, highlight). Never introduce a gray for mood or depth.",
+        "section": "colors"
+      },
+      {
+        "name": "The Book Voice Rule",
+        "body": "Serif marks the book's own words. Controls never use the serif, and book text never uses the UI sans unless the reader chose the sans reading font.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "Every number that updates in place (page counts, percentages, time, battery, pager) uses tabular figures, so a partial refresh does not shift its neighbours.",
+        "section": "typography"
+      },
+      {
+        "name": "The Proportion Rule",
+        "body": "One design from 6\" to 10.3\". Change columns and margins with the panel and keep the component sizes.",
+        "section": "layout"
+      },
+      {
+        "name": "The Edge, Not Shadow Rule",
+        "body": "Separate surfaces with a 1px ink rule or a sheet edge. Never use a drop shadow, blur or translucent scrim tint. Scrims exist only to catch taps and are fully transparent.",
+        "section": "elevation"
+      },
+      {
+        "name": "The No-Motion Rule",
+        "body": "Nothing animates on the product surface. State changes are a repaint of a named region with a named refresh type.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do separate surfaces with 1px ink rules and divide list rows with 1px rule gray.",
+      "Do show single-choice selection as an ink-filled pill with paper text.",
+      "Do put every reading adjustment in one bottom sheet with a 1px ink border and 16dp top corners.",
+      "Do paginate lists with the pill pager and \"n / N\"; keep overflow hidden.",
+      "Do put the label under the icon in tab bars and toolbars, with line icons at 1.7 stroke and 2.2 for the current tab.",
+      "Do keep touch targets at 44dp or more and list rows at 56dp or more.",
+      "Do use tabular figures for every number that updates in place.",
+      "Do name the refresh type and repaint region for every new interaction; only `full` may flash.",
+      "Do implement night mode as inversion of the whole screen, not as a second palette."
+    ],
+    "donts": [
+      "Don't use color to carry meaning; the panels are monochrome.",
+      "Don't use drop shadows, blur, gradients for depth, or tinted scrims.",
+      "Don't animate anything on the product surface.",
+      "Don't make lists scroll.",
+      "Don't set controls in the serif, or book text in the UI sans unless the reader chose it.",
+      "Don't bring the demo's orange signal color, desk grays or bezel into the product."
+    ]
+  }
+}
