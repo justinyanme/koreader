@@ -1,6 +1,6 @@
 --[[--
 Small controls of the e-ink redesign (see DESIGN.md, Components): a pill
-button, a tick stepper and a toggle. They only use @{ui.palette} colors and
+button, a tick stepper, a toggle and a list pager. They only use @{ui.palette} colors and
 the ui_* font roles, and leave refreshing to their owner.
 
 @usage
@@ -31,23 +31,28 @@ local PillButton = InputContainer:extend{
     text = nil,
     icon = nil,
     icon_size = Screen:scaleBySize(18),
+    icon_rotation_angle = 0,
     callback = nil,
     enabled = true,
     solid = false,
     width = nil, -- defaults to the label width plus 16dp padding
     height = Screen:scaleBySize(40),
+    bordersize = Size.border.button,
 }
 
 function PillButton:init()
     local fg = not self.enabled and Palette.ink_3 or self.solid and Palette.paper or Palette.ink
     local label
     if self.icon then
-        label = IconWidget:new{ icon = self.icon, width = self.icon_size, height = self.icon_size, alpha = true }
+        label = IconWidget:new{
+            icon = self.icon, width = self.icon_size, height = self.icon_size, alpha = true,
+            rotation_angle = self.icon_rotation_angle,
+        }
         if not self.enabled then label.dim = true end
     else
         label = TextWidget:new{ text = self.text, face = Font:getFace("ui_label_large"), fgcolor = fg }
     end
-    local bw = Size.border.button
+    local bw = self.bordersize
     local w = self.width or label:getSize().w + 2 * (Screen:scaleBySize(16) + bw)
     self.dimen = Geom:new{ w = w, h = self.height }
     self[1] = FrameContainer:new{
@@ -189,7 +194,47 @@ function Toggle:onTapSelect()
     return true
 end
 
+--- Pager band (44dp): back pill, "n / N", forward pill; 44 × 32dp pills with a 1dp border. Empty with one page.
+local Pager = HorizontalGroup:extend{
+    page = 1,
+    pages = 1,
+    width = nil,
+    on_change = nil, -- function(new_page)
+}
+
+function Pager:init()
+    local band = Geom:new{ w = self.width, h = Screen:scaleBySize(44) }
+    if self.pages <= 1 then
+        self[1] = CenterContainer:new{ dimen = band, HorizontalSpan:new{ width = 0 } }
+        return
+    end
+    local function button(delta, rotation)
+        local target = self.page + delta
+        return PillButton:new{
+            icon = "eink/chev", icon_size = Screen:scaleBySize(16), icon_rotation_angle = rotation,
+            width = Screen:scaleBySize(44), height = Screen:scaleBySize(32), bordersize = Size.border.default,
+            enabled = target >= 1 and target <= self.pages,
+            callback = function() self.on_change(target) end,
+        }
+    end
+    local gap = Screen:scaleBySize(14)
+    self[1] = CenterContainer:new{
+        dimen = band,
+        HorizontalGroup:new{
+            button(-1, 180),
+            HorizontalSpan:new{ width = gap },
+            CenterContainer:new{
+                dimen = Geom:new{ w = Screen:scaleBySize(54), h = band.h },
+                TextWidget:new{ text = self.page .. " / " .. self.pages, face = Font:getFace("ui_label"), fgcolor = Palette.ink },
+            },
+            HorizontalSpan:new{ width = gap },
+            button(1, 0),
+        },
+    }
+end
+
 return {
+    Pager = Pager,
     PillButton = PillButton,
     TickTrack = TickTrack,
     TickStepper = TickStepper,

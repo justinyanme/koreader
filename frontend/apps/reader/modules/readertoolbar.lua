@@ -231,6 +231,7 @@ end
 function ReaderToolbar:onSetDimensions(dimen)
     self:hideToolbar(true)
     self:closeSheet(true)
+    self:closeDrawer()
     if self.menu_container then
         self:onCloseReaderMenu()
         ReaderMenu.onShowMenu(self)
@@ -241,6 +242,29 @@ end
 function ReaderToolbar:onCloseWidget()
     self:hideToolbar(true)
     self:closeSheet(true)
+    self:closeDrawer()
+end
+
+--- The contents drawer (目录 / 书签 / 笔记) takes over "ShowToc", from the toolbar and gestures alike;
+-- the original table of contents stays in the original menu, which calls ReaderToc directly.
+function ReaderToolbar:onShowToc()
+    if not Device:isTouchDevice() then return end -- no D-pad navigation here: ReaderToc handles it
+    self:hideToolbar(true)
+    self:closeSheet(true)
+    self:closeDrawer()
+    self.drawer = require("apps/reader/modules/readertocdrawer"):new{
+        ui = self.ui,
+        on_close = function() self.drawer = nil end,
+    }
+    UIManager:show(self.drawer, "ui", self.drawer.panel_rect)
+    return true
+end
+
+function ReaderToolbar:closeDrawer()
+    if self.drawer then
+        UIManager:close(self.drawer)
+        self.drawer = nil
+    end
 end
 
 function ReaderToolbar:buildBars()
