@@ -49,6 +49,7 @@ local PAGER_H = dp(44)
 local TEXT_H = dp(60) -- title (2 lines) and status under each cover
 local ROW_GAP = dp(18)
 local COL_GAP = dp(20) -- minimum; columns are spread with space-between
+local EXTRACT_CHUNK = 40 -- books per background job, well under BookInfoManager's 5 minute watchdog
 
 local filter_texts = {
     all = C_("Status of group of books", "All"),
@@ -85,12 +86,13 @@ local ShelfView = WidgetContainer:extend{
 
 function ShelfView:init()
     self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = self.height }
-    self.bim = self.ui.coverbrowser and require("bookinfomanager")
+    -- CoverBrowser's cache, when that plugin is loaded
+    self.bim = package.loaded["bookinfomanager"]
     self.filter = "all"
     self.sort = G_reader_settings:readSetting("shelf_sort", "recent")
     self.page = 1
     self:computeGrid()
-    self:reload()
+    self:reload(true)
     self:update()
 end
 
@@ -115,53 +117,91 @@ function ShelfView:computeGrid()
     self.cover_specs = { max_cover_w = self.cover_w, max_cover_h = self.cover_h }
 end
 
---- Re-reads the books from disk and caches, and queues extraction of what the cache lacks.
-function ShelfView:reload()
-    self.books = Shelf.load(homeDir(), self.bim, self.cover_specs)
-    if not self.bim or self.extracting then return end
-    self.attempted = self.attempted or {}
-    local pending = {}
-    for _, book in ipairs(self.books) do
-        -- each file at most once per view, so a book that fails to extract cannot loop
-        if book.needs_extract and not self.attempted[book.file] then
-            self.attempted[book.file] = true
-            table.insert(pending, { filepath = book.file, cover_specs = self.cover_specs })
-        end
+--- Re-reads statuses and the cache, and queues extraction of what the cache lacks.
+-- `rescan` also walks the home folder again; tab switches keep the last scan.
+function ShelfView:reload(rescan)
+    if rescan or not self.scanned then
+        self.scanned = Shelf.scan(homeDir())
     end
-    if #pending > 0 then
-        self.extracting = { files = pending, done = 0, start = time.now() }
-        self.poll = function() self:pollExtraction() end
+    self.books = Shelf.load(self.scanned, self.bim, self.cover_specs)
+    if self.bim and not self.extracting and #self:pendingFiles() > 0 then
+        self.extracting = { total = #self:pendingFiles(), done = 0, stalls = 0, start = time.now() }
+        self.poll = self.poll or function() self:pollExtraction() end
         UIManager:scheduleIn(1, self.poll)
     end
 end
 
+function ShelfView:pendingFiles()
+    local pending = {}
+    for _, book in ipairs(self.books) do
+        if book.needs_extract then
+            table.insert(pending, book.file)
+        end
+    end
+    return pending
+end
+
+function ShelfView:isShowing()
+    return self.ui.content and self.ui.content[1] == self
+end
+
+-- BookInfoManager runs one job at a time: a new job kills the running one (the file browser starts
+-- its own for thumbnails), and its watchdog kills jobs older than 5 minutes. So the shelf waits its
+-- turn, submits small chunks, and after each one re-queues what the cache still lacks. A book that
+-- keeps failing gets a final row after BookInfoManager's max_extract_tries.
 function ShelfView:pollExtraction()
     local ext = self.extracting
     if self.bim:isExtractingInBackground() then
-        -- Another job (e.g. the file browser's own thumbnails) must finish first:
-        -- BookInfoManager runs one job at a time and a new one kills the running one.
-        if ext.launched then
-            -- ponytail: one cache lookup per pending book each poll; fine for hundreds of new books
-            local done = 0
-            for _, f in ipairs(ext.files) do
-                local info = self.bim:getBookInfo(f.filepath)
-                if info and info.cover_fetched then done = done + 1 end
+        if ext.launched and self:isShowing() then
+            local cache = Shelf.readCache(self.bim)
+            local missing = 0
+            for _, book in ipairs(self.books) do
+                if book.needs_extract and Shelf.needsExtract(self.bim, cache[book.file], self.cover_specs) then
+                    missing = missing + 1
+                end
             end
-            if done ~= ext.done then
-                ext.done = done
-                self:update("pager")
-            end
+            self:setProgress(ext.total - missing)
         end
         UIManager:scheduleIn(2, self.poll)
-    elseif not ext.launched and self.bim:extractInBackground(ext.files) then
-        ext.launched = true
-        UIManager:scheduleIn(2, self.poll)
-    else
-        logger.info("Shelf: extracted", #ext.files, "books in", time.to_ms(time.since(ext.start)), "ms")
-        self.extracting = nil
-        self.books = Shelf.load(homeDir(), self.bim, self.cover_specs)
-        self:update("list")
+        return
     end
+    -- idle: our chunk ended (done or killed), or someone else's job did
+    self.books = Shelf.load(self.scanned, self.bim, self.cover_specs)
+    local pending = self:pendingFiles()
+    if ext.launched then
+        -- safety net: stop if chunks keep ending without the cache gaining anything
+        ext.stalls = #pending >= (ext.last_pending or math.huge) and ext.stalls + 1 or 0
+    end
+    ext.last_pending = #pending
+    if #pending == 0 or ext.stalls >= 3 then
+        logger.info("Shelf: extracted", ext.total - #pending, "of", ext.total, "books in",
+            time.to_ms(time.since(ext.start)), "ms")
+        self.extracting = nil
+        if self:isShowing() then self:update("list") else self:update() end
+        return
+    end
+    local chunk = {}
+    for i = 1, math.min(EXTRACT_CHUNK, #pending) do
+        chunk[i] = { filepath = pending[i], cover_specs = self.cover_specs }
+    end
+    ext.launched = self.bim:extractInBackground(chunk)
+    if not ext.launched then -- fork failed
+        self.extracting = nil
+        return
+    end
+    if self:isShowing() then self:setProgress(ext.total - #pending) end
+    UIManager:scheduleIn(2, self.poll)
+end
+
+--- Updates the progress line, repainting the pager band only.
+function ShelfView:setProgress(done)
+    if done == self.extracting.done and self.progress_shown then return end
+    self.extracting.done = done
+    self.progress_shown = true
+    if not self[1] then return end
+    self[1][4]:free()
+    self[1][4] = self:buildPager()
+    UIManager:setDirty(self.ui, "ui", Geom:new{ x = self.dimen.x, y = self.dimen.y + self.height - PAGER_H, w = self.width, h = PAGER_H })
 end
 
 function ShelfView:stop()
@@ -194,7 +234,7 @@ function ShelfView:update(region)
         logger.info("Shelf: first render built in", time.to_ms(time.since(start)), "ms")
     end
     if region then
-        local y = ({ header = 0, list = HEADER_H, grid = HEADER_H + CHIPS_H, pager = self.height - PAGER_H })[region]
+        local y = ({ header = 0, list = HEADER_H, grid = HEADER_H + CHIPS_H })[region]
         UIManager:setDirty(self.ui, "ui", Geom:new{ x = self.dimen.x, y = self.dimen.y + y, w = self.width, h = self.height - y })
     end
 end
@@ -295,7 +335,8 @@ end
 
 function ShelfView:coverWidget(book, w, h)
     local border = Size.border.default
-    local info = self.bim and self.bim:getBookInfo(book.file, true)
+    -- cover blobs are read for the visible books only
+    local info = book.has_cover and self.bim and self.bim:getBookInfo(book.file, true)
     if info and info.cover_bb then
         local bb = info.cover_bb
         return FrameContainer:new{
@@ -404,7 +445,7 @@ function ShelfView:buildPager()
     if self.extracting then
         if #band > 0 then table.insert(band, HorizontalSpan:new{ width = dp(14) }) end
         table.insert(band, TextWidget:new{
-            text = T(_("Indexing books %1 / %2…"), self.extracting.done, #self.extracting.files),
+            text = T(_("Indexing books %1 / %2…"), self.extracting.done, self.extracting.total),
             face = Font:getFace("ui_caption"),
             fgcolor = Palette.ink_2,
         })
@@ -421,6 +462,14 @@ end
 function ShelfView:setPage(page)
     self.page = page
     self:update("grid")
+end
+
+--- Turns one page forward (1) or back (-1), if there is one.
+function ShelfView:turnPage(delta)
+    local page = self.page + delta
+    if page >= 1 and page <= self.pages then
+        self:setPage(page)
+    end
 end
 
 function ShelfView:setSort(sort)
