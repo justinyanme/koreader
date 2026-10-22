@@ -127,7 +127,7 @@ function ReaderToolbar.applyFooterDefaults()
         } do
             footer[k] = v
         end
-        footer.order = { "chapter_progress", "dynamic_filler", "percentage", "time", "battery" }
+        footer.order = { [0] = "off", "chapter_progress", "dynamic_filler", "percentage", "time", "battery" }
         G_reader_settings:saveSetting("footer", footer)
     end
 end
@@ -154,21 +154,62 @@ end
 
 ReaderToolbar.onReaderReady = ReaderToolbar.initGesListener
 
--- Middle third: toolbar. Left and right thirds: page turns, unless the user set custom tap zones.
+--[[--
+Where taps go on the page, as screen-ratio rects: { x, y, w, h, kind } with kind
+"backward", "forward", "toolbar" or "none" (page turn taps disabled), first match wins.
+Default: thirds. Custom page turn zones keep their size; the toolbar gets the band
+left between them, or the screen's center when they leave none.
+]]
+function ReaderToolbar:getTapLayout()
+    local third = 1/3
+    if G_reader_settings:isTrue("page_turns_disable_tap") then
+        return { { 0, 0, third, 1, "none" }, { third, 0, third, 1, "toolbar" }, { 2 * third, 0, third, 1, "none" } }
+    end
+    if G_reader_settings:readSetting("page_turns_tap_zones", "default") == "default" then
+        local left, right = "backward", "forward"
+        if self.view.inverse_reading_order ~= BD.mirroredUILayout() then
+            left, right = right, left
+        end
+        return { { 0, 0, third, 1, left }, { third, 0, third, 1, "toolbar" }, { 2 * third, 0, third, 1, right } }
+    end
+    local forward, backward = self.view:getTapZones()
+    local function rect(z, kind) return { z.ratio_x, z.ratio_y, z.ratio_w, z.ratio_h, kind } end
+    -- side by side (left_right) or stacked (top_bottom, bottom_top): the toolbar takes the gap
+    local axis = forward.ratio_h == 1 and backward.ratio_h == 1 and 1 or 2
+    local first, second = backward, forward
+    if (axis == 1 and forward.ratio_x < backward.ratio_x) or (axis == 2 and forward.ratio_y < backward.ratio_y) then
+        first, second = forward, backward
+    end
+    local gap_start, gap_end
+    if axis == 1 then
+        gap_start, gap_end = first.ratio_x + first.ratio_w, second.ratio_x
+    else
+        gap_start, gap_end = first.ratio_y + first.ratio_h, second.ratio_y
+    end
+    local toolbar
+    if gap_end - gap_start > 0.01 then
+        toolbar = axis == 1 and { gap_start, 0, gap_end - gap_start, 1, "toolbar" }
+                             or { 0, gap_start, 1, gap_end - gap_start, "toolbar" }
+    else
+        -- zones covering the whole page: the toolbar keeps a center square on top of them
+        return { { third, third, third, third, "toolbar" }, rect(backward, "backward"), rect(forward, "forward") }
+    end
+    return { rect(backward, "backward"), rect(forward, "forward"), toolbar }
+end
+
 function ReaderToolbar:onTapPage(ges)
-    local third = math.floor(ges.pos.x * 3 / Screen:getWidth())
-    if third == 1 then
-        return self:showToolbar()
+    local fx, fy = ges.pos.x / Screen:getWidth(), ges.pos.y / Screen:getHeight()
+    for _, z in ipairs(self:getTapLayout()) do
+        if fx >= z[1] and fx < z[1] + z[3] and fy >= z[2] and fy < z[2] + z[4] then
+            if z[5] == "toolbar" then
+                return self:showToolbar()
+            elseif z[5] == "none" then
+                return true
+            end
+            return (self.ui.rolling or self.ui.paging):onGotoViewRel(z[5] == "forward" and 1 or -1)
+        end
     end
-    if G_reader_settings:readSetting("page_turns_tap_zones", "default") ~= "default"
-            or G_reader_settings:isTrue("page_turns_disable_tap") then
-        return false -- fall through to the page turn and config zones
-    end
-    local direction = third == 0 and -1 or 1
-    if self.view.inverse_reading_order ~= BD.mirroredUILayout() then
-        direction = -direction
-    end
-    return (self.ui.rolling or self.ui.paging):onGotoViewRel(direction)
+    return self:showToolbar()
 end
 
 function ReaderToolbar:onTapShowMenu()
@@ -180,7 +221,8 @@ function ReaderToolbar:onPressMenu()
 end
 
 function ReaderToolbar:onShowMenu(tab_index, do_not_show)
-    if do_not_show then -- menu search and rebuilds want the original menu
+    -- menu search and rebuilds want the original menu, and so do devices without touch (no D-pad navigation here)
+    if do_not_show or not Device:isTouchDevice() then
         return ReaderMenu.onShowMenu(self, tab_index, do_not_show)
     end
     return self:showToolbar()

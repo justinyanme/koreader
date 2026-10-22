@@ -29,6 +29,7 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Screen = Device.screen
 local T = require("ffi/util").template
 local _ = require("gettext")
+local C_ = _.pgettext
 
 local Panels = {}
 
@@ -288,11 +289,13 @@ local function brightnessContent(toolbar)
                 end,
             }))
     end
-    local autowarmth = ui.autowarmth
+    -- Without natural light the plugin is "auto night mode" and would flip night mode on its own.
+    local autowarmth = Device:hasNaturalLight() and ui.autowarmth
     if autowarmth then
         table.insert(group, toggleRow(toolbar, _("Adjust warmth automatically by time"), autowarmth.activate ~= 0,
             function(on)
                 autowarmth:onAutoWarmthMode(on and 2 or 0) -- 2: fixed schedule, needs no location
+                refresh() -- warmth and night mode may have changed with it
             end))
     end
     table.insert(group, toggleRow(toolbar, _("Night mode (white on black)"), G_reader_settings:isTrue("night_mode"),
@@ -350,40 +353,55 @@ function Tile:onTapSelect()
     return true
 end
 
--- Tap zone overlay: the three columns of the page, a tap anywhere closes it.
-local TapZones = InputContainer:extend{}
+-- Tap zone overlay: draws ReaderToolbar:getTapLayout(), a tap anywhere closes it.
+local TapZones = InputContainer:extend{
+    layout = nil,
+}
 
 function TapZones:init()
     local sw, sh = Screen:getWidth(), Screen:getHeight()
     self.dimen = Geom:new{ x = 0, y = 0, w = sw, h = sh }
     local margin = Screen:scaleBySize(6)
-    local col_w = math.floor(sw / 3)
-    local names = { _("Previous page"), _("Toolbar"), _("Next page") }
-    local hints = { _("Tap the left third"), _("Tap the middle"), _("Tap the right third") }
-    if self.mirrored then
-        names[1], names[3] = names[3], names[1]
-    end
-    local row = HorizontalGroup:new{}
-    for i = 1, 3 do
-        local bw = Size.border.thick
-        local inner = Geom:new{ w = col_w - 2 * margin - 2 * bw, h = sh - 2 * margin - 2 * bw }
-        table.insert(row, FrameContainer:new{
+    local bw = Size.border.thick
+    local names = {
+        backward = C_("Tap zones", "Previous page"),
+        forward = C_("Tap zones", "Next page"),
+        toolbar = C_("Tap zones", "Toolbar"),
+        none = _("Page turn taps off"),
+    }
+    local thirds_hints = { _("Tap the left third"), _("Tap the middle"), _("Tap the right third") }
+    self.zones = {}
+    -- drawn in reverse so that the zone that wins a tap is on top
+    for i = #self.layout, 1, -1 do
+        local z = self.layout[i]
+        local x, y = math.floor(z[1] * sw), math.floor(z[2] * sh)
+        local w, h = math.floor(z[3] * sw), math.floor(z[4] * sh)
+        local hint
+        if math.abs(z[3] - 1/3) < 0.01 and z[4] == 1 then
+            hint = thirds_hints[math.floor(z[1] * 3 + 0.5) + 1]
+        end
+        local inner = Geom:new{ w = w - 2 * (margin + bw), h = h - 2 * (margin + bw) }
+        local label = VerticalGroup:new{ text(names[z[5]], "ui_title", Palette.ink, inner.w) }
+        if hint then
+            table.insert(label, VerticalSpan:new{ width = Screen:scaleBySize(4) })
+            table.insert(label, text(hint, "ui_caption", Palette.ink_2, inner.w))
+        end
+        table.insert(self.zones, { x = x, y = y, widget = FrameContainer:new{
             margin = margin, padding = 0, bordersize = bw, radius = Screen:scaleBySize(8),
             color = Palette.ink, background = Palette.paper,
-            CenterContainer:new{
-                dimen = inner,
-                VerticalGroup:new{
-                    text(names[i], "ui_title", Palette.ink, inner.w),
-                    VerticalSpan:new{ width = Screen:scaleBySize(4) },
-                    text(hints[i], "ui_caption", Palette.ink_2, inner.w),
-                },
-            },
-        })
+            CenterContainer:new{ dimen = inner, label },
+        } })
     end
-    self[1] = FrameContainer:new{ bordersize = 0, padding = 0, background = Palette.paper, row }
     self.ges_events.TapClose = { GestureRange:new{ ges = "tap", range = self.dimen } }
     if Device:hasKeys() then
         self.key_events.TapClose = { { Device.input.group.Back } }
+    end
+end
+
+function TapZones:paintTo(bb, x, y)
+    bb:paintRect(x, y, self.dimen.w, self.dimen.h, Palette.paper)
+    for _, z in ipairs(self.zones) do
+        z.widget:paintTo(bb, x + z.x, y + z.y)
     end
 end
 
@@ -407,10 +425,10 @@ local function moreContent(toolbar, sheet)
     local tiles = {
         { "eink/info", _("Book information"), true, function() ui.bookinfo:onShowBookInfo() end },
         { "eink/zones", _("Tap zones"), Device:isTouchDevice(), function()
-            local zones = TapZones:new{ mirrored = toolbar.view.inverse_reading_order ~= require("ui/bidi").mirroredUILayout() }
+            local zones = TapZones:new{ layout = toolbar:getTapLayout() }
             UIManager:show(zones, "ui", zones.dimen)
         end },
-        { "eink/export", _("Export notes"), ui.exporter ~= nil, function() ui.exporter:onExportCurrentNotes() end },
+        { "eink/export", _("Export notes"), ui.exporter ~= nil and ui.exporter:isReadyToExport(), function() ui.exporter:onExportCurrentNotes() end },
         { "eink/stats", _("Reading statistics"), ui.statistics ~= nil, function() ui.statistics:onShowReaderProgress() end },
         -- Until the reorganized settings (#12) exist: the original menu, on its settings tab.
         { "eink/refresh", _("Refresh and ghosting"), true, function() toolbar:showOriginalMenuTab("appbar.settings") end },
