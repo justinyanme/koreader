@@ -176,6 +176,54 @@ describe("ReaderTocDrawer module", function()
             assert.is_nil(ui.menu.drawer)
         end)
 
+        it("should refresh only the panel when opened by the ShowToc action", function()
+            local drawer
+            local refreshes = refreshesOf(function()
+                ui:handleEvent(Event:new("ShowToc"))
+                drawer = ui.menu.drawer
+            end)
+            assert.are.equal(drawer, topWidget())
+            assert.are.same({ { mode = "ui", region = drawer.panel_rect } }, refreshes)
+            drawer:onClose()
+            UIManager:forceRePaint()
+        end)
+
+        it("should build only the shown rows of a very long, very deep table of contents", function()
+            local TextBoxWidget = require("ui/widget/textboxwidget")
+            local orig_toc = ui.toc.toc
+            local big = {}
+            while #big < 3000 do
+                for _, e in ipairs(orig_toc) do
+                    -- every 10th entry nested 60 levels deep: the indent must stay capped
+                    table.insert(big, { title = e.title .. " " .. #big, xpointer = e.xpointer, page = e.page,
+                                        depth = #big % 10 == 0 and 60 or e.depth })
+                end
+            end
+            table.sort(big, function(a, b) return a.page < b.page end)
+            ui.toc.toc = big
+            local boxes = 0
+            local orig_init = TextBoxWidget.init
+            TextBoxWidget.init = function(...) boxes = boxes + 1 return orig_init(...) end
+            local ok, err = pcall(function()
+                local drawer = openDrawer(ui)
+                assert.are.equal(#drawer.shown_rows, boxes) -- one title box per shown row, nothing more
+                local pages = drawer.cache.toc.pages
+                assert.is_true(#pages > 50)
+                boxes = 0
+                local paginate = spy.on(drawer, "paginate")
+                drawer:goToListPage(drawer.cache.toc.page % #pages + 1)
+                UIManager:forceRePaint()
+                assert.spy(paginate).was_not_called()
+                assert.are.equal(#drawer.shown_rows, boxes)
+                assert.are.equal(#pages[drawer.cache.toc.page], #drawer.shown_rows)
+                drawer:onClose()
+                UIManager:forceRePaint()
+            end)
+            TextBoxWidget.init = orig_init
+            ui.toc.toc = orig_toc
+            assert(ok, err)
+        end)
+
         it("should show how to add bookmarks and notes when there are none", function()
             local drawer = openDrawer(ui)
             local refreshes = refreshesOf(function() tapWidget(tab(drawer, "Bookmarks")) end)
@@ -242,13 +290,19 @@ describe("ReaderTocDrawer module", function()
             local drawer = openDrawer(ui)
             tapWidget(tab(drawer, "Bookmarks"))
             UIManager:forceRePaint()
-            assert.is_true(drawer.page_count > 1)
+            assert.is_true(#drawer.cache.bookmarks.pages > 1)
             local next_button = find(drawer.panel, function(w)
                 return w.icon == "eink/chev" and w.icon_rotation_angle == 0 and w.callback ~= nil
             end)
+            -- page excerpts are read once per drawer, not on every list page
+            local text_reads = 0
+            local orig = ui.document.getTextFromXPointers
+            ui.document.getTextFromXPointers = function(...) text_reads = text_reads + 1 return orig(...) end
             local refreshes = refreshesOf(function() tapWidget(next_button) end)
+            ui.document.getTextFromXPointers = orig
+            assert.are.equal(0, text_reads)
             assert.are.same({ { mode = "ui", region = drawer.list_rect } }, refreshes)
-            assert.are.equal(2, drawer.pages.bookmarks)
+            assert.are.equal(2, drawer.cache.bookmarks.page)
             drawer:onClose()
             UIManager:forceRePaint()
         end)
@@ -282,6 +336,44 @@ describe("ReaderTocDrawer module", function()
     end)
 
     describe("with a PDF", function()
+        it("should say there is no table of contents, and jump to bookmarks and notes", function()
+            local ui = openReader("spec/front/unit/data/sample.pdf")
+            local ok, err = pcall(function()
+                ui:handleEvent(Event:new("SetScrollMode", false)) -- in continuous mode, a jump scrolls the note to the top
+                local drawer = openDrawer(ui)
+                assert.is_truthy(find(drawer.panel, function(w) return w.text == "No table of contents" end))
+                drawer:onClose()
+
+                ui.paging:onGotoPage(10)
+                ui.highlight:onHold(nil, { pos = Geom:new{ x = 260, y = 70 } })
+                ui.highlight:onHoldPan(nil, { pos = Geom:new{ x = 260, y = 150 } })
+                ui.highlight:onHoldRelease()
+                ui.highlight:saveHighlight()
+                ui.highlight:onClose()
+                ui.paging:onGotoPage(5)
+                ui.bookmark:onToggleBookmark()
+                ui.paging:onGotoPage(1)
+                UIManager:forceRePaint()
+
+                drawer = openDrawer(ui)
+                tapWidget(tab(drawer, "Notes 1"))
+                UIManager:forceRePaint()
+                local row = shownRow(drawer, function(r) return r.note end)
+                tapWidget(row)
+                assert.are.equal(row.note.page, ui:getCurrentPage())
+                assert.are_not.equal(1, ui:getCurrentPage())
+
+                drawer = openDrawer(ui)
+                tapWidget(tab(drawer, "Bookmarks 1"))
+                UIManager:forceRePaint()
+                tapWidget(drawer.shown_rows[1])
+                assert.are.equal(5, ui:getCurrentPage())
+                assert.are.equal(ui, topWidget())
+            end)
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
         it("should list the outline and jump to an entry", function()
             local ui = openReader(sample_pdf)
             local ok, err = pcall(function()

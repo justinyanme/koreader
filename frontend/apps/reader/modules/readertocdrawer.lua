@@ -3,7 +3,9 @@ Contents drawer of the e-ink redesign (see DESIGN.md, Navigation, and the protot
 
 Opened by the reader toolbar's "Contents" (the "ShowToc" event): a left panel with the
 book's cover, title, author and progress over three tabs, contents, bookmarks and notes.
-Lists are paginated, never scrolled, and a group header never ends a page.
+Lists are paginated, never scrolled, and a group header never ends a page. Each tab is
+measured and paginated once per drawer (without rendering), and only the rows of the shown
+page are built, so long tables of contents stay cheap.
 
 Opening, closing and switching tabs refresh the panel ("ui"), turning a list page only
 refreshes the list ("ui"). Jumps close the drawer without a refresh of its own and let
@@ -27,6 +29,7 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local Palette = require("ui/palette")
+local RenderImage = require("ui/renderimage")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
@@ -45,18 +48,32 @@ local function text(str, face, color, max_width, bold)
     return TextWidget:new{ text = str, face = Font:getFace(face), fgcolor = color or Palette.ink, max_width = max_width, bold = bold }
 end
 
--- Wrapped text clamped to max_lines, with an ellipsis when it overflows.
-local function textBox(str, face, width, max_lines, opts)
+-- Line height of a TextBoxWidget in `face` (see TextBoxWidget:init).
+local function lineHeight(face, line_height)
+    return math.floor((1 + (line_height or 0.3)) * Font:getFace(face).size + 0.5)
+end
+
+local function textSize(str, face, bold)
+    local widget = TextWidget:new{ text = str, face = Font:getFace(face), bold = bold }
+    local size = widget:getSize()
+    widget:free()
+    return size
+end
+
+-- Lines `str` needs at `width`, at most max_lines, estimated from its unwrapped width (nothing is rendered).
+local function lineCount(str, face, width, max_lines, bold)
+    return math.max(1, math.min(max_lines, math.ceil(textSize(str, face, bold).w / width)))
+end
+
+-- Wrapped text; with `lines`, exactly that tall, with an ellipsis when it needs more.
+local function textBox(str, face, width, lines, opts)
     local args = { text = str, face = Font:getFace(face), width = width, fgcolor = Palette.ink, bgcolor = Palette.paper }
     for k, v in pairs(opts or {}) do args[k] = v end
-    local box = TextBoxWidget:new(args)
-    if max_lines and #box.vertical_string_list > max_lines then
-        args.height = max_lines * box.line_height_px
+    if lines then
+        args.height = lines * lineHeight(face, args.line_height)
         args.height_overflow_show_ellipsis = true
-        box:free()
-        box = TextBoxWidget:new(args)
     end
-    return box
+    return TextBoxWidget:new(args)
 end
 
 local function rule(w, color)
@@ -162,7 +179,7 @@ local TocDrawer = InputContainer:extend{
     on_close = nil, -- function, called once the drawer is closed
 }
 
-local covers = setmetatable({}, { __mode = "k" }) -- document => cover blitbuffer or false
+local thumbnails = setmetatable({}, { __mode = "k" }) -- document => cover thumbnail, or false
 
 --[[--
 Splits measured rows into pages that fit `max_h`.
@@ -207,7 +224,7 @@ function TocDrawer:init()
     for _, item in ipairs(self.ui.annotation.annotations) do
         table.insert(item.drawer and self.notes or self.bookmarks, item)
     end
-    self.pages = {} -- tab => current list page
+    self.cache = {} -- tab => { items = measured rows, pages = paginate(items), page = shown page }
     self:build()
 end
 
@@ -221,40 +238,25 @@ function TocDrawer:build()
     local list_h = self.panel_rect.h - top_h - pager_h - (export and export:getSize().h or 0)
     self.list_rect = Geom:new{ x = 0, y = top_h, w = self.panel_rect.w, h = self.panel_rect.h - top_h }
 
-    local rows, current = self:buildRows()
-    local measured = {}
-    for i, row in ipairs(rows) do
-        measured[i] = { h = row:getSize().h, is_header = row.is_header }
-    end
-    local pages = self.paginate(measured, list_h)
-    local page = self.pages[self.tab]
-    if not page then
-        page = 1
-        for p, indexes in ipairs(pages) do
-            for _, i in ipairs(indexes) do
-                if i == current then page = p end
-            end
-        end
-    end
-    page = math.max(1, math.min(page, #pages))
-    self.pages[self.tab] = page
-    self.page_count = #pages
+    local tab = self:getTab(list_h)
     self.shown_rows = {}
     local list = VerticalGroup:new{ align = "left" }
     local used = 0
-    for _, i in ipairs(pages[page] or {}) do
-        table.insert(list, rows[i])
-        table.insert(self.shown_rows, rows[i])
-        used = used + rows[i]:getSize().h
+    for _, i in ipairs(tab.pages[tab.page] or {}) do
+        local item = tab.items[i]
+        local row = self:buildRow(item)
+        table.insert(list, row)
+        table.insert(self.shown_rows, row)
+        used = used + item.h
     end
-    table.insert(list, VerticalSpan:new{ width = list_h - used })
+    table.insert(list, VerticalSpan:new{ width = math.max(0, list_h - used) })
 
     local column = VerticalGroup:new{ align = "left", header, tabs, list }
     if export then
         table.insert(column, export)
     end
     table.insert(column, EinkControls.Pager:new{
-        width = w, page = page, pages = #pages,
+        width = w, page = tab.page, pages = #tab.pages,
         on_change = function(p) self:goToListPage(p) end,
     })
     if self.panel then
@@ -272,15 +274,43 @@ function TocDrawer:build()
     }
 end
 
+--- The current tab's measured rows and pages, computed once per drawer.
+function TocDrawer:getTab(list_h)
+    local tab = self.cache[self.tab]
+    if not tab then
+        local items, current
+        if self.tab == "bookmarks" then
+            items = self:bookmarkItems()
+        elseif self.tab == "notes" then
+            items = self:noteItems()
+        else
+            items, current = self:tocItems()
+        end
+        tab = { items = items, pages = self.paginate(items, list_h), page = 1 }
+        for p, indexes in ipairs(tab.pages) do
+            for _, i in ipairs(indexes) do
+                if i == current then tab.page = p end
+            end
+        end
+        self.cache[self.tab] = tab
+    end
+    return tab
+end
+
 function TocDrawer:getCover(w, h)
     local doc = self.ui.document
-    if covers[doc] == nil then
-        covers[doc] = self.ui.bookinfo and self.ui.bookinfo:getCoverImage(doc) or false
+    if thumbnails[doc] == nil then
+        local bb = self.ui.bookinfo and self.ui.bookinfo:getCoverImage(doc)
+        if bb then
+            local scale = math.min(w / bb:getWidth(), h / bb:getHeight())
+            bb = RenderImage:scaleBlitBuffer(bb, math.floor(bb:getWidth() * scale), math.floor(bb:getHeight() * scale), true)
+        end
+        thumbnails[doc] = bb or false
     end
-    if covers[doc] then
+    if thumbnails[doc] then
         return CenterContainer:new{
             dimen = Geom:new{ w = w, h = h },
-            ImageWidget:new{ image = covers[doc], image_disposable = false, width = w, height = h, scale_factor = 0 },
+            ImageWidget:new{ image = thumbnails[doc], image_disposable = false },
         }
     end
     -- ponytail: plain stock card until #9's typographic covers can be shared
@@ -357,9 +387,8 @@ function TocDrawer:buildExportRow()
     }
 end
 
--- Content over a rule-gray divider, at least min_h tall with pad_v above and below.
-local function row(w, content, pad_v, min_h, callback)
-    local h = math.max(min_h or 0, content:getSize().h + 2 * pad_v)
+-- A list row `h` tall: content (vertically centered) over a rule-gray divider.
+local function row(w, h, content, callback)
     return ListRow:new{
         callback = callback,
         VerticalGroup:new{
@@ -369,89 +398,39 @@ local function row(w, content, pad_v, min_h, callback)
     }
 end
 
-local function emptyState(w, title, hint)
-    local group = VerticalGroup:new{
-        align = "center",
-        VerticalSpan:new{ width = dp(40) },
-        text(title, "ui_body", Palette.ink, w, true),
-    }
-    if hint then
-        table.insert(group, VerticalSpan:new{ width = dp(4) })
-        table.insert(group, textBox(hint, "ui_label_large", w - dp(16), nil, { alignment = "center", fgcolor = Palette.ink_2 }))
-    end
-    return ListRow:new{ CenterContainer:new{ dimen = Geom:new{ w = w, h = group:getSize().h }, group } }
-end
-
-local function groupHeader(w, title)
-    return ListRow:new{
-        is_header = true,
-        VerticalGroup:new{
-            align = "left",
-            VerticalSpan:new{ width = dp(18) },
-            text(title, "ui_caption", Palette.ink_2, w),
-            VerticalSpan:new{ width = dp(6) },
-            rule(w, Palette.ink),
-        },
-    }
-end
-
---- Rows of the current tab, and the index of the row to open on (the current chapter).
-function TocDrawer:buildRows()
-    if self.tab == "bookmarks" then
-        return self:buildBookmarkRows()
-    elseif self.tab == "notes" then
-        return self:buildNoteRows()
-    end
-    return self:buildTocRows()
-end
-
 function TocDrawer:pageString(pn_or_xp)
     return self.ui.bookmark:getBookmarkPageString(pn_or_xp)
 end
 
-function TocDrawer:buildTocRows()
+--[[--
+Measured rows of each tab: plain tables with the row's height `h` (and `is_header`), and what
+buildRow() needs to build it. Heights come from text widths, so measuring renders nothing.
+]]
+function TocDrawer:tocItems()
     local w = self.content_w
     local toc = self.ui.toc
     if #toc.toc == 0 then
-        return { emptyState(w, _("No table of contents")) }
+        return { { kind = "empty", h = 0, title = _("No table of contents") } }
     end
     local current = toc:getTocIndexByPage(self.ui.rolling and self.ui.document:getXPointer() or self.ui:getCurrentPage())
-    local rows = {}
+    local tag_w = textSize(_("Reading"), "ui_micro").w + 2 * (dp(7) + dp(1)) + dp(8)
+    local line_h = lineHeight("ui_body")
+    local items = {}
     for i, entry in ipairs(toc.toc) do
         local is_current = i == current
-        local indent = dp(16) * math.max(0, (entry.depth or 1) - 1)
-        local right = HorizontalGroup:new{ align = "center" }
-        if is_current then
-            table.insert(right, HorizontalSpan:new{ width = dp(8) })
-            table.insert(right, FrameContainer:new{
-                bordersize = dp(1), color = Palette.ink, radius = dp(9), padding = 0,
-                padding_left = dp(7), padding_right = dp(7),
-                text(_("Reading"), "ui_micro", Palette.ink),
-            })
-        end
-        table.insert(right, HorizontalSpan:new{ width = dp(12) })
-        local pn_or_xp = self.ui.rolling and entry.xpointer or entry.page
-        table.insert(right, text(self:pageString(pn_or_xp), "ui_caption", is_current and Palette.ink or Palette.ink_2))
-        local title_w = w - indent - right:getSize().w
-        local title = textBox(self.ui.toc:cleanUpTocTitle(entry.title, true), "ui_body", title_w, 2, { bold = is_current })
-        rows[i] = row(w, HorizontalGroup:new{
-            align = "center",
-            HorizontalSpan:new{ width = indent },
-            title,
-            right,
-        }, dp(8), dp(50), function()
-            self:jump(function()
-                if entry.xpointer then
-                    self.ui:handleEvent(Event:new("GotoXPointer", entry.xpointer, entry.xpointer))
-                else
-                    self.ui:handleEvent(Event:new("GotoPage", entry.page))
-                end
-            end)
-        end)
-        rows[i].toc_index = i
-        rows[i].is_current = is_current
+        local page = self:pageString(self.ui.rolling and entry.xpointer or entry.page)
+        local right_w = dp(12) + textSize(page, "ui_caption").w + (is_current and tag_w or 0)
+        local indent = math.min(dp(16) * math.max(0, (entry.depth or 1) - 1), math.floor(w / 3))
+        local title = toc:cleanUpTocTitle(entry.title, true)
+        local title_w = w - indent - right_w
+        local lines = lineCount(title, "ui_body", title_w, 2, is_current)
+        items[i] = {
+            kind = "toc", index = i, entry = entry, is_current = is_current, page = page,
+            indent = indent, title = title, title_w = title_w, lines = lines,
+            h = math.max(dp(50), lines * line_h + 2 * dp(8)),
+        }
     end
-    return rows, current
+    return items, current
 end
 
 --- Text at the top of a bookmarked page, or nil.
@@ -460,9 +439,10 @@ function TocDrawer:pageStartText(item)
     if self.ui.rolling then
         local page = doc:getPageFromXPointer(item.page)
         local next_xp = page < doc:getPageCount() and doc:getPageXPointer(page + 1)
-        return next_xp and doc:getTextFromXPointers(item.page, next_xp)
+        return next_xp and doc:getTextFromXPointers(item.page, next_xp) or doc:getTextFromXPointer(item.page)
     end
-    local boxes = doc:getTextBoxes(item.page)
+    -- the text layer only: no reflow segmentation of scanned pages
+    local boxes = doc.getPageTextBoxes and doc:getPageTextBoxes(item.page)
     if not boxes then return end
     local words = {}
     for _, line in ipairs(boxes) do
@@ -478,76 +458,152 @@ local function date(item)
     return (item.datetime or ""):sub(1, 10)
 end
 
-function TocDrawer:goTo(item)
-    self:jump(function() self.ui.bookmark:gotoBookmark(item.page, item.pos0) end)
-end
-
-function TocDrawer:buildBookmarkRows()
-    local w = self.content_w
+function TocDrawer:bookmarkItems()
     if #self.bookmarks == 0 then
-        return { emptyState(w, _("No bookmarks yet"), _("Show the toolbar and tap the bookmark icon at the top right.")) }
+        return { { kind = "empty", h = 0, title = _("No bookmarks yet"),
+                   hint = _("Show the toolbar and tap the bookmark icon at the top right.") } }
     end
-    local rows = {}
+    local w = self.content_w
+    local line_h, caption_h = lineHeight("ui_excerpt", 0.6), textSize("0", "ui_caption").h
+    local items = {}
     for __, item in ipairs(self.bookmarks) do
         local excerpt = snippet(self:pageStartText(item), 120)
         if excerpt == "" then
             excerpt = item.chapter or self.ui.doc_props.display_title
         end
         local page = self:pageString(item.page)
-        local meta = item.chapter and T(_("%1 · Page %2 · %3"), item.chapter, page, date(item))
-                                   or T(_("Page %1 · %2"), page, date(item))
-        table.insert(rows, row(w, VerticalGroup:new{
-            align = "left",
-            textBox(excerpt, "ui_excerpt", w, 3, { line_height = 0.6 }),
-            VerticalSpan:new{ width = dp(4) },
-            text(meta, "ui_caption", Palette.ink_2, w),
-        }, dp(12), nil, function() self:goTo(item) end))
+        local lines = lineCount(excerpt, "ui_excerpt", w, 3)
+        table.insert(items, {
+            kind = "bookmark", item = item, excerpt = excerpt, lines = lines,
+            meta = item.chapter and T(_("%1 · Page %2 · %3"), item.chapter, page, date(item))
+                                 or T(_("Page %1 · %2"), page, date(item)),
+            h = lines * line_h + dp(4) + caption_h + 2 * dp(12) + dp(1),
+        })
     end
-    return rows
+    return items
 end
 
-function TocDrawer:buildNoteRows()
-    local w = self.content_w
+function TocDrawer:noteItems()
     if #self.notes == 0 then
-        return { emptyState(w, _("No notes yet"), _("Long-press text, then tap Highlight or Add note.")) }
+        return { { kind = "empty", h = 0, title = _("No notes yet"), hint = _("Long-press text, then tap Highlight or Add note.") } }
     end
-    local rows, chapter = {}, nil
-    local swatch_w = dp(24)
+    local w = self.content_w
+    local excerpt_h, label_h = lineHeight("ui_excerpt", 0.6), lineHeight("ui_label_large")
+    local caption_h = textSize("0", "ui_caption").h
+    local thought_w = textSize(_("Thought"), "ui_label_large", true).w + dp(4)
+    local items, chapter = {}, nil
     for __, item in ipairs(self.notes) do
         local item_chapter = item.chapter or self.ui.doc_props.display_title
         if item_chapter ~= chapter then
             chapter = item_chapter
-            table.insert(rows, groupHeader(w, chapter))
+            table.insert(items, { kind = "header", is_header = true, title = chapter, h = dp(18) + caption_h + dp(6) + dp(1) })
         end
-        local excerpt = textBox(snippet(item.text, 400), "ui_excerpt", w - swatch_w, 3, { line_height = 0.6 })
-        local content = VerticalGroup:new{
-            align = "left",
-            HorizontalGroup:new{
-                align = "top",
-                LeftContainer:new{
-                    dimen = Geom:new{ w = swatch_w, h = excerpt.line_height_px },
-                    Swatch:new{ drawer = item.drawer },
-                },
-                excerpt,
+        local excerpt = snippet(item.text, 400)
+        local lines = lineCount(excerpt, "ui_excerpt", w - dp(24), 3)
+        local note = item.note and item.note ~= "" and snippet(item.note, 200)
+        local note_lines = note and lineCount(note, "ui_label_large", w - thought_w, 2) or 0
+        table.insert(items, {
+            kind = "note", item = item, excerpt = excerpt, lines = lines, note = note, note_lines = note_lines,
+            h = lines * excerpt_h + (note and dp(6) + note_lines * label_h or 0) + dp(4) + caption_h + 2 * dp(12) + dp(1),
+        })
+    end
+    return items
+end
+
+function TocDrawer:buildRow(it)
+    local w = self.content_w
+    if it.kind == "empty" then
+        local group = VerticalGroup:new{
+            align = "center",
+            VerticalSpan:new{ width = dp(40) },
+            text(it.title, "ui_body", Palette.ink, w, true),
+        }
+        if it.hint then
+            table.insert(group, VerticalSpan:new{ width = dp(4) })
+            table.insert(group, textBox(it.hint, "ui_label_large", w - dp(16), nil, { alignment = "center", fgcolor = Palette.ink_2 }))
+        end
+        return ListRow:new{ CenterContainer:new{ dimen = Geom:new{ w = w, h = group:getSize().h }, group } }
+    elseif it.kind == "header" then
+        return ListRow:new{
+            is_header = true,
+            VerticalGroup:new{
+                align = "left",
+                VerticalSpan:new{ width = dp(18) },
+                text(it.title, "ui_caption", Palette.ink_2, w),
+                VerticalSpan:new{ width = dp(6) },
+                rule(w, Palette.ink),
             },
         }
-        if item.note and item.note ~= "" then
-            local label = text(_("Thought"), "ui_label_large", Palette.ink, nil, true)
-            local gap = dp(4)
-            table.insert(content, VerticalSpan:new{ width = dp(6) })
-            table.insert(content, HorizontalGroup:new{
-                align = "top",
-                label,
-                HorizontalSpan:new{ width = gap },
-                textBox(snippet(item.note, 200), "ui_label_large", w - label:getSize().w - gap, 2),
+    elseif it.kind == "toc" then
+        local right = HorizontalGroup:new{ align = "center" }
+        if it.is_current then
+            table.insert(right, HorizontalSpan:new{ width = dp(8) })
+            table.insert(right, FrameContainer:new{
+                bordersize = dp(1), color = Palette.ink, radius = dp(9), padding = 0,
+                padding_left = dp(7), padding_right = dp(7),
+                text(_("Reading"), "ui_micro", Palette.ink),
             })
         end
-        table.insert(content, VerticalSpan:new{ width = dp(4) })
-        table.insert(content, text(date(item), "ui_caption", Palette.ink_2, w))
-        table.insert(rows, row(w, content, dp(12), nil, function() self:goTo(item) end))
-        rows[#rows].note = item
+        table.insert(right, HorizontalSpan:new{ width = dp(12) })
+        table.insert(right, text(it.page, "ui_caption", it.is_current and Palette.ink or Palette.ink_2))
+        local entry = it.entry
+        local r = row(w, it.h, HorizontalGroup:new{
+            align = "center",
+            HorizontalSpan:new{ width = it.indent },
+            textBox(it.title, "ui_body", it.title_w, it.lines, { bold = it.is_current }),
+            right,
+        }, function()
+            self:jump(function()
+                if entry.xpointer then
+                    self.ui:handleEvent(Event:new("GotoXPointer", entry.xpointer, entry.xpointer))
+                else
+                    self.ui:handleEvent(Event:new("GotoPage", entry.page))
+                end
+            end)
+        end)
+        r.toc_index, r.is_current = it.index, it.is_current
+        return r
+    elseif it.kind == "bookmark" then
+        return row(w, it.h, VerticalGroup:new{
+            align = "left",
+            textBox(it.excerpt, "ui_excerpt", w, it.lines, { line_height = 0.6 }),
+            VerticalSpan:new{ width = dp(4) },
+            text(it.meta, "ui_caption", Palette.ink_2, w),
+        }, function() self:goTo(it.item) end)
     end
-    return rows
+    -- note
+    local swatch_w = dp(24)
+    local content = VerticalGroup:new{
+        align = "left",
+        HorizontalGroup:new{
+            align = "top",
+            LeftContainer:new{
+                dimen = Geom:new{ w = swatch_w, h = lineHeight("ui_excerpt", 0.6) },
+                Swatch:new{ drawer = it.item.drawer },
+            },
+            textBox(it.excerpt, "ui_excerpt", w - swatch_w, it.lines, { line_height = 0.6 }),
+        },
+    }
+    if it.note then
+        local label = text(_("Thought"), "ui_label_large", Palette.ink, nil, true)
+        local gap = dp(4)
+        table.insert(content, VerticalSpan:new{ width = dp(6) })
+        table.insert(content, HorizontalGroup:new{
+            align = "top",
+            label,
+            HorizontalSpan:new{ width = gap },
+            textBox(it.note, "ui_label_large", w - label:getSize().w - gap, it.note_lines),
+        })
+    end
+    table.insert(content, VerticalSpan:new{ width = dp(4) })
+    table.insert(content, text(date(it.item), "ui_caption", Palette.ink_2, w))
+    local r = row(w, it.h, content, function() self:goTo(it.item) end)
+    r.note = it.item
+    return r
+end
+
+function TocDrawer:goTo(item)
+    self:jump(function() self.ui.bookmark:gotoBookmark(item.page, item.pos0) end)
 end
 
 function TocDrawer:switchTab(tab)
@@ -558,11 +614,10 @@ function TocDrawer:switchTab(tab)
 end
 
 function TocDrawer:goToListPage(page)
-    self.pages[self.tab] = page
+    self.cache[self.tab].page = page
     self:build()
     UIManager:setDirty(self, "ui", self.list_rect)
 end
-
 -- Closes without a refresh of its own: the jump repaints the page.
 function TocDrawer:jump(fn)
     UIManager:close(self)
