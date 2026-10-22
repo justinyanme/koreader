@@ -41,6 +41,8 @@ local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Widget = require("ui/widget/widget")
+local ffi = require("ffi")
+require("ffi/posix_h") -- free()
 local util = require("util")
 local Screen = Device.screen
 local _ = require("gettext")
@@ -96,11 +98,11 @@ function NoteMarks:paintTo(bb, x, y)
     for _, box in ipairs(self.highlight.view.highlight.visible_boxes or {}) do
         local item = annotations[box.index]
         if item and item.note then
-            last[box.index] = box.rect
+            last[box.index] = box
         end
     end
-    for index, rect in pairs(last) do
-        local r = self.highlight:toScreen({ rect }, annotations[index])[1]
+    for _, box in pairs(last) do
+        local r = self.highlight:boxToScreen(box)
         if r then
             -- raised into the line gap: page text cannot reflow around it
             self.icon:paintTo(bb, x + r.x + r.w, y + r.y - math.floor(self.size / 2))
@@ -112,6 +114,7 @@ end
 local NoteSheet = BottomSheet:extend{
     input = nil, -- InputText
     is_always_active = true, -- taps outside the keyboard on top of us still reach us, as with InputDialog
+    close_on_scrim = false, -- a stray tap must not lose the text being typed
 }
 
 function NoteSheet:fitKeyboard()
@@ -123,6 +126,16 @@ end
 NoteSheet.onKeyboardHeightChanged = NoteSheet.fitKeyboard
 NoteSheet.onKeyboardClosed = NoteSheet.fitKeyboard
 
+-- A tap on the text area once the keyboard was hidden: as InputText does without a parent, then make room again.
+function NoteSheet:onSwitchFocus(input)
+    if not ((Device:hasKeyboard() or Device:hasScreenKB()) and G_reader_settings:nilOrFalse("virtual_keyboard_enabled")) then
+        input:onShowKeyboard()
+    end
+    Device:startTextInput()
+    input.focused = true
+    self:fitKeyboard()
+end
+
 function NoteSheet:onClose()
     -- the keyboard is freed with the input text, so hide it first
     self.input:onCloseKeyboard()
@@ -132,8 +145,11 @@ end
 local ReaderHighlightBubble = ReaderHighlight:extend{}
 
 --- Registers the bubbles in their replacement slot.
+-- Touch devices only, like the toolbar: the bubbles have no key navigation.
 function ReaderHighlightBubble.register()
-    require("apps/replacements").reader_highlight = ReaderHighlightBubble
+    if Device:isTouchDevice() then
+        require("apps/replacements").reader_highlight = ReaderHighlightBubble
+    end
 end
 
 function ReaderHighlightBubble:init()
@@ -144,7 +160,7 @@ end
 function ReaderHighlightBubble:onReadSettings(config)
     ReaderHighlight.onReadSettings(self, config)
     -- the style last picked in any book wins over the one saved with this book
-    self.view.highlight.saved_drawer = G_reader_settings:readSetting("highlight_drawing_style", self.view.highlight.saved_drawer)
+    self.view.highlight.saved_drawer = G_reader_settings:readSetting("highlight_drawing_style") or self.view.highlight.saved_drawer
 end
 
 --- Screen rects of boxes; on fixed-layout pages boxes are in page coordinates (item gives the page).
@@ -162,24 +178,54 @@ function ReaderHighlightBubble:selectionRects()
     return self.selected_text and self:toScreen(self.selected_text.sboxes or self.selected_text.pboxes, self.selected_text) or {}
 end
 
-function ReaderHighlightBubble:highlightRects(index)
-    return self:toScreen(self:getHighlightVisibleBoxes(index), self.ui.annotation.annotations[index])
+--- Screen rect of a visible highlight box (fixed-layout boxes carry their page).
+function ReaderHighlightBubble:boxToScreen(box)
+    local item = self.ui.annotation.annotations[box.index]
+    return self.view:pageToScreenTransform(box.page or (item and item.pos0 and item.pos0.page), box.rect)
 end
 
--- The lines of some text: their bounding box, grown by the note mark and the underlines below the text.
-local function linesRegion(rects)
+function ReaderHighlightBubble:highlightRects(index)
+    local rects = {}
+    for _, box in ipairs(self.view.highlight.visible_boxes or {}) do
+        if box.index == index then
+            table.insert(rects, self:boxToScreen(box))
+        end
+    end
+    return rects
+end
+
+--- The lines of some text: their bounding box, grown by the note mark and the underlines below the text,
+-- and as wide as the screen when notes are marked in the margin.
+function ReaderHighlightBubble:linesRegion(rects)
     if #rects == 0 then return end
     local pad = Screen:scaleBySize(10)
     local r = Geom.boundingBox(rects)
+    local note_mark = self.view.highlight.note_mark
+    if note_mark == "sideline" or note_mark == "sidemark" then
+        return Geom:new{ x = 0, y = r.y - pad, w = Screen:getWidth(), h = r.h + 2 * pad }
+    end
     return Geom:new{ x = r.x - pad, y = r.y - pad, w = r.w + 2 * pad, h = r.h + 2 * pad }
 end
 
--- "fast" only renders black and white: use "ui" where a marker highlight shows under the region.
+-- "fast" only renders black and white: use "ui" over scanned or rendered pages, marker highlights and images.
 function ReaderHighlightBubble:refreshTypeOver(region)
+    if self.ui.paging then return "ui" end
     for _, box in ipairs(self.view.highlight.visible_boxes or {}) do
         if box.drawer == "lighten" then
-            local r = self:toScreen({ box.rect }, self.ui.annotation.annotations[box.index])[1]
+            local r = self:boxToScreen(box)
             if r and region:intersectWith(r) then
+                return "ui"
+            end
+        end
+    end
+    -- ponytail: samples a 3×3 grid, so an image smaller than a ninth of the region can be missed
+    local cre = self.ui.document._document
+    for i = 0, 2 do
+        for j = 0, 2 do
+            local data = cre:getImageDataFromPosition(region.x + math.floor(region.w * (1 + 2 * i) / 6),
+                region.y + math.floor(region.h * (1 + 2 * j) / 6))
+            if data then
+                ffi.C.free(data)
                 return "ui"
             end
         end
@@ -188,17 +234,19 @@ function ReaderHighlightBubble:refreshTypeOver(region)
 end
 
 --- Clears the selection, repainting only its lines (upstream repaints the whole page).
-function ReaderHighlightBubble:clear(clear_id, refresh_type)
+-- With fast, uses "fast" where nothing gray is under it; otherwise "ui", as upstream save paths
+-- (dictionary, highlight prompt, select mode) clear right after painting a gray marker.
+function ReaderHighlightBubble:clear(clear_id, fast)
     if (clear_id and clear_id ~= self.clear_id) or not self.hold_pos or not self.ui.document then
         return ReaderHighlight.clear(self, clear_id)
     end
     -- selections spanning pages turn pages back: those need the whole page
-    local region = not self.restore_page_mode_func and linesRegion(self:selectionRects())
+    local region = not self.restore_page_mode_func and self:linesRegion(self:selectionRects())
     self.hold_pos = nil
     ReaderHighlight.clear(self, clear_id)
     self.selected_text = nil
     if region then
-        UIManager:setDirty(self.dialog, refresh_type or self:refreshTypeOver(region), region)
+        UIManager:setDirty(self.dialog, fast and self:refreshTypeOver(region) or "ui", region)
     else
         UIManager:setDirty(self.dialog, "ui")
     end
@@ -207,6 +255,7 @@ end
 
 function ReaderHighlightBubble:showBubble(bubble)
     self:closeBubble()
+    bubble.close_refresh_type = bubble.refresh_type == "ui" and "ui" or self:refreshTypeOver(bubble:getRefreshRegion())
     self.highlight_dialog = bubble
     UIManager:show(bubble, bubble.refresh_type, bubble:getRefreshRegion())
 end
@@ -219,7 +268,13 @@ function ReaderHighlightBubble:closeBubble()
         return UIManager:close(bubble)
     end
     local region = bubble:getRefreshRegion()
-    UIManager:close(bubble, bubble.refresh_type == "ui" and "ui" or self:refreshTypeOver(region), region)
+    UIManager:close(bubble, bubble.close_refresh_type, region)
+end
+
+--- Closes the selection bubble and clears the selection, both "fast" where possible.
+function ReaderHighlightBubble:dismiss()
+    self:closeBubble()
+    self:clear(nil, true)
 end
 
 function ReaderHighlightBubble:onClose(keep_highlight)
@@ -230,7 +285,12 @@ function ReaderHighlightBubble:onClose(keep_highlight)
 end
 
 function ReaderHighlightBubble:onHoldRelease()
-    if self.clear_id or self.select_mode or not self.selected_text then
+    if not self.hold_pos and not self.select_mode then
+        -- nothing was selected (blank area, "Do nothing" long-press action...): drop a selection left over
+        -- from looking up a highlight, so that it does not come back as a new bubble
+        self.selected_text = nil
+    end
+    if self.clear_id or self.select_mode or not self.hold_pos or not self.selected_text then
         return ReaderHighlight.onHoldRelease(self)
     end
     -- a single word gets the bubble too, not the dictionary straight away
@@ -241,20 +301,30 @@ function ReaderHighlightBubble:onHoldRelease()
 end
 
 --- Selection bubble: copy, highlight, write note, look up, search.
-function ReaderHighlightBubble:onShowHighlightMenu()
+function ReaderHighlightBubble:onShowHighlightMenu(index)
     if not self.selected_text then return end
+    local rects = self:selectionRects()
+    if #rects == 0 then -- e.g. multi-page selection in select mode
+        return ReaderHighlight.onShowHighlightMenu(self, index)
+    end
     local text = util.cleanupSelectedText(self.selected_text.text)
     local bubble = SelectionBubble:new{
         rows = { {
             { text = C_("Text", "Copy"), callback = function()
                 Device.input.setClipboardText(text)
-                self:onClose()
+                self:dismiss()
                 UIManager:show(Notification:new{ text = _("Selection copied to clipboard.") })
             end },
             { text = C_("Highlight bubble", "Highlight"), callback = function()
-                local rects = self:selectionRects()
+                -- a selection across pages turns back to its first page when cleared: wait for the repaint
+                local turns_back = self.restore_page_mode_func ~= nil
                 local index = self:saveSelection()
-                if index then self:showHighlightBubble(index, rects) end
+                if not index then return end
+                if turns_back then
+                    UIManager:nextTick(function() self:showHighlightBubble(index) end)
+                else
+                    self:showHighlightBubble(index, rects)
+                end
             end },
             { text = C_("Highlight bubble", "Write note"), callback = function()
                 local index = self:saveSelection()
@@ -262,15 +332,21 @@ function ReaderHighlightBubble:onShowHighlightMenu()
             end },
             { text = C_("Highlight bubble", "Look up"), callback = function()
                 self:closeBubble()
-                self:lookupDict() -- the dictionary popup clears the selection
+                -- the dictionary popup clears the selection
+                if self.selected_text.text == "" and self.selected_text.sboxes then
+                    self:lookupDictWord() -- scanned page: OCR
+                else
+                    self:lookupDict()
+                end
             end },
             { text = _("Search"), callback = function()
-                self:onClose()
+                self:dismiss()
                 self.ui.search:searchCallback(nil, text) -- all results, paginated
             end },
         } },
-        anchor_rects = self:selectionRects(),
-        tap_close_callback = function() self:onClose() end,
+        anchor_rects = rects,
+        rule_color = Palette.paper, -- the bubble is black and white, so "fast" renders it right
+        tap_close_callback = function() self:dismiss() end,
     }
     bubble.refresh_type = "fast"
     self:showBubble(bubble)
@@ -294,7 +370,9 @@ end
 function ReaderHighlightBubble:showHighlightBubble(index, rects)
     local item = self.ui.annotation.annotations[index]
     rects = rects or self:highlightRects(index)
-    if #rects == 0 then return end
+    if #rects == 0 then
+        return ReaderHighlight.showHighlightNoteOrDialog(self, index)
+    end
     local styles = {}
     for i, drawer in ipairs(STYLES) do
         styles[i] = {
@@ -352,11 +430,11 @@ function ReaderHighlightBubble:setHighlightStyle(index, drawer, rects)
     self.view.highlight.saved_drawer = drawer
     G_reader_settings:saveSetting("highlight_drawing_style", drawer)
     self.ui:handleEvent(Event:new("AnnotationsModified", { item }))
-    UIManager:setDirty(self.dialog, "ui", linesRegion(rects or self:highlightRects(index)))
+    UIManager:setDirty(self.dialog, "ui", self:linesRegion(rects or self:highlightRects(index)))
 end
 
 function ReaderHighlightBubble:deleteHighlight(index)
-    local region = linesRegion(self:highlightRects(index))
+    local region = self:linesRegion(self:highlightRects(index))
     local item = self.ui.annotation.annotations[index]
     self:writePdfAnnotation("delete", item)
     self.ui.bookmark:removeItemByIndex(index)
@@ -404,7 +482,7 @@ function ReaderHighlightBubble:showNoteSheet(index, is_new)
         if save then
             self:setNote(index, input:getText())
         end
-        local region = linesRegion(self:highlightRects(index))
+        local region = self:linesRegion(self:highlightRects(index))
         sheet:onClose()
         if region then
             UIManager:setDirty(self.dialog, "ui", region)
