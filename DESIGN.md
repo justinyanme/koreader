@@ -315,7 +315,7 @@ A center tap brings two paper bands. The top bar is 56dp (back, then bookmark, s
 The single home for every adjustment. A paper plane with a 1px ink border and 16dp top corners, bleeding 1px past the screen edges. Content has 24dp side padding and 20dp at the bottom. The 54dp header holds a 16dp bold title and a close icon button. Rows are 52dp minimum. An optional link row at the foot has a 1px rule above it and a chevron.
 
 ### Selection bubble
-A solid ink 10dp-radius bar with paper labels, 44dp action cells (复制 / 划线 / 写想法 / 查询 / 搜索) separated by bubble-rule dividers, and a 7dp arrow pointing at the selection. A second row carries highlight styles. The selected style is a 2dp paper inset ring. Text selection itself is ink fill with paper text.
+A solid ink 10dp-radius bar with paper labels, 44dp action cells (复制 / 划线 / 写想法 / 查询 / 搜索) separated by bubble-rule dividers, and a 7dp arrow pointing at the selection. On device the selection bubble's dividers are paper instead of bubble-rule: the bubble shows with a `fast` refresh, which renders only black and white, and a bubble-rule gray would come out wrong. The highlight bubble keeps bubble-rule, as it refreshes with `ui` for its gray marker swatch. When neither above nor below the selection has room, the bubble overlays the selection without the arrow. A second row carries highlight styles. The selected style is a 2dp paper inset ring. Text selection itself is ink fill with paper text.
 
 ### Highlights
 Three styles, all monochrome: **marker** (marker-gray fill), **line** (2dp ink underline offset 0.3em) and **wave** (1.3dp wavy ink underline). A note adds a small ink note glyph after the highlight's last character.

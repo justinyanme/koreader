@@ -14,5 +14,6 @@ An empty slot means upstream behavior.
 return {
     reader_menu = nil, -- instead of ReaderMenu
     reader_config = nil, -- instead of ReaderConfig, which owns ConfigDialog
+    reader_highlight = nil, -- instead of ReaderHighlight, which owns the selection and highlight dialogs
     filemanager = nil, -- instead of FileManager, whose setupLayout() builds the home screen
 }
