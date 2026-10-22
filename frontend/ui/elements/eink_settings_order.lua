@@ -10,6 +10,8 @@ Each row is backed by items of the original menus, by id:
     choice  the entries up to the first separator are one single choice, shown with a check mark
     value   function(item) returning the row's current value; by default the "Name: value" text or checked radio entry
     preview "tap_zones": the reader can draw its tap zones from the row's page
+    events  { [item id] = { event = name, text = label } }: that item's entry, labelled `text`, sends the event
+            to the UI instead of running its callback
 Items missing in the current context (reader-only items in the file browser) leave their row dimmed.
 Everything else stays reachable through the last row, the original menu.
 ]]
@@ -35,7 +37,9 @@ return {
         { id = "wifi", text = _("Wi-Fi"), items = { "network" },
           value = function() return require("ui/network/manager"):isWifiOn() and _("On") or _("Off") end },
         { id = "progress_sync", text = C_("Settings", "Progress sync"), items = { "progress_sync" } },
-        { id = "transfer", text = _("Wireless transfer and library"), items = { "calibre", "opds", "cloudstorage" } },
+        { id = "transfer", text = _("Wireless transfer and library"), items = { "calibre", "opds", "cloudstorage" },
+          -- the 书源 page; the original menu keeps the original browser and its label
+          events = { opds = { event = "ShowOPDSCatalog", text = _("Book sources (OPDS)") } } },
     } },
     { id = "device", text = C_("Settings group", "Device"), rows = {
         { id = "buttons", text = _("Physical buttons"), items = { "navigation" } },

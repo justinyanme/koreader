@@ -52,6 +52,10 @@ function OPDSClient:request(request)
 
         local request_origin = url.parse(request_url)
         local same_origin = isSameOrigin(request_origin, original_origin)
+        -- like Basic auth, auth_headers (e.g. Cloudflare Access tokens) only go to the original origin
+        if same_origin then
+            for name, value in pairs(request.auth_headers or {}) do headers[name] = value end
+        end
         local function makeRequest()
             return socket.skip(1, http.request {
                 url = request_url,

@@ -463,7 +463,7 @@ describe("Shelf home, 我的 tab", function()
         local fm, view = openMe()
         view:open("sync")
         local shown = texts(view)
-        for _, entry in ipairs{ _("Progress sync"), _("Calibre wireless connection"), _("OPDS catalog"), _("Cloud storage") } do
+        for _, entry in ipairs{ _("Progress sync"), _("Calibre wireless connection"), _("Book sources (OPDS)"), _("Cloud storage") } do
             assert.is_true(contains(shown, entry))
         end
         -- plugins are not loaded in specs

@@ -75,13 +75,23 @@ function OPDS:addToMainMenu(menu_items)
         menu_items.opds = {
             text = _("OPDS catalog"),
             callback = function()
-                self:onShowOPDSCatalog()
+                self:showOriginalCatalog()
             end,
         }
     end
 end
 
+-- The redesign's 书源 page replaces the browser here (apps/replacements); the menu item keeps the original.
 function OPDS:onShowOPDSCatalog()
+    local catalog = require("apps/replacements").opds_catalog
+    if catalog then
+        self:loadSettings()
+        return catalog.show(self)
+    end
+    self:showOriginalCatalog()
+end
+
+function OPDS:showOriginalCatalog()
     self:loadSettings()
     self.opds_browser = OPDSBrowser:new{
         settings = self.opds_settings,

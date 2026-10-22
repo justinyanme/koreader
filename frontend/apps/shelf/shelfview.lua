@@ -14,7 +14,6 @@ local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
-local ImageWidget = require("ui/widget/imagewidget")
 local InputDialog = require("ui/widget/inputdialog")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local Notification = require("ui/widget/notification")
@@ -46,9 +45,8 @@ local HEADER_H = dp(12) + dp(44) -- top padding + search row
 local CHIPS_H = dp(12) + dp(30) -- gap + chips
 local GRID_TOP = dp(18)
 local PAGER_H = dp(44)
-local TEXT_H = dp(60) -- title (2 lines) and status under each cover
-local ROW_GAP = dp(18)
-local COL_GAP = dp(20) -- minimum; columns are spread with space-between
+local TEXT_H = ShelfWidgets.TEXT_H
+local ROW_GAP = ShelfWidgets.ROW_GAP
 local EXTRACT_CHUNK = 40 -- books per background job, well under BookInfoManager's 5 minute watchdog
 
 local filter_texts = {
@@ -74,10 +72,6 @@ local function statusText(book)
     return T(_("Read %1%"), math.floor((book.percent or 0) * 100))
 end
 
-local function homeDir()
-    return G_reader_settings:readSetting("home_dir") or filemanagerutil.getDefaultDir()
-end
-
 local ShelfView = WidgetContainer:extend{
     ui = nil, -- the FileManager
     width = nil,
@@ -97,23 +91,9 @@ function ShelfView:init()
 end
 
 function ShelfView:computeGrid()
-    -- Columns follow the physical panel width: 6" -> 3, 7" -> 4, 10.3" -> 5.
-    local inches = Screen:getWidth() / Screen:getDPI()
-    local cols = inches < 3.9 and 3 or inches < 5.2 and 4 or 5
-    local inner_w = self.width - 2 * GUTTER
-    local grid_h = self.height - HEADER_H - CHIPS_H - GRID_TOP - PAGER_H
-    local cover_w = math.floor((inner_w - COL_GAP * (cols - 1)) / cols)
-    local rows = math.floor((grid_h + ROW_GAP) / (math.floor(cover_w * 4 / 3) + TEXT_H + ROW_GAP))
-    -- Shrink covers a little to fit one more row rather than leave the bottom empty;
-    -- below two rows, accept down to 3/4 of the column width (the prototype's rule).
-    local shrunk = math.floor(((grid_h + ROW_GAP) / (rows + 1) - TEXT_H - ROW_GAP) * 3 / 4)
-    if shrunk >= cover_w * (rows < 2 and 0.75 or 0.85) then
-        rows, cover_w = rows + 1, shrunk
-    end
-    rows = math.max(rows, 1)
-    self.cols, self.rows = cols, rows
-    self.cover_w, self.cover_h = cover_w, math.floor(cover_w * 4 / 3)
-    self.col_gap = cols > 1 and math.floor((inner_w - cols * cover_w) / (cols - 1)) or 0
+    local grid = ShelfWidgets.gridGeometry(self.width, self.height - HEADER_H - CHIPS_H - GRID_TOP - PAGER_H)
+    self.cols, self.rows, self.col_gap = grid.cols, grid.rows, grid.col_gap
+    self.cover_w, self.cover_h = grid.cover_w, grid.cover_h
     self.cover_specs = { max_cover_w = self.cover_w, max_cover_h = self.cover_h }
 end
 
@@ -121,7 +101,7 @@ end
 -- `rescan` also walks the home folder again; tab switches keep the last scan.
 function ShelfView:reload(rescan)
     if rescan or not self.scanned then
-        self.scanned = Shelf.scan(homeDir())
+        self.scanned = Shelf.scan(Shelf.homeDir())
     end
     self.books = Shelf.load(self.scanned, self.bim, self.cover_specs)
     if self.bim and not self.extracting and #self:pendingFiles() > 0 then
@@ -241,7 +221,9 @@ end
 
 function ShelfView:buildHeader()
     local field_h = dp(40)
-    local field_w = self.width - 2 * GUTTER - dp(10) - dp(44)
+    -- the 书源 icon only shows with the OPDS plugin
+    local has_sources = self.ui.opds ~= nil
+    local field_w = self.width - 2 * GUTTER - dp(10) - dp(44) - (has_sources and dp(44) or 0)
     local query = self.query
     local inner_h = field_h - 2 * Size.border.button
     local inner_w = field_w - dp(14) - 2 * Size.border.button
@@ -282,12 +264,20 @@ function ShelfView:buildHeader()
             },
         },
         HorizontalSpan:new{ width = dp(10) },
+    }
+    if has_sources then
+        table.insert(row, ShelfWidgets.Tappable:new{
+            callback = function() self.ui.opds:onShowOPDSCatalog() end,
+            CenterContainer:new{ dimen = Geom:new{ w = dp(44), h = dp(44) },
+                IconWidget:new{ icon = "eink/source", width = dp(24), height = dp(24) } },
+        })
+    end
+    table.insert(row,
         ShelfWidgets.Tappable:new{
             callback = function() self:showSortSheet() end,
             CenterContainer:new{ dimen = Geom:new{ w = dp(44), h = dp(44) },
                 IconWidget:new{ icon = "eink/sliders", width = dp(24), height = dp(24) } },
-        },
-    }
+        })
     return LeftContainer:new{
         dimen = Geom:new{ w = self.width, h = HEADER_H },
         HorizontalGroup:new{ HorizontalSpan:new{ width = GUTTER }, VerticalGroup:new{ VerticalSpan:new{ width = dp(12) }, row } },
@@ -334,70 +324,9 @@ function ShelfView:buildGrid(per_page)
 end
 
 function ShelfView:coverWidget(book, w, h)
-    local border = Size.border.default
     -- cover blobs are read for the visible books only
     local info = book.has_cover and self.bim and self.bim:getBookInfo(book.file, true)
-    if info and info.cover_bb then
-        local bb = info.cover_bb
-        return FrameContainer:new{
-            bordersize = border,
-            color = Palette.rule,
-            padding = 0,
-            -- fill the 3:4 box and crop the overflow, centered
-            ImageWidget:new{
-                image = bb,
-                width = w - 2 * border,
-                height = h - 2 * border,
-                scale_factor = math.max((w - 2 * border) / bb:getWidth(), (h - 2 * border) / bb:getHeight()),
-            },
-        }
-    end
-    -- typographic "frame" cover (DESIGN.md, Typographic cover)
-    local inset = math.floor(w * 0.07)
-    local frame_w, frame_h = w - 2 * inset, h - 2 * inset
-    local px_per_dp = dp(100) / 100
-    local title_size = math.max(9, math.floor(w * 0.12 / px_per_dp))
-    local author_size = math.max(8, math.floor(w * 0.065 / px_per_dp))
-    local text_w = frame_w - 2 * dp(6)
-    local content = VerticalGroup:new{
-        TextBoxWidget:new{
-            text = book.title,
-            face = Font:getFace("ui_headword", title_size),
-            bold = true,
-            alignment = "center",
-            width = text_w,
-            bgcolor = Palette.cover_stock,
-            height = math.floor(frame_h * 0.6),
-            height_adjust = true,
-            height_overflow_show_ellipsis = true,
-        },
-    }
-    if book.authors then
-        table.insert(content, VerticalSpan:new{ width = math.floor(w * 0.08) })
-        table.insert(content, TextWidget:new{
-            text = book.authors,
-            face = Font:getFace("ui_micro", author_size),
-            max_width = text_w,
-        })
-    end
-    return FrameContainer:new{
-        bordersize = border,
-        color = Palette.rule,
-        background = Palette.cover_stock,
-        padding = 0,
-        CenterContainer:new{
-            dimen = Geom:new{ w = w - 2 * border, h = h - 2 * border },
-            FrameContainer:new{
-                bordersize = Size.border.button,
-                color = Palette.ink,
-                padding = 0,
-                CenterContainer:new{
-                    dimen = Geom:new{ w = frame_w - 2 * border - 2 * Size.border.button, h = frame_h - 2 * border - 2 * Size.border.button },
-                    content,
-                },
-            },
-        },
-    }
+    return ShelfWidgets.cover(book, w, h, info and info.cover_bb)
 end
 
 function ShelfView:buildCell(book)

@@ -199,5 +199,6 @@ function ShelfFileManager:onCloseWidget()
 end
 
 Replacements.filemanager = ShelfFileManager
+require("apps/opds/booksourceview") -- registers the 书源 page for the OPDS plugin
 
 return ShelfFileManager

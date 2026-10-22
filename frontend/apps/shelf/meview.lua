@@ -496,7 +496,7 @@ function MeView:syncItems()
     else
         table.insert(items, self:entryItem(_("Calibre wireless connection"), _("Plugin disabled")))
     end
-    table.insert(items, self:entryItem(_("OPDS catalog"), not self.ui.opds and _("Plugin disabled") or nil,
+    table.insert(items, self:entryItem(_("Book sources (OPDS)"), not self.ui.opds and _("Plugin disabled") or nil,
         self.ui.opds and function() self.ui.opds:onShowOPDSCatalog() end))
     table.insert(items, self:entryItem(_("Cloud storage"), not self.ui.cloudstorage and _("Plugin disabled") or nil,
         self.ui.cloudstorage and function() self.ui.cloudstorage:onShowCloudStorageList() end))
