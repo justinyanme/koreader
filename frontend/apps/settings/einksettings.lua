@@ -206,9 +206,10 @@ function EinkSettings:rowItems(row)
     end
     for _, id in ipairs(row.items or {}) do
         local item = self.by_id[id]
-        if item and row.events and row.events[id] then
-            -- same entry, but it sends an event instead of running the original callback
-            item = { text = itemText(item), callback = function() self.ui:handleEvent(Event:new(row.events[id])) end }
+        local event = item and row.events and row.events[id]
+        if event then
+            -- an entry of its own: it sends an event instead of running the original callback
+            item = { text = event.text or itemText(item), callback = function() self.ui:handleEvent(Event:new(event.event)) end }
         end
         if item then
             table.insert(items, item)
