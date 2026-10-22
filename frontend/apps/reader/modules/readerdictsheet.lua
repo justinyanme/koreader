@@ -18,7 +18,9 @@ keeps its height across these unless the new content is taller.
 ]]
 
 local BottomSheet = require("ui/widget/bottomsheet")
+local ConfirmBox = require("ui/widget/confirmbox")
 local Device = require("device")
+local DictQuickLookup = require("ui/widget/dictquicklookup")
 local EinkControls = require("ui/widget/einkcontrols")
 local Event = require("ui/event")
 local Font = require("ui/font")
@@ -43,6 +45,7 @@ local TextWidget = require("ui/widget/textwidget")
 local TrapWidget = require("ui/widget/trapwidget")
 local Trapper = require("ui/trapper")
 local UIManager = require("ui/uimanager")
+local Utf8Proc = require("ffi/utf8proc")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Wikipedia = require("ui/wikipedia")
@@ -55,6 +58,7 @@ local _ = require("gettext")
 local C_ = _.pgettext
 
 local MAX_MATCH_CHARS = 20 -- longer selections are only looked up as a whole
+local MAX_SENSES = 40 -- longer entries are cut; "Full entry" has the rest
 
 -- Part-of-speech abbreviations that start a sense line ("n. 旅居者").
 local POS = {}
@@ -113,7 +117,8 @@ function ReaderDictSheet.register()
 end
 
 --- Words to look up for a selection, in order of preference.
-function ReaderDictSheet.candidates(word)
+-- extra: candidates from the language support plugins, tried right after the selection
+function ReaderDictSheet.candidates(word, extra)
     local list, seen = {}, {}
     local function add(w)
         if w and not seen[w] then
@@ -122,6 +127,7 @@ function ReaderDictSheet.candidates(word)
         end
     end
     add(word)
+    for _, w in ipairs(extra or {}) do add(w) end
     if util.hasCJKChar(word) then
         local chars = util.splitToChars(word)
         local n = #chars
@@ -138,20 +144,23 @@ function ReaderDictSheet.candidates(word)
                 if ok then add(table.concat(chars, "", i, i + len - 1)) end
             end
         end
-    elseif word:match("^%a[%a'-]*$") then
-        local lower = word:lower()
+    else
+        local lower = Utf8Proc.lowercase(word, false)
         add(lower)
-        for _, w in ipairs(lemmas(lower)) do add(w) end
+        if lower:match("^%a[%a'-]*$") then
+            for _, w in ipairs(lemmas(lower)) do add(w) end
+        end
     end
     return list
 end
 
 -- Exact lookups of all candidates in one sdcv run; the first candidate with results wins.
 function ReaderDictSheet:startSdcv(word, dict_names)
-    local words = self.candidates(word)
+    local extra
     if self.ui.languagesupport and self.ui.languagesupport:hasActiveLanguagePlugins() then
-        util.arrayAppend(words, self.ui.languagesupport:extraDictionaryFormCandidates(word) or {})
+        extra = self.ui.languagesupport:extraDictionaryFormCandidates(word)
     end
+    local words = self.candidates(word, extra)
     local cancelled, results = self:rawSdcv(words, dict_names, false, self.lookup_progress_msg or false)
     if results == nil then
         return { {
@@ -181,6 +190,10 @@ end
 local DictSheet
 
 function ReaderDictSheet:showDict(word, results, boxes, link, dict_close_callback)
+    if #DictQuickLookup.window_list > 0 or DictQuickLookup.temp_large_window_request then
+        -- a lookup from inside the upstream popup (links, its search, enlarging) stays there
+        return ReaderDictionary.showDict(self, word, results, boxes, link, dict_close_callback)
+    end
     self:dismissLookupInfo()
     if not (results and results[1]) then return end
     self.dict_window = DictSheet:new{
@@ -208,6 +221,8 @@ function ReaderDictSheet.parseEntry(results)
     for _, r in ipairs(results) do
         local def = r.definition or ""
         if r.is_html then
+            def = def:gsub("<[sS][tT][yY][lL][eE].-</[sS][tT][yY][lL][eE]%s*>", "")
+                     :gsub("<[sS][cC][rR][iI][pP][tT].-</[sS][cC][rR][iI][pP][tT]%s*>", "")
             -- block ends become line breaks before the tags go
             for _, tag in ipairs{ "div", "li", "p", "dd", "dt", "tr", "h%d" } do
                 def = def:gsub("</%s*" .. tag .. "%s*>", "\n")
@@ -270,6 +285,9 @@ function DictSheet:init()
     self.headword = self.not_found and self.word or self.results[1].word
     if not self.not_found then
         self.phonetic, self.senses = ReaderDictSheet.parseEntry(self.results)
+        for i = #self.senses, MAX_SENSES + 1, -1 do
+            self.senses[i] = nil
+        end
     end
     self.content = self:buildContent()
     BottomSheet.init(self)
@@ -364,23 +382,35 @@ function DictSheet:paginate(w, avail)
 end
 
 function DictSheet:vocabulary()
-    return not self.not_found and self.ui.vocabbuilder
+    -- not from within the vocabulary builder, as upstream
+    local vocab = self.ui.vocabbuilder
+    return not self.not_found and vocab and not vocab.widget
 end
 
 function DictSheet:onVocabulary()
     local vocab = self.ui.vocabbuilder
-    local text
-    if vocab:hasWord(self.headword) then
-        vocab:removeWord(self.headword)
-        text = _("Removed from vocabulary builder")
-    else
-        local title = self.ui.doc_props and self.ui.doc_props.display_title or _("Dictionary lookup")
-        -- the plugin saves the words around the selection, which is still there
-        self.ui:handleEvent(Event:new("WordLookedUp", self.headword, title, true))
-        text = _("Added to vocabulary builder")
+    local word = self.headword
+    if vocab:hasWord(word) then
+        -- removing loses the review history: confirm, as upstream
+        UIManager:show(ConfirmBox:new{
+            text = T(_("Remove word \"%1\" from vocabulary builder?"), word),
+            ok_text = _("Remove"),
+            ok_callback = function()
+                vocab:removeWord(word)
+                if self.closed then return end
+                self:update()
+                UIManager:show(Notification:new{ text = _("Removed from vocabulary builder") })
+            end,
+        })
+        return
     end
-    self:update()
-    UIManager:show(Notification:new{ text = text })
+    local title = self.ui.doc_props and self.ui.doc_props.display_title or _("Dictionary lookup")
+    -- the plugin saves the words around the selection, which is still there
+    self.ui:handleEvent(Event:new("WordLookedUp", word, title, true))
+    if vocab:hasWord(word) then
+        self:update()
+        UIManager:show(Notification:new{ text = _("Added to vocabulary builder") })
+    end
 end
 
 function DictSheet:onSearchBook()
@@ -394,10 +424,13 @@ function DictSheet:onFullEntry()
     local close_callback = self.dict_close_callback
     self.dict_close_callback = nil -- the popup calls it
     self:onClose(true)
+    self.dictionary._lookup_start_time = nil -- no input block: this is not a slow lookup
     if self.source == "wiki" then
         local wikipedia = self.ui.wikipedia
+        local highlight = wikipedia.highlight
         wikipedia.highlight = self.highlight
         wikipedia:showDict(self.headword, self.wiki.results, self.boxes, nil, close_callback)
+        wikipedia.highlight = highlight
     else
         ReaderDictionary.showDict(self.dictionary, self.word, self.results, self.boxes, self.link, close_callback)
     end
@@ -418,6 +451,7 @@ function DictSheet:loadWiki()
         self.wiki = { offline = true }
         return self:update()
     end
+    local previous = { source = self.source == "wiki" and self.wiki and "wiki" or "dict", wiki = self.wiki }
     self.wiki = { loading = true }
     self:update()
     UIManager:forceRePaint()
@@ -426,7 +460,7 @@ function DictSheet:loadWiki()
         wikipedia:initLanguages(self.headword)
         local lang = wikipedia.wiki_last_language or wikipedia.wiki_languages[1]
         -- invisible: a tap cancels the request, the sheet shows the progress
-        local trap = TrapWidget:new{}
+        local trap = TrapWidget:new{ resend_event = true }
         UIManager:show(trap)
         Wikipedia:setTrapWidget(trap)
         local ok, pages = pcall(Wikipedia.searchAndGetIntros, Wikipedia, self.headword, lang)
@@ -450,7 +484,10 @@ function DictSheet:loadWiki()
             table.sort(results, function(a, b) return a.index < b.index end)
         end
         if self.closed then return end
-        if #results > 0 then
+        if not ok and tostring(pages):find(Wikipedia.dismissed_error_code, 1, true) then
+            -- cancelled by a tap: back to where we were
+            self.source, self.wiki = previous.source, previous.wiki
+        elseif #results > 0 then
             self.wiki = { results = results }
         else
             self.wiki = { failed = not ok }
@@ -524,16 +561,20 @@ function DictSheet:buildContent()
                 callback = function() self:onVocabulary() end,
             })
         end
-        table.insert(buttons, { text = C_("Dictionary sheet", "Search book"), callback = function() self:onSearchBook() end })
-        local button_w = math.floor((w - (#buttons - 1) * gap) / #buttons)
-        local row = HorizontalGroup:new{}
-        for i, b in ipairs(buttons) do
-            if i > 1 then table.insert(row, HorizontalSpan:new{ width = gap }) end
-            b.width = button_w
-            table.insert(row, EinkControls.PillButton:new(b))
+        if self.highlight then -- as upstream: no search from a lookup not started in the book
+            table.insert(buttons, { text = C_("Dictionary sheet", "Search book"), callback = function() self:onSearchBook() end })
         end
-        table.insert(bottom, VerticalSpan:new{ width = dp(14) })
-        table.insert(bottom, row)
+        if #buttons > 0 then
+            local button_w = math.floor((w - (#buttons - 1) * gap) / #buttons)
+            local row = HorizontalGroup:new{}
+            for i, b in ipairs(buttons) do
+                if i > 1 then table.insert(row, HorizontalSpan:new{ width = gap }) end
+                b.width = button_w
+                table.insert(row, EinkControls.PillButton:new(b))
+            end
+            table.insert(bottom, VerticalSpan:new{ width = dp(14) })
+            table.insert(bottom, row)
+        end
         if not self.not_found then
             link_note = self.results[1].dict
         end
@@ -572,7 +613,7 @@ function DictSheet:buildContent()
     local body = VerticalGroup:new{ align = "left" }
     if self.source == "dict" then
         if self.not_found then
-            local too_long = #util.splitToChars(self.word) > MAX_MATCH_CHARS
+            local too_long = util.hasCJKChar(self.word) and #util.splitToChars(self.word) > MAX_MATCH_CHARS
             if too_long then
                 table.insert(body, emptyState(w, _("Selection too long to look up"), _("Try searching the book instead.")))
             else
