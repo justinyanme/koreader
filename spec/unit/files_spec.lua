@@ -237,6 +237,91 @@ describe("Files tab (FileManager replacement)", function()
         fm:onClose()
     end)
 
+    it("re-enters a folder that lists nothing with a focused path (Show folder of a gone file)", function()
+        local fm, fc = openFiles()
+        fc:changeToPath(home .. "/empty", home .. "/empty/gone.epub")
+        UIManager:forceRePaint()
+        assert.are.equal(home .. "/empty", fc.path)
+        assert.is_true(has(texts(fc[1]), _("This folder is empty")))
+        fm:onClose()
+    end)
+
+    it("goes up a folder with Back, and prompts to exit only at home, also from 书架", function()
+        local fm, fc = openFiles("sub/deeper")
+        fc:handleEvent(Event:new("Back"))
+        assert.are.equal(home .. "/sub", fc.path)
+        fc:handleEvent(Event:new("Back"))
+        assert.are.equal(home, fc.path)
+        local stack = #UIManager._window_stack
+        fc:handleEvent(Event:new("Back"))
+        assert.are.equal(home, fc.path)
+        assert.are.equal(stack + 1, #UIManager._window_stack) -- "Exit KOReader?"
+        UIManager:close(topWidget())
+        -- on 书架, Back keeps its exit prompt even when the hidden browser is in a subfolder
+        fc:changeToPath(home .. "/sub")
+        fm:switchTab("shelf")
+        fm:onBack()
+        assert.are.equal(home .. "/sub", fc.path)
+        assert.are.equal(stack + 1, #UIManager._window_stack)
+        UIManager:close(topWidget())
+        fm:onClose()
+    end)
+
+    it("shows crumbs from / outside home", function()
+        local fm, fc = openFiles()
+        assert.are.same({ { text = "/", path = "/" } }, fc:getCrumbs("/"))
+        assert.are.same({ { text = "/", path = "/" }, { text = "usr", path = "/usr" }, { text = "bin", path = "/usr/bin" } },
+            fc:getCrumbs("/usr/bin"))
+        assert.are.same({ { text = "files_home", path = home }, { text = "sub", path = home .. "/sub" } },
+            fc:getCrumbs(home .. "/sub"))
+        fc:changeToPath("/")
+        UIManager:forceRePaint()
+        assert.are.equal("/", texts(fc[1][1][2])[1])
+        fm:onClose()
+    end)
+
+    it("keeps the size column of file search results, which are built with the file browser's items", function()
+        local fm, fc = openFiles()
+        local path = home .. "/a.epub"
+        local attr = lfs.attributes(path)
+        local item = fc:getListItem(nil, "a.epub", path, attr, fc:getCollate())
+        assert.are.equal(util.getFriendlySize(attr.size), item.mandatory)
+        fm:onClose()
+    end)
+
+    it("refreshes only the title row when select mode toggles", function()
+        local fm, fc = openFiles("sub")
+        local refreshes, restore = spyRefreshes()
+        fm:onToggleSelectMode()
+        restore()
+        local title_h = fc.title_row.dimen.h
+        local found = false
+        for _, r in ipairs(refreshes) do
+            assert.are.equal("ui", r.type)
+            assert.is_true(r.region.y + r.region.h <= fm.content_dimen.h)
+            if r.region.h == title_h then found = true end
+        end
+        assert.is_true(found)
+        fm:onToggleSelectMode()
+        fm:onClose()
+    end)
+
+    it("stays on 文件 across a rotation, laid out for the new screen", function()
+        local Screen = require("device").screen
+        local fm, fc = openFiles("many")
+        local rotation = Screen:getRotationMode()
+        fm:onSetRotationMode(rotation == 0 and 1 or 0)
+        local rotated = FileManager.instance
+        assert.are.equal("files", rotated.current_tab)
+        assert.are.equal(rotated.files_ui, rotated.content[1])
+        assert.are.equal(home .. "/many", rotated.file_chooser.path)
+        assert.are.equal(rotated.content_dimen.h, rotated.file_chooser.dimen.h)
+        assert.are.equal(Screen:getWidth(), rotated.file_chooser.dimen.w)
+        assert.is_not.equal(fc, rotated.file_chooser)
+        rotated:onSetRotationMode(rotation)
+        FileManager.instance:onClose()
+    end)
+
     it("leaves the upstream file browser alone without the replacement", function()
         local registered = Replacements.filemanager
         Replacements.filemanager = nil
