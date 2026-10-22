@@ -8,7 +8,7 @@ related_targets: []
 # Surface: KOReader e-ink redesign demo
 
 Scope: single-file web prototype of the redesigned KOReader UI on an e-ink device. Mode: Operate.
-Screens: 书架/文件/我的, reader page + tap toolbar, 目录/书签/笔记, 进度, 亮度, 排版 sheet, selection → 划线/写想法/查询, dictionary sheet, settings depth.
+Screens: 书架/文件/我的, reader page + tap toolbar, 目录/书签/笔记, 进度, 亮度, 排版 sheet, selection → 划线/写想法/查询, dictionary sheet, settings depth, 书源 (OPDS as a remote shelf: cover grid, long-press sheet, 分类浏览, search, manage/edit, network error states; spec justinyanme/koreader#24).
 Audience: the fork owner, reading Chinese and English non-fiction EPUB on 6"/7"/10.3" monochrome Android e-ink and a Kindle.
 Constraint: user pinned WeChat Read (微信读书) e-ink edition as the look and interaction model — "跟微信读书一样就行，不一样那就是有问题". Monochrome only. Everything must map onto KOReader's Lua widgets (no motion, explicit refresh regions).
 Unresolved: exact WeChat Read e-ink screens unverified (no public screenshots fetched); calibrate against user's device screenshots.
