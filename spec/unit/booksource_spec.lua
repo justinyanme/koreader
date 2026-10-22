@@ -68,12 +68,21 @@ describe("书源 (OPDS as a remote shelf)", function()
         if mode == "auth" then return 401, {}, "Unauthorized" end
         if mode == "500" then return 500, {}, "boom", "HTTP/1.1 500 Internal Server Error" end
         if mode == "html" then return 200, {}, "<html><body>Login</body></html>" end
+        if mode == "json" and path == "/opds" then return 200, {}, '{"error": "not a feed"}' end
+        if mode == "osd_timeout" and path == "/opds/osd" then return nil end
         local atom = { ["content-type"] = "application/atom+xml" }
+        if path == "/opds" and server.cookie then atom["set-cookie"] = "CF_Authorization=old; Path=/" end
         if path == "/opds" then
             if mode == "no_new" then
                 return 200, atom, xmlFeed("Calibre-Web", SEARCH_LINKS, {
                     navEntry("Authors", "/opds/author"),
                     navEntry("Alphabetical Books", "/opds/books", nil, "acquisition"),
+                })
+            elseif mode == "foreign" then
+                -- links off the source's origin: another host, and plain http on its own host
+                return 200, atom, xmlFeed("Calibre-Web", "", {
+                    navEntry("Elsewhere", "https://other.example/opds/x"),
+                    navEntry("Plain", "http://nas.example/opds/plain"),
                 })
             elseif mode == "categories" then
                 return 200, atom, xmlFeed("Calibre-Web", "", { navEntry("Authors", "/opds/author") })
@@ -105,6 +114,7 @@ describe("书源 (OPDS as a remote shelf)", function()
             local q = path:match("^/opds/search/(.*)$")
             return 200, atom, xmlFeed("Search", "", q == "Book%201" and books(1, 1) or {})
         elseif path:match("^/opds/cover") then
+            if server.html_thumbs then return 200, { ["content-type"] = "text/html" }, "<html>login</html>" end
             local f = io.open(PNG, "rb")
             local png = f:read("*a")
             f:close()
@@ -115,6 +125,8 @@ describe("书源 (OPDS as a remote shelf)", function()
             return 302, { location = ORIGIN .. "/files/book4.epub" }, ""
         elseif server.fail_downloads and path:match("^/opds/download/") then
             return 500, {}, "boom"
+        elseif server.html_downloads and path:match("^/opds/download/") then
+            return 200, { ["content-type"] = "text/html; charset=utf-8" }, "<html><body>Sign in</body></html>"
         elseif path:match("^/opds/download/") or path:match("^/files/") then
             -- the slow one is large enough to get past stdio buffering before it stalls
             local body = "BOOK " .. path .. string.rep(".", path == "/opds/download/9/epub/" and 40000 or 900)
@@ -140,6 +152,15 @@ describe("书源 (OPDS as a remote shelf)", function()
         if not f then return list end
         for line in f:lines() do table.insert(list, loadstring("return " .. line)()) end
         f:close()
+        return list
+    end
+
+    -- requests for feeds only: thumbnails come from a background process, at their own pace
+    local function feedRequests()
+        local list = {}
+        for _, r in ipairs(requests()) do
+            if not r.url:find("/opds/cover", 1, true) then table.insert(list, r) end
+        end
         return list
     end
 
@@ -386,7 +407,7 @@ describe("书源 (OPDS as a remote shelf)", function()
             local settings = EinkSettings.show(fm, fm.menu, "transfer")
             local entry
             for __, item in ipairs(settings.item_table) do
-                if item.text == _("OPDS catalog") then entry = item end
+                if item.text == _("Book sources (OPDS)") then entry = item end
             end
             settings:select(entry)
             assert.are.equal(BookSourceView, getmetatable(topWidget()).__index)
@@ -466,24 +487,60 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.are.same({ "Authors" }, { result.navs[1].title })
         end)
 
-        it("pages through the grid and fetches the server's next batch at the end", function()
+        it("pages through every book exactly once, fetching the next batch before a page it cannot fill", function()
             local view = openSources(openFM())
             local page = view:top()
-            local last = page.pages
-            view:turnPage(last)
-            assert.are.equal(last, page.page_no)
+            local seen, order = {}, {}
             local refreshes, restore = spyRefreshes()
-            view:turnPage(last + 1)
-            assert.is_true(page.loading_more)
-            assert.are.equal("fast", refreshes[1].type)
-            assert.are.same(view.pager_rect, refreshes[1].region)
-            flush()
+            for _ = 1, 20 do
+                for _, cell in ipairs(view.cells) do
+                    seen[cell.book.key] = (seen[cell.book.key] or 0) + 1
+                    table.insert(order, cell.book.title)
+                end
+                local before = page.page_no
+                view:turnPage(before + 1)
+                flush()
+                if page.page_no == before then break end
+            end
             restore()
+            assert.are.equal(42, #order)
+            for i = 1, 42 do
+                assert.are.equal(1, seen["urn:uuid:book-" .. i])
+                assert.are.equal("Book " .. i, order[i])
+            end
             assert.are.equal(1, #requestsTo(ROOT .. "/new?offset=40"))
-            assert.are.equal(42, #page.result.books)
             assert.is_nil(page.result.next)
-            assert.are.equal("ui", refreshes[#refreshes].type)
-            assert.are.same(view.body_rect, refreshes[#refreshes].region)
+            -- the pager says it is fetching ("fast"), then the batch repaints everything under the nav bar ("ui")
+            local fetching, landed
+            for i, r in ipairs(refreshes) do
+                if r.type == "fast" and r.region == view.pager_rect then fetching = i end
+                if fetching and not landed and r.type == "ui" and r.region == view.content_rect then landed = i end
+            end
+            assert.is_not_nil(fetching)
+            assert.is_not_nil(landed)
+            assert.is_true(has(view, "42 books"))
+        end)
+
+        it("repaints under the nav bar once a feed arrives, so the search row and caption show", function()
+            local fm = openFM()
+            local refreshes, restore = spyRefreshes()
+            local view = openSources(fm)
+            restore()
+            local last = refreshes[#refreshes]
+            assert.are.equal("ui", last.type)
+            assert.are.same(view.content_rect, last.region)
+            assert.are.equal(view.dimen.h - view.content_rect.y, view.content_rect.h)
+        end)
+
+        it("repaints the grid for the covers of the page shown only, not of a page left", function()
+            local view = openSources(openFM())
+            view:turnPage(2) -- page 1's covers may still be on their way
+            local refreshes, restore = spyRefreshes()
+            waitFor(function() return #refreshes > 0 end, "page 2's covers")
+            for _ = 1, 40 do ffiUtil.usleep(25000) flush() end
+            restore()
+            assert.are.equal(1, #refreshes)
+            assert.are.same(view.body_rect, refreshes[1].region)
         end)
 
         it("fetches the page's thumbnails with the source's auth, then repaints the grid once", function()
@@ -527,11 +584,11 @@ describe("书源 (OPDS as a remote shelf)", function()
             tap(view, "Author 5")
             waitFor(function() return view:top().result.state == "ok" end, "a book list")
             assert.are.same({ "Book 5" }, bookTitles(view))
-            local count = #requests()
+            local count = #feedRequests()
             view:pop()
             view:pop()
             assert.are.equal("home", view:top().kind)
-            assert.are.equal(count, #requests())
+            assert.are.equal(count, #feedRequests())
         end)
 
         it("searches the source and clears back to the home feed", function()
@@ -545,10 +602,10 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.are.equal(1, #requestsTo(ROOT .. "/search/Book%201"))
             assert.are.same({ "Book 1" }, bookTitles(view))
             assert.is_true(has(view, "Book 1"))
-            local count = #requests()
+            local count = #feedRequests()
             tap(view, "eink/close")
             assert.are.equal(ROOT .. "/new", view:top().result.url)
-            assert.are.equal(count, #requests())
+            assert.are.equal(count, #feedRequests())
 
             view:search("nothing")
             waitFor(function() return view:top().result.state == "ok" end, "results")
@@ -691,6 +748,115 @@ describe("书源 (OPDS as a remote shelf)", function()
             local f = io.open(file, "rb")
             assert.are.equal("BOOK", f:read(4))
             f:close()
+        end)
+    end)
+
+    describe("credentials and answers", function()
+        it("sends no credentials to a feed link off the source's origin", function()
+            server.mode = "foreign"
+            local view = openSources(openFM())
+            assert.is_true(has(view, "Elsewhere"))
+            tap(view, "Elsewhere")
+            waitFor(function() return view:top().result.state ~= "loading" end, "the other host")
+            view:pop()
+            tap(view, "Plain")
+            waitFor(function() return view:top().result.state ~= "loading" end, "the http link")
+            local off = requestsTo("https://other.example/")
+            for _, r in ipairs(requestsTo("http://nas.example/")) do table.insert(off, r) end
+            assert.are.equal(2, #off)
+            for _, r in ipairs(off) do
+                assert.is_nil(r.user)
+                assert.is_nil(r.password)
+                assert.is_nil(r.headers["CF-Access-Client-Id"])
+                assert.is_nil(r.headers["CF-Access-Client-Secret"])
+            end
+            -- the source's own origin still gets them
+            assert.are.equal("reader", requestsTo(ROOT)[1].user)
+        end)
+
+        it("drops the source's cookies once its credentials change", function()
+            server.cookie = true
+            local view = openSources(openFM())
+            assert.are.equal("CF_Authorization=old", requestsTo(ROOT .. "/new")[1].headers.Cookie)
+            tap(view, "eink/more")
+            tap(topWidget(), _("Edit source"))
+            view.save_button:onTapSelect()
+            local count = #feedRequests()
+            view:retry()
+            waitFor(function() return view:top().result.state == "ok" end, "the reload")
+            assert.is_nil(feedRequests()[count + 1].headers.Cookie)
+        end)
+
+        it("stops at the first unreachable request instead of waiting on each", function()
+            server.mode = "osd_timeout"
+            local view = openSources(openFM())
+            assert.are.equal("unreachable", view:top().result.state)
+            assert.are.same({}, requestsTo(ROOT .. "/new"))
+        end)
+
+        it("says a JSON answer that is not OPDS is not a catalog", function()
+            server.mode = "json"
+            local view = openSources(openFM())
+            assert.are.equal("not_opds", view:top().result.state)
+            assert.is_true(has(view, _("Not an OPDS catalog")))
+        end)
+
+        it("does not save a web page as a book", function()
+            server.html_downloads = true
+            local view = openSources(openFM())
+            tap(view, "Book 6")
+            waitFor(function() return view.downloads["urn:uuid:book-6"] == nil end, "the download")
+            local toast = UIManager._window_stack[#UIManager._window_stack].widget
+            assert.are.equal(T(_("Download failed: %1"), BookSource.failureText{ state = "not_book" }), toast.text)
+            assert.is_nil(lfs.attributes(home .. "/Author 6 - Book 6.epub", "mode"))
+            assert.is_nil(savedSources()[1].downloaded)
+            assert.are.same({}, opened)
+        end)
+
+        it("does not cache a thumbnail that is not an image", function()
+            server.html_thumbs = true
+            local view = openSources(openFM())
+            waitFor(function() return #requestsTo(ROOT .. "/cover_240_240/") == #view.cells end, "the thumbnails")
+            for _ = 1, 20 do ffiUtil.usleep(25000) flush() end
+            local cached = 0
+            if lfs.attributes(BookSource.thumb_dir, "mode") then
+                for name in lfs.dir(BookSource.thumb_dir) do
+                    if name ~= "." and name ~= ".." then cached = cached + 1 end
+                end
+            end
+            assert.are.equal(0, cached)
+        end)
+
+        it("says so when the download folder cannot be written", function()
+            local missing = tmp .. "/no-such-folder"
+            writeSources{ nas{ download_dir = missing } }
+            local view = openSources(openFM())
+            tap(view, "Book 1")
+            local toast = UIManager._window_stack[#UIManager._window_stack].widget
+            assert.are.equal(T(_("Download failed: %1"), BookSource.failureText{ state = "nowrite", detail = missing }),
+                toast.text)
+            assert.is_nil(view.downloads["urn:uuid:book-1"])
+            assert.are.same({}, requestsTo(ROOT .. "/download/"))
+        end)
+
+        it("closes its sheets with the page, and says a running download was canceled", function()
+            local view = openSources(openFM())
+            tap(view, "Book 1", true)
+            local sheet = topWidget()
+            assert.are.equal(BottomSheet, getmetatable(sheet).__index)
+            view:close()
+            assert.is_false(UIManager:isWidgetShown(sheet))
+
+            view = openSources(FileManager.instance)
+            view:turnPage(2)
+            if not view:cellOf({ key = "urn:uuid:book-9" }) then view:turnPage(1) end
+            tap(view, "Book 9")
+            local dl = view.downloads["urn:uuid:book-9"]
+            waitFor(function() return lfs.attributes(dl.part, "mode") == "file" end, "the partial file")
+            view:close()
+            local toast = UIManager._window_stack[#UIManager._window_stack].widget
+            assert.are.equal(_("Download canceled"), toast.text)
+            assert.is_nil(lfs.attributes(dl.part, "mode"))
         end)
     end)
 
