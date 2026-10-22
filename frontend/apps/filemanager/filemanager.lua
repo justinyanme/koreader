@@ -136,7 +136,7 @@ function FileManager:setupLayout()
         right_icon_hold_callback = false, -- propagate long-press to dispatcher
     }
 
-    local file_chooser = FileChooser:new{
+    local file_chooser = (self.file_chooser_class or FileChooser):new{ -- a replacement may restyle the browser
         name = "filemanager",
         path = self.root_path,
         height = self.file_chooser_height, -- nil: full screen; set by a replacement that adds its own chrome
