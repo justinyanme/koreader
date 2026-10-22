@@ -81,6 +81,20 @@ local Font = {
         x_smallinfofont = "NotoSans-Regular.ttf",
         -- extra extra small font for info messages
         xx_smallinfofont = "NotoSans-Regular.ttf",
+
+        -- e-ink redesign type scale (see DESIGN.md, Typography). Sizes are dp,
+        -- half sizes rounded up. CJK glyphs fall back to Noto Sans CJK, also
+        -- in the serif roles, until a CJK serif is bundled.
+        ui_micro = "NotoSans-Regular.ttf",
+        ui_caption = "NotoSans-Regular.ttf",
+        ui_label = "NotoSans-Regular.ttf",
+        ui_label_large = "NotoSans-Regular.ttf",
+        ui_body = "NotoSans-Regular.ttf",
+        ui_title = "NotoSans-Bold.ttf",
+        ui_title_large = "NotoSans-Bold.ttf",
+        ui_headline = "NotoSans-Bold.ttf",
+        ui_excerpt = "NotoSerif-Regular.ttf",
+        ui_headword = "NotoSerif-Bold.ttf",
     },
     sizemap = {
         cfont = 24,
@@ -102,6 +116,17 @@ local Font = {
         smallinfofontbold = 22,
         x_smallinfofont = 20,
         xx_smallinfofont = 18,
+
+        ui_micro = 11,
+        ui_caption = 12,
+        ui_label = 13,
+        ui_label_large = 14,
+        ui_body = 15,
+        ui_title = 16,
+        ui_title_large = 17,
+        ui_headline = 22,
+        ui_excerpt = 15, -- 14.5 in DESIGN.md
+        ui_headword = 26,
     },
     -- This fallback fonts list should only contain
     -- regular weight (non bold) font files.
