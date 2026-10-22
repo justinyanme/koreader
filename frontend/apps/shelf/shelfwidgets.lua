@@ -8,6 +8,12 @@ screens need them:
     Pager{ page, pages, on_change } -- page is 1-based
     TabBar{ width, tabs = { { id, icon, text } }, current, on_change }
     BottomSheet{ title, header, rows = { { text, callback, checked } } } -- shown with BottomSheet:show()
+
+and the cover grid shared by 书架 and 书源:
+
+    gridGeometry(width, grid_h) -- { cols, rows, cover_w, cover_h, col_gap }
+    cover(book, w, h, image_bb, keep_image) -- the image cropped to fill (freed with the widget unless keep_image),
+                                            -- or the typographic cover from book.title/authors
 ]]
 
 local BottomContainer = require("ui/widget/container/bottomcontainer")
@@ -20,11 +26,13 @@ local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
+local ImageWidget = require("ui/widget/imagewidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local Palette = require("ui/palette")
 local Size = require("ui/size")
+local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -34,6 +42,101 @@ local T = require("ffi/util").template
 local _ = require("gettext")
 
 local function dp(n) return Screen:scaleBySize(n) end
+
+local GUTTER = dp(24)
+local TEXT_H = dp(60) -- title (2 lines) and status under each cover
+local ROW_GAP = dp(18)
+local COL_GAP = dp(20) -- minimum; columns are spread with space-between
+
+--- Cover grid layout for a region `width` wide (24dp gutters) and `grid_h` tall.
+local function gridGeometry(width, grid_h)
+    -- Columns follow the physical panel width: 6" -> 3, 7" -> 4, 10.3" -> 5.
+    local inches = Screen:getWidth() / Screen:getDPI()
+    local cols = inches < 3.9 and 3 or inches < 5.2 and 4 or 5
+    local inner_w = width - 2 * GUTTER
+    local cover_w = math.floor((inner_w - COL_GAP * (cols - 1)) / cols)
+    local rows = math.floor((grid_h + ROW_GAP) / (math.floor(cover_w * 4 / 3) + TEXT_H + ROW_GAP))
+    -- Shrink covers a little to fit one more row rather than leave the bottom empty;
+    -- below two rows, accept down to 3/4 of the column width (the prototype's rule).
+    local shrunk = math.floor(((grid_h + ROW_GAP) / (rows + 1) - TEXT_H - ROW_GAP) * 3 / 4)
+    if shrunk >= cover_w * (rows < 2 and 0.75 or 0.85) then
+        rows, cover_w = rows + 1, shrunk
+    end
+    rows = math.max(rows, 1)
+    return {
+        cols = cols,
+        rows = rows,
+        cover_w = cover_w,
+        cover_h = math.floor(cover_w * 4 / 3),
+        col_gap = cols > 1 and math.floor((inner_w - cols * cover_w) / (cols - 1)) or 0,
+    }
+end
+
+--- A `w` × `h` cover: `image_bb` cropped to fill, or the typographic "frame" cover (DESIGN.md, Typographic cover).
+local function cover(book, w, h, image_bb, keep_image)
+    local border = Size.border.default
+    if image_bb then
+        local bb = image_bb
+        return FrameContainer:new{
+            bordersize = border,
+            color = Palette.rule,
+            padding = 0,
+            -- fill the 3:4 box and crop the overflow, centered
+            ImageWidget:new{
+                image = bb,
+                width = w - 2 * border,
+                height = h - 2 * border,
+                scale_factor = math.max((w - 2 * border) / bb:getWidth(), (h - 2 * border) / bb:getHeight()),
+                image_disposable = not keep_image,
+            },
+        }
+    end
+    local inset = math.floor(w * 0.07)
+    local frame_w, frame_h = w - 2 * inset, h - 2 * inset
+    local px_per_dp = dp(100) / 100
+    local title_size = math.max(9, math.floor(w * 0.12 / px_per_dp))
+    local author_size = math.max(8, math.floor(w * 0.065 / px_per_dp))
+    local text_w = frame_w - 2 * dp(6)
+    local content = VerticalGroup:new{
+        TextBoxWidget:new{
+            text = book.title,
+            face = Font:getFace("ui_headword", title_size),
+            bold = true,
+            alignment = "center",
+            width = text_w,
+            bgcolor = Palette.cover_stock,
+            height = math.floor(frame_h * 0.6),
+            height_adjust = true,
+            height_overflow_show_ellipsis = true,
+        },
+    }
+    if book.authors then
+        table.insert(content, VerticalSpan:new{ width = math.floor(w * 0.08) })
+        table.insert(content, TextWidget:new{
+            text = book.authors,
+            face = Font:getFace("ui_micro", author_size),
+            max_width = text_w,
+        })
+    end
+    return FrameContainer:new{
+        bordersize = border,
+        color = Palette.rule,
+        background = Palette.cover_stock,
+        padding = 0,
+        CenterContainer:new{
+            dimen = Geom:new{ w = w - 2 * border, h = h - 2 * border },
+            FrameContainer:new{
+                bordersize = Size.border.button,
+                color = Palette.ink,
+                padding = 0,
+                CenterContainer:new{
+                    dimen = Geom:new{ w = frame_w - 2 * border - 2 * Size.border.button, h = frame_h - 2 * border - 2 * Size.border.button },
+                    content,
+                },
+            },
+        },
+    }
+end
 
 --- A region that calls `callback` on tap and `hold_callback` on long-press.
 local Tappable = InputContainer:extend{
@@ -261,4 +364,9 @@ return {
     TabBar = TabBar,
     BottomSheet = BottomSheet,
     pill = pill,
+    gridGeometry = gridGeometry,
+    cover = cover,
+    GUTTER = GUTTER,
+    TEXT_H = TEXT_H,
+    ROW_GAP = ROW_GAP,
 }
