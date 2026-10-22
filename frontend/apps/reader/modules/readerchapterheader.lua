@@ -31,6 +31,14 @@ function ReaderChapterHeader:getTitle()
     return title
 end
 
+-- Mirrors when ReaderFlipping:paintTo() draws an icon for reflowable books.
+function ReaderChapterHeader:flippingIconShown()
+    local ui = self.ui
+    local highlight = ui.highlight
+    if highlight and (highlight.select_mode or highlight.long_hold_reached) then return true end
+    return ui.rolling.rendering_state ~= nil and self.view.flipping:getRollingRenderingStateIconWidget() ~= nil
+end
+
 function ReaderChapterHeader:paintTo(bb, x, y)
     local ui = self.ui
     if not ui.rolling or not ui.document or self.view.view_mode ~= "page"
@@ -41,7 +49,12 @@ function ReaderChapterHeader:paintTo(bb, x, y)
     if not title or title == "" then return end
     local margins = ui.document:getPageMargins()
     local top = Screen:scaleBySize(self.TOP)
-    local width = Screen:getWidth() - margins.left - margins.right
+    local left = margins.left
+    if self:flippingIconShown() then
+        -- ReaderFlipping's icon (re-rendering, selection) sits in the top left corner: start after it
+        left = math.max(left, Screen:scaleBySize(36 + self.GAP)) -- its icons are 32 or 36dp
+    end
+    local width = Screen:getWidth() - left - margins.right
     local widget = TextWidget:new{
         text = title,
         face = Font:getFace("ui_caption"),
@@ -49,7 +62,7 @@ function ReaderChapterHeader:paintTo(bb, x, y)
         max_width = width,
     }
     if width > 0 and top + widget:getSize().h + Screen:scaleBySize(self.GAP) <= margins.top then
-        widget:paintTo(bb, x + margins.left, y + top)
+        widget:paintTo(bb, x + left, y + top)
     end
     widget:free()
 end
