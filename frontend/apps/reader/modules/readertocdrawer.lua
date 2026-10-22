@@ -486,10 +486,20 @@ end
 --[[--
 Measured rows shared with other note lists (the 我的 tab's all-notes page): a group header,
 a highlight with its note and date, and an empty state. Build them with TocDrawer.groupHeader,
-TocDrawer.buildNoteRow and TocDrawer.emptyState, `w` wide.
+TocDrawer.buildNoteRow and TocDrawer.emptyState, `w` wide. `metrics` (TocDrawer.noteMetrics())
+holds the sizes every row shares: measure it once per list.
 ]]
-function TocDrawer.headerItem(title)
-    return { kind = "header", is_header = true, title = title, h = dp(18) + textSize("0", "ui_caption").h + dp(6) + dp(1) }
+function TocDrawer.noteMetrics()
+    return {
+        excerpt_h = lineHeight("ui_excerpt", 0.6),
+        label_h = lineHeight("ui_label_large"),
+        caption_h = textSize("0", "ui_caption").h,
+        thought_w = textSize(_("Thought"), "ui_label_large", true).w + dp(4),
+    }
+end
+
+function TocDrawer.headerItem(title, metrics)
+    return { kind = "header", is_header = true, title = title, h = dp(18) + metrics.caption_h + dp(6) + dp(1) }
 end
 
 function TocDrawer.emptyItem(title, hint)
@@ -497,17 +507,15 @@ function TocDrawer.emptyItem(title, hint)
 end
 
 --- Measured row of an annotation with a drawer (a highlight), `w` wide.
-function TocDrawer.noteItem(w, item)
-    local excerpt_h, label_h = lineHeight("ui_excerpt", 0.6), lineHeight("ui_label_large")
-    local caption_h = textSize("0", "ui_caption").h
-    local thought_w = textSize(_("Thought"), "ui_label_large", true).w + dp(4)
+function TocDrawer.noteItem(w, item, metrics)
     local excerpt = snippet(item.text, 400)
     local lines = lineCount(excerpt, "ui_excerpt", w - dp(24), 3)
     local note = item.note and item.note ~= "" and snippet(item.note, 200)
-    local note_lines = note and lineCount(note, "ui_label_large", w - thought_w, 2) or 0
+    local note_lines = note and lineCount(note, "ui_label_large", w - metrics.thought_w, 2) or 0
     return {
         kind = "note", item = item, excerpt = excerpt, lines = lines, note = note, note_lines = note_lines,
-        h = lines * excerpt_h + (note and dp(6) + note_lines * label_h or 0) + dp(4) + caption_h + 2 * dp(12) + dp(1),
+        h = lines * metrics.excerpt_h + (note and dp(6) + note_lines * metrics.label_h or 0)
+            + dp(4) + metrics.caption_h + 2 * dp(12) + dp(1),
     }
 end
 
@@ -515,14 +523,15 @@ function TocDrawer:noteItems()
     if #self.notes == 0 then
         return { self.emptyItem(_("No notes yet"), _("Long-press text, then tap Highlight or Add note.")) }
     end
+    local metrics = self.noteMetrics()
     local items, chapter = {}, nil
     for __, item in ipairs(self.notes) do
         local item_chapter = item.chapter or self.ui.doc_props.display_title
         if item_chapter ~= chapter then
             chapter = item_chapter
-            table.insert(items, self.headerItem(chapter))
+            table.insert(items, self.headerItem(chapter, metrics))
         end
-        table.insert(items, self.noteItem(self.content_w, item))
+        table.insert(items, self.noteItem(self.content_w, item, metrics))
     end
     return items
 end
