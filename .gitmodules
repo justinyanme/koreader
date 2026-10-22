@@ -14,5 +14,5 @@
 	shallow = true
 [submodule "l10n"]
 	path = l10n
-	url = https://github.com/koreader/koreader-translations.git
+	url = https://github.com/justinyanme/koreader-translations.git
 	shallow = true
