@@ -186,6 +186,9 @@ end
 
 local UIManager = require("ui/uimanager")
 
+-- E-ink redesign replacements (see apps/replacements); late patches can still override them
+require("apps/reader/modules/readertoolbar").register()
+
 -- Apply developer patches
 userpatch.applyPatches(userpatch.late)
 
