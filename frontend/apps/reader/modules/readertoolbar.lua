@@ -260,6 +260,15 @@ function ReaderToolbar:onShowToc()
     return true
 end
 
+--- The reorganized settings (apps/settings/einksettings), on an optional group or row id.
+function ReaderToolbar:onShowEinkSettings(target)
+    self:hideToolbar(true)
+    self:closeSheet(true)
+    self:closeDrawer()
+    require("apps/settings/einksettings").show(self.ui, self, target)
+    return true
+end
+
 function ReaderToolbar:closeDrawer()
     if self.drawer then
         UIManager:close(self.drawer)
