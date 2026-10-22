@@ -18,6 +18,7 @@ local Event = require("ui/event")
 local FileManager = require("apps/filemanager/filemanager")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
+local MeView = require("apps/shelf/meview")
 local Palette = require("ui/palette")
 local Replacements = require("apps/replacements")
 local ShelfView = require("apps/shelf/shelfview")
@@ -39,8 +40,10 @@ ShelfFileManager.tabs = {
         return fm.shelf_view
     end },
     { id = "files", icon = "folder", text = _("Files"), open = function(fm) return fm.files_ui end },
-    -- until #11: the original menu on top of the current tab
-    { id = "me", icon = "user", text = _("Me"), open = function(fm) fm.menu:onShowMenu() end },
+    { id = "me", icon = "user", text = _("Me"), open = function(fm)
+        fm.me_view:reset()
+        return fm.me_view
+    end },
 }
 
 function ShelfFileManager:init()
@@ -68,9 +71,13 @@ function ShelfFileManager:setupLayout()
         self.shelf_view:free()
     end
     self.shelf_view = ShelfView:new{ ui = self, width = self.content_dimen.w, height = self.content_dimen.h }
+    if self.me_view then self.me_view:free() end
+    self.me_view = MeView:new{ ui = self, width = self.content_dimen.w, height = self.content_dimen.h }
+    if self.current_tab == "me" then self.me_view:reset() end
+    local current = { files = self.files_ui, me = self.me_view }
     self.content = WidgetContainer:new{
         dimen = self.content_dimen:copy(),
-        self.current_tab == "files" and self.files_ui or self.shelf_view,
+        current[self.current_tab] or self.shelf_view,
     }
     self.layout_group = VerticalGroup:new{ self.content, self:buildTabBar() }
     self[1] = FrameContainer:new{

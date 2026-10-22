@@ -219,11 +219,8 @@ describe("Shelf home (FileManager replacement)", function()
                     assert.is_true(r.region.h < screen_h)
                 end
             end
-            -- 我的 opens the original menu on top until #11, and the current tab stays
             fm:switchTab("me")
-            assert.is_truthy(fm.menu.menu_container)
-            assert.are.equal("shelf", fm.current_tab)
-            fm.menu:onCloseFileManagerMenu()
+            assert.are.equal(fm.me_view, fm.content[1])
             -- rotation rebuilds the layout and keeps the tab
             fm:switchTab("files")
             fm:reinit()
