@@ -73,9 +73,11 @@ function ShelfFileManager:setupLayout()
         self.shelf_view:free()
     end
     self.shelf_view = ShelfView:new{ ui = self, width = self.content_dimen.w, height = self.content_dimen.h }
+    -- a rebuild (rotation) keeps the 我的 subpage and its list page
+    local me_state = self.me_view and self.me_view:getState()
     if self.me_view then self.me_view:free() end
     self.me_view = MeView:new{ ui = self, width = self.content_dimen.w, height = self.content_dimen.h }
-    if self.current_tab == "me" then self.me_view:reset() end
+    if self.current_tab == "me" then self.me_view:reset(me_state) end
     local current = { files = self.files_ui, me = self.me_view }
     self.content = WidgetContainer:new{
         dimen = self.content_dimen:copy(),
@@ -137,6 +139,8 @@ end
 function ShelfFileManager:onSwipeFM(ges)
     if self.current_tab == "files" then
         return FileManager.onSwipeFM(self, ges)
+    elseif self.current_tab == "me" then
+        return self.me_view:swipe(ges)
     end
     local direction = BD.flipDirectionIfMirroredUILayout(ges.direction)
     if direction == "west" then
@@ -167,6 +171,11 @@ function ShelfFileManager:onRefresh()
     FileManager.onRefresh(self)
     self.shelf_view:reload(true)
     self.shelf_view:update(self.current_tab == "shelf" and "header" or nil)
+    self.me_view:invalidate()
+    if self.current_tab == "me" then
+        self.me_view:reset(self.me_view:getState())
+        UIManager:setDirty(self, "ui", self.content_dimen)
+    end
     return true
 end
 

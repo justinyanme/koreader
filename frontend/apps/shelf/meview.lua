@@ -4,8 +4,12 @@ the vocabulary, sync and transfer, and settings.
 
 Subpages open over the content area, above the tab bar, with a nav bar and a
 paged list. Entering, leaving and paging repaint the content area (or the list
-under the nav bar) with a "ui" refresh; nothing here flashes. Swipes page the
-current list, and Back leaves a subpage (on the home it reaches the file manager).
+under the nav bar) with a "ui" refresh; nothing here flashes. Back leaves a
+subpage (on the home it reaches the file manager); the file manager's swipe
+handler pages the current list through MeView:swipe().
+
+The home page shows counts only, cached until invalidate(); a subpage loads its
+notes or words when it opens and drops them when it closes.
 ]]
 
 local BD = require("ui/bidi")
@@ -17,7 +21,6 @@ local Event = require("ui/event")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
-local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
@@ -162,20 +165,41 @@ local MeView = InputContainer:extend{
 function MeView:init()
     self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = self.height }
     self.inner_w = self.width - 2 * GUTTER
-    self.ges_events.Swipe = { GestureRange:new{ ges = "swipe", range = self.dimen } }
     if Device:hasKeys() then
         self.key_events.Back = { { Device.input.group.Back } }
     end
 end
 
---- Reads the data and shows the home page; the caller refreshes. Called each time the tab opens.
-function MeView:reset()
-    self.subpage = nil
-    self.week = Me.week()
-    self.streak = Me.streak()
-    self.library = Me.library()
-    self.words = Me.vocab()
+--[[--
+Shows the home page, or the subpage of `state` (from getState()), reading the home data unless
+cached; the caller refreshes. Called each time the tab opens and when the layout is rebuilt.
+]]
+function MeView:reset(state)
+    self.home = self.home or state and state.home
+    if not self.home then
+        local counts = Me.counts()
+        self.home = {
+            week = Me.week(),
+            streak = Me.streak(),
+            note_count = counts.note_count,
+            finished_this_year = counts.finished_this_year,
+            word_count = Me.vocabCount(),
+        }
+    end
+    self:unload()
+    if state and state.subpage then
+        self:load(state.subpage, state.page)
+    end
     self:build()
+end
+
+--- Drops the cached home data (books or statistics changed).
+function MeView:invalidate()
+    self.home = nil
+end
+
+function MeView:getState()
+    return { subpage = self.subpage, page = self.page, home = self.home }
 end
 
 function MeView:build()
@@ -216,8 +240,9 @@ end
 
 function MeView:buildHome()
     local heading = text(_("Reading this week"), "ui_body", Palette.ink, nil, true)
-    local total = text(durationText(self.week.total_minutes), "ui_label")
-    self.chart = WeekChart:new{ week = self.week, width = self.inner_w }
+    local home = self.home
+    local total = text(durationText(home.week.total_minutes), "ui_label")
+    self.chart = WeekChart:new{ week = home.week, width = self.inner_w }
     local stats = VerticalGroup:new{
         align = "left",
         HorizontalGroup:new{
@@ -229,14 +254,14 @@ function MeView:buildHome()
         VerticalSpan:new{ width = dp(12) },
         self.chart,
         VerticalSpan:new{ width = dp(10) },
-        text(T(_("%1-day reading streak · %2 finished this year"), self.streak, self.library.finished_this_year),
+        text(T(_("%1-day reading streak · %2 finished this year"), home.streak, home.finished_this_year),
             "ui_caption", Palette.ink_2, self.inner_w),
     }
     local rows = VerticalGroup:new{
         align = "left",
-        self:entryRow(C_("Me page", "Notes"), T(_("%1 highlights and notes"), self.library.note_count),
+        self:entryRow(C_("Me page", "Notes"), T(_("%1 highlights and notes"), home.note_count),
             function() self:open("notes") end),
-        self:entryRow(C_("Me page", "Vocabulary"), T(_("%1 words"), #self.words),
+        self:entryRow(C_("Me page", "Vocabulary"), T(_("%1 words"), home.word_count),
             function() self:open("vocab") end),
         self:entryRow(_("Sync and transfer"), "KOSync · Calibre · OPDS", function() self:open("sync") end),
         self:entryRow(_("Settings"), _("Reading · Screen · Network · Device"), function()
@@ -260,20 +285,34 @@ local subpages = {
     sync = { title = function() return _("Sync and transfer") end, items = "syncItems" },
 }
 
---- Opens a subpage ("notes", "vocab" or "sync") over the content area.
-function MeView:open(kind)
+-- Loads a subpage's data and measures its rows (nothing rendered), paginated once;
+-- only the shown page is built.
+function MeView:load(kind, page)
     self.subpage = kind
-    -- rows are measured (nothing rendered) and paginated once; only the shown page is built
+    if kind == "notes" then
+        self.books = Me.notes()
+    elseif kind == "vocab" then
+        self.words = Me.vocab()
+    end
     self.items = self[subpages[kind].items](self)
     self.pages = TocDrawer.paginate(self.items, self.height - NAV_H - PAGER_H - dp(4))
-    self.page = 1
+    self.page = math.max(1, math.min(page or 1, #self.pages))
+end
+
+function MeView:unload()
+    self.subpage, self.items, self.pages, self.books, self.words = nil, nil, nil, nil, nil
+end
+
+--- Opens a subpage ("notes", "vocab" or "sync") over the content area.
+function MeView:open(kind)
+    self:load(kind)
     self:build()
     UIManager:setDirty(self.ui, "ui", self.dimen)
 end
 
 --- Leaves the subpage for the home page.
 function MeView:close()
-    self.subpage, self.items, self.pages = nil, nil, nil
+    self:unload()
     self:build()
     UIManager:setDirty(self.ui, "ui", self.dimen)
 end
@@ -340,26 +379,46 @@ function MeView:emptyItem(title, hint)
     return self:drawerItem(TocDrawer.emptyItem(title, hint), TocDrawer.emptyState)
 end
 
---- Opens the note's book at the note (a full refresh, as for opening any book).
+--- Opens the note's book at the note (a full refresh, as for opening any book), keeping the
+-- position it opened on for "Return to last position", as the contents drawer does.
 function MeView:openNote(book, note)
     filemanagerutil.openFile(self.ui, book.file, nil, nil, function(ui)
+        ui.link:addCurrentLocationToStack()
         ui.bookmark:gotoBookmark(note.page, note.pos0)
     end)
 end
 
+--- Exports all notes, or with no format or service enabled yet, opens the menu where the exporter's settings live.
+function MeView:exportNotes()
+    local exporter, menu = self.ui.exporter, self.ui.menu
+    if exporter:isReady() then
+        return exporter:onExportAllNotes()
+    end
+    if menu.tab_item_table == nil then
+        menu:setUpdateItemTable()
+    end
+    for i, tab in ipairs(menu.tab_item_table) do
+        if tab.icon == "appbar.tools" then
+            return menu:onShowMenu(i)
+        end
+    end
+    menu:onShowMenu()
+end
+
 function MeView:notesItems()
-    if self.library.note_count == 0 then
+    if #self.books == 0 then
         return { self:emptyItem(_("No notes yet"), _("Long-press text in a book, then tap Highlight or Add note.")) }
     end
     local items = {}
     if self.ui.exporter then
-        table.insert(items, self:entryItem(_("Export notes"), nil, function() self.ui.exporter:onExportAllNotes() end))
+        table.insert(items, self:entryItem(_("Export notes"), nil, function() self:exportNotes() end))
     end
-    for __, book in ipairs(self.library.books) do
-        table.insert(items, self:drawerItem(TocDrawer.headerItem(T(_("%1 · %2 notes"), book.title, #book.notes)),
+    local metrics = TocDrawer.noteMetrics()
+    for __, book in ipairs(self.books) do
+        table.insert(items, self:drawerItem(TocDrawer.headerItem(T(_("%1 · %2 notes"), book.title, #book.notes), metrics),
             TocDrawer.groupHeader))
         for __, note in ipairs(book.notes) do
-            table.insert(items, self:drawerItem(TocDrawer.noteItem(self.inner_w, note), TocDrawer.buildNoteRow,
+            table.insert(items, self:drawerItem(TocDrawer.noteItem(self.inner_w, note, metrics), TocDrawer.buildNoteRow,
                 function() self:openNote(book, note) end))
         end
     end
@@ -378,10 +437,10 @@ function MeView:vocabItems()
             _("When looking up a word, tap Add to vocabulary builder.")))
         return items
     end
-    local word_face, context_face = Font:getFace("ui_excerpt", 17), Font:getFace("ui_excerpt", 13)
+    local word_face, context_face = Font:getFace("ui_vocab_word"), Font:getFace("ui_vocab_context")
     local caption_h = textSize("0", "ui_caption").h
     for __, w in ipairs(self.words) do
-        local word_h = textSize(w.word, word_face, true).h
+        local word_h = textSize(w.word, word_face).h
         local context = ((w.prev_context or "") ~= "" or (w.next_context or "") ~= "")
             and BD.auto((table.concat({ w.prev_context or "", w.word, w.next_context or "" }):gsub("%s+", " ")))
         local lines = context and math.max(1, math.min(2, math.ceil(textSize(context, context_face).w / self.inner_w))) or 0
@@ -394,7 +453,7 @@ function MeView:vocabItems()
             local group = VerticalGroup:new{
                 align = "left",
                 VerticalSpan:new{ width = dp(12) },
-                text(w.word, word_face, Palette.ink, self.inner_w, true),
+                text(w.word, word_face, Palette.ink, self.inner_w),
             }
             if context then
                 table.insert(group, VerticalSpan:new{ width = dp(2) })
@@ -445,7 +504,8 @@ function MeView:syncItems()
     return items
 end
 
-function MeView:onSwipe(__, ges)
+--- Pages the current subpage's list on a west or east swipe; called by the file manager's swipe handler.
+function MeView:swipe(ges)
     if self.subpage then
         local direction = BD.flipDirectionIfMirroredUILayout(ges.direction)
         if direction == "west" then
@@ -454,7 +514,6 @@ function MeView:onSwipe(__, ges)
             self:goToPage(self.page - 1)
         end
     end
-    -- never let the hidden shelf or file browser turn their pages
     return true
 end
 
