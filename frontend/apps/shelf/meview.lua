@@ -265,8 +265,7 @@ function MeView:buildHome()
             function() self:open("vocab") end),
         self:entryRow(_("Sync and transfer"), "KOSync · Calibre · OPDS", function() self:open("sync") end),
         self:entryRow(_("Settings"), _("Reading · Screen · Network · Device"), function()
-            -- until #12 reorganizes settings, the file manager's menu
-            self.ui.menu:onShowMenu()
+            self.ui:handleEvent(Event:new("ShowEinkSettings"))
         end),
     }
     return VerticalGroup:new{
