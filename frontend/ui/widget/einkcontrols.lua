@@ -129,6 +129,7 @@ local TickStepper = HorizontalGroup:extend{
     value = 1,
     width = nil,
     on_change = nil, -- function(value)
+    on_step = nil, -- optional function(direction): handles the minus (-1) and plus (+1) buttons instead of on_change
     minus_icon = "eink/minus",
     plus_icon = "eink/plus",
 }
@@ -136,9 +137,16 @@ local TickStepper = HorizontalGroup:extend{
 function TickStepper:init()
     local bw, bh, gap = Screen:scaleBySize(44), Screen:scaleBySize(38), Screen:scaleBySize(8)
     local set = function(v) if self.on_change then self.on_change(v) end end
+    local step = function(direction)
+        if self.on_step then
+            self.on_step(direction)
+        else
+            set(self.value + direction)
+        end
+    end
     self[1] = PillButton:new{
         icon = self.minus_icon, width = bw, height = bh, enabled = self.value > 1,
-        callback = function() set(self.value - 1) end,
+        callback = function() step(-1) end,
     }
     self[2] = HorizontalSpan:new{ width = gap }
     self[3] = TickTrack:new{
@@ -147,7 +155,7 @@ function TickStepper:init()
     self[4] = HorizontalSpan:new{ width = gap }
     self[5] = PillButton:new{
         icon = self.plus_icon, width = bw, height = bh, enabled = self.value < self.count,
-        callback = function() set(self.value + 1) end,
+        callback = function() step(1) end,
     }
 end
 

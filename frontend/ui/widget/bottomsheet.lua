@@ -47,7 +47,7 @@ function BottomSheet:init()
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     self.ges_events.TapScrim = { GestureRange:new{ ges = "tap", range = self.dimen } }
     if Device:hasKeys() then
-        self.key_events.Close = { { Device.input.group.Back } }
+        self.key_events.BackKey = { { Device.input.group.Back } }
     end
     self:build()
 end
@@ -146,6 +146,16 @@ end
 
 function BottomSheet:onTapScrim(_, ges)
     if ges.pos.y < self.sheet_y and self.close_on_scrim then
+        self:onClose()
+    end
+    return true
+end
+
+-- Back goes to the previous page when there is one, else closes the sheet.
+function BottomSheet:onBackKey()
+    if self.on_back then
+        self.on_back()
+    else
         self:onClose()
     end
     return true
