@@ -22,7 +22,20 @@ describe("ReaderTypesetPanel module", function()
         Replacements.reader_config = ReaderTypesetPanel
     end)
 
+    local DEFAULT_KEYS = { "copt_font_size", "copt_line_spacing", "copt_h_page_margins", "copt_t_page_margin" }
+    local function clearDefaults()
+        for _, key in ipairs(DEFAULT_KEYS) do
+            G_reader_settings:delSetting(key)
+        end
+    end
+
+    -- Runs the tasks scheduled by the reader (e.g. the re-render after BatchedUpdateDone).
+    local function runTasks()
+        for _ = 1, 3 do UIManager:_checkTasks() end
+    end
+
     teardown(function()
+        clearDefaults()
         Replacements.reader_menu = nil
         Replacements.reader_config = nil
     end)
@@ -164,7 +177,10 @@ describe("ReaderTypesetPanel module", function()
             local size = ui.document.configurable.font_size
             local plus = find(sheet, function(w) return w.icon == "eink/plus" and w.callback end)
             UIManager.refresh_count = 0
-            local refreshes = refreshesOf(function() tapWidget(plus) end)
+            local refreshes = refreshesOf(function()
+                tapWidget(plus)
+                runTasks() -- the re-render follows BatchedUpdateDone
+            end)
             assert.is_true(ui.document.configurable.font_size > size)
             assert.are.equal(sheet, topWidget())
             local modes = {}
@@ -288,8 +304,157 @@ describe("ReaderTypesetPanel module", function()
             end
             ui:handleEvent(Event:new("SetPageTopMargin", 44))
             assert.is_true(inkInTopMargin())
+
+            ui:handleEvent(Event:new("SetViewMode", "scroll"))
+            assert.is_false(inkInTopMargin())
+            ui:handleEvent(Event:new("SetViewMode", "page"))
+            assert.is_true(inkInTopMargin())
+
+            ui.document.configurable.status_line = 0 -- crengine's own top status bar
+            assert.is_false(inkInTopMargin())
+            ui.document.configurable.status_line = 1
+
             ui:handleEvent(Event:new("SetPageTopMargin", 15))
             assert.is_false(inkInTopMargin())
+            ui:handleEvent(Event:new("SetPageTopMargin", 44))
+            runTasks()
+        end)
+
+        it("should step the font size from an off-scale size to the next size below or above", function()
+            ui.config:apply("font_size", 23, "SetFontSize")
+            local sheet = openPanel(ui)
+            tapWidget(find(sheet, function(w) return w.icon == "eink/minus" and w.callback end))
+            assert.are.equal(22, ui.document.configurable.font_size)
+            ui.config:apply("font_size", 23, "SetFontSize")
+            ui.config:refreshSheet()
+            UIManager:forceRePaint()
+            tapWidget(find(sheet, function(w) return w.icon == "eink/plus" and w.callback end))
+            assert.are.equal(24, ui.document.configurable.font_size)
+            runTasks()
+            sheet:onClose()
+        end)
+
+        it("should go back to the first page on Back from more layout options", function()
+            local sheet = openPanel(ui)
+            ui.config:showPage("more")
+            UIManager:forceRePaint()
+            sheet:onBackKey()
+            UIManager:forceRePaint()
+            assert.are.equal("main", ui.config.page)
+            assert.are.equal(sheet, topWidget())
+            sheet:onBackKey()
+            UIManager:forceRePaint()
+            assert.is_nil(ui.config.sheet)
+        end)
+
+        it("should find the paragraph style tweaks by id, and fall back to all of them", function()
+            local tweaks = ui.styletweak.tweaks_table
+            local indent = ui.config:styleTweaks("paragraph_indent")
+            assert.are_not.equal(tweaks, indent)
+            assert.is_truthy(find(indent, function(w) return w.tweak_id == "paragraph_indent" end))
+            assert.is_truthy(find(ui.config:styleTweaks("paragraph_whitespace"), function(w) return w.tweak_id == "paragraph_whitespace" end))
+            assert.are.equal(tweaks, ui.config:styleTweaks("no_such_tweak"))
+        end)
+
+        it("should close a menu it opened on CloseConfigMenu", function()
+            ui.config:showMenu(ui.typography.menu_table)
+            UIManager:forceRePaint()
+            assert.are.equal(ui.config.menu_container, topWidget())
+            ui:handleEvent(Event:new("CloseConfigMenu"))
+            UIManager:forceRePaint()
+            assert.is_nil(ui.config.menu_container)
+            assert.are.equal(ui, topWidget())
+        end)
+
+        it("should keep the chosen margin step across rotation, widened only to cap the line length", function()
+            ui.config:setFontSize(15)
+            runTasks()
+            local sheet = openPanel(ui)
+            tapWidget(segmented(sheet, _.pgettext("Margins", "Narrow")), 1/6)
+            runTasks()
+            assert.are.same({ 18, 18 }, ui.document.configurable.h_page_margins)
+            sheet:onClose()
+
+            ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_CLOCKWISE))
+            runTasks()
+            local narrow = ui.config:marginsFor(1)
+            assert.is_true(narrow > 18) -- a landscape line would hold more than 38 characters
+            assert.are.same({ narrow, narrow }, ui.document.configurable.h_page_margins)
+            sheet = openPanel(ui)
+            assert.are.equal(1, segmented(sheet, _.pgettext("Margins", "Narrow")).value)
+            tapWidget(segmented(sheet, _.pgettext("Margins", "Narrow")), 5/6)
+            runTasks()
+            assert.are.equal(3, ui.doc_settings:readSetting("typeset_margin_step"))
+            local wide = ui.config:marginsFor(3)
+            assert.are.same({ wide, wide }, ui.document.configurable.h_page_margins)
+            UIManager:forceRePaint()
+            tapWidget(segmented(sheet, _.pgettext("Margins", "Narrow")), 3/6)
+            runTasks()
+            -- 窄 and 标准 may widen to the same margins: the step stays what was chosen
+            assert.are.equal(2, segmented(ui.config.sheet, _.pgettext("Margins", "Narrow")).value)
+            ui.config.sheet:onClose()
+
+            ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_UPRIGHT))
+            runTasks()
+            assert.are.same({ 28, 28 }, ui.document.configurable.h_page_margins)
+
+            -- margins set elsewhere are the user's own
+            ui:handleEvent(Event:new("SetPageHorizMargins", { 15, 15 }))
+            runTasks()
+            assert.is_nil(ui.doc_settings:readSetting("typeset_margin_step"))
+        end)
+    end)
+
+    describe("design defaults", function()
+        it("should be written for a fresh book, but not over a defaults.lua customization", function()
+            clearDefaults()
+            G_defaults:saveSetting("DCREREADER_CONFIG_DEFAULT_FONT_SIZE", 25)
+            local ui = openReader(sample_epub)
+            G_defaults:delSetting("DCREREADER_CONFIG_DEFAULT_FONT_SIZE")
+            assert.is_nil(G_reader_settings:readSetting("copt_font_size"))
+            assert.are.equal(125, G_reader_settings:readSetting("copt_line_spacing"))
+            assert.are.equal(44, G_reader_settings:readSetting("copt_t_page_margin"))
+            assert.are.equal(125, ui.document.configurable.line_spacing)
+            closeReader(ui)
+        end)
+
+        it("should not be written, and the original bar used, when the slot is empty", function()
+            clearDefaults()
+            Replacements.reader_config = nil
+            local ui = openReader(sample_epub)
+            ui:handleEvent(Event:new("ShowConfigMenu"))
+            UIManager:forceRePaint()
+            assert.is_truthy(ui.config.config_dialog)
+            assert.are.equal(ui.config.config_dialog, topWidget())
+            ui.config.config_dialog:closeDialog()
+            UIManager:forceRePaint()
+            for _, key in ipairs(DEFAULT_KEYS) do
+                assert.is_nil(G_reader_settings:readSetting(key))
+            end
+            assert.is_nil(ui.view.view_modules.chapter_header)
+            closeReader(ui)
+            Replacements.reader_config = ReaderTypesetPanel
+        end)
+    end)
+
+    describe("with a book without a language", function()
+        local ui, lang
+        setup(function()
+            lang = _.current_lang
+            _.current_lang = "zh_CN"
+            G_reader_settings:makeTrue("typeset_serif_missing_shown")
+            ui = openReader("spec/front/unit/data/sample.txt")
+        end)
+        teardown(function()
+            closeReader(ui)
+            _.current_lang = lang
+            G_reader_settings:delSetting("typeset_serif_missing_shown")
+        end)
+
+        it("should follow the UI language for the font cards", function()
+            assert.is_truthy(ui.config:isCJK())
+            assert.are.equal("Noto Sans CJK SC", ui.config:cardFace("sans"))
+            assert.are.equal("Noto Sans CJK SC", ui.font.font_face)
         end)
     end)
 
@@ -342,6 +507,7 @@ describe("ReaderTypesetPanel module", function()
             assert.are.equal(ui.config.config_dialog, topWidget())
             ui.config.config_dialog:closeDialog()
             UIManager:forceRePaint()
+            assert.is_nil(ui.view.view_modules.chapter_header)
         end)
     end)
 
