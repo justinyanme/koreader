@@ -238,6 +238,9 @@ if not Device:isStartupScriptUpToDate() then
     UIManager:runOnce()
 end
 
+-- e-ink redesign: register replacement screens (see frontend/apps/replacements.lua)
+require("apps/shelf/shelffilemanager")
+
 -- Start app
 if exit_code then -- luacheck: ignore
     -- We're quitting to finalize an update.
