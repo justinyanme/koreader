@@ -38,6 +38,7 @@ local PillButton = InputContainer:extend{
     width = nil, -- defaults to the label width plus 16dp padding
     height = Screen:scaleBySize(40),
     bordersize = Size.border.button,
+    face = nil, -- label face, defaults to ui_label_large
 }
 
 function PillButton:init()
@@ -50,7 +51,7 @@ function PillButton:init()
         }
         if not self.enabled then label.dim = true end
     else
-        label = TextWidget:new{ text = self.text, face = Font:getFace("ui_label_large"), fgcolor = fg }
+        label = TextWidget:new{ text = self.text, face = self.face or Font:getFace("ui_label_large"), fgcolor = fg }
     end
     local bw = self.bordersize
     local w = self.width or label:getSize().w + 2 * (Screen:scaleBySize(16) + bw)
