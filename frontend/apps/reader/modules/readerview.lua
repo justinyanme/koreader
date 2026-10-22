@@ -34,7 +34,7 @@ local ReaderView = OverlapGroup:extend{
     -- single page state
     state = nil, -- table
     outer_page_color = Blitbuffer.gray(G_defaults:readSetting("DOUTER_PAGE_COLOR") * (1/15)),
-    -- highlight with "lighten" or "underscore" or "strikeout" or "invert"
+    -- highlight with "lighten" or "underscore" or "strikeout" or "invert" or "wave"
     highlight = nil, -- table
     highlight_visible = true,
     note_mark_line_w = 3, -- side line thickness
@@ -568,6 +568,7 @@ function ReaderView:drawPageSavedHighlight(bb, x, y)
                         if rect then
                             local hl_box = {
                                 index     = item.parent or (index + idx_offset), -- index in annotations
+                                page      = page,
                                 rect      = box,
                                 drawer    = drawer,
                                 color     = color,
@@ -662,6 +663,32 @@ function ReaderView:drawXPointerSavedHighlight(bb, x, y)
     return colorful
 end
 
+--- Paints a 1.3dp wavy line (12dp period, 1.5dp amplitude) from x to x + w, centered on mid_y.
+-- The phase follows the absolute x, so the boxes of one line join into one wave.
+local wave_offsets -- y offsets over one period, by x
+function ReaderView.paintWave(bb, x, mid_y, w, color)
+    local period = Screen:scaleBySize(12)
+    if not wave_offsets or #wave_offsets ~= period then
+        local amp = Screen:scaleBySize(1.5)
+        wave_offsets = {}
+        for i = 1, period do
+            wave_offsets[i] = math.floor(amp * math.sin(2 * math.pi * (i - 1) / period) + 0.5)
+        end
+    end
+    local stroke = math.max(1, Screen:scaleBySize(1.3))
+    local paint = Blitbuffer.isColor8(color) and bb.paintRect or bb.paintRectRGB32
+    local prev
+    for i = 0, w - 1 do
+        local wy = mid_y + wave_offsets[(x + i) % period + 1]
+        local top, bottom = wy, wy
+        if prev then
+            top, bottom = math.min(prev, wy), math.max(prev, wy)
+        end
+        paint(bb, x + i, top, 1, bottom - top + stroke, color)
+        prev = wy
+    end
+end
+
 function ReaderView:drawHighlightRect(bb, _x, _y, rect, drawer, color, draw_note_mark)
     local x, y, w, h = rect.x, rect.y, rect.w, rect.h
     if drawer == "lighten" or drawer == "invert" then
@@ -714,6 +741,13 @@ function ReaderView:drawHighlightRect(bb, _x, _y, rect, drawer, color, draw_note
         else
             bb:paintRectRGB32(x, line_y, w, Size.line.medium, Screen.night_mode and color:invert() or color)
         end
+    elseif drawer == "wave" then -- fork-only style, see doc/adr/0003-wavy-highlight-style.md
+        if is_gray then
+            color = Blitbuffer.COLOR_BLACK
+        elseif Screen.night_mode then
+            color = color:invert()
+        end
+        ReaderView.paintWave(bb, x, y + h - Screen:scaleBySize(1.5), w, color)
     elseif drawer == "invert" then
         bb:invertRect(x, y, w, h)
     end

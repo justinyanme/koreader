@@ -378,6 +378,7 @@ local highlight_style = {
     {_("Underline"), "underscore"},
     {_("Strikethrough"), "strikeout"},
     {_("Invert"), "invert"},
+    {_("Wavy underline"), "wave"}, -- fork-only style, see doc/adr/0003-wavy-highlight-style.md
 }
 
 local note_mark = {

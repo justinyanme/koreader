@@ -250,6 +250,9 @@ function PdfDocument:saveHighlight(pageno, item, annot_color)
         annot_type = C.PDF_ANNOT_UNDERLINE
     elseif item.drawer == "strikeout" then
         annot_type = C.PDF_ANNOT_STRIKE_OUT
+    elseif item.drawer == "wave" then
+        -- MuPDF only writes highlight, underline and strike-out markups; the book settings keep "wave"
+        annot_type = C.PDF_ANNOT_UNDERLINE
     end
     -- NOTE: For highlights, display style may differ compared to ReaderView:drawHighlightRect...
     --       (e.g., we do a MUL blend, MuPDF currently appears to do an OVER blend).
