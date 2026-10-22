@@ -217,7 +217,7 @@ function ReaderUI:init()
         document = self.document,
     })
     -- dictionary
-    self:registerModule("dictionary", ReaderDictionary:new{
+    self:registerModule("dictionary", (Replacements.reader_dictionary or ReaderDictionary):new{
         dialog = self.dialog,
         view = self.view,
         ui = self,
