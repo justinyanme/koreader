@@ -46,6 +46,7 @@ local ReaderChapterHeader = require("apps/reader/modules/readerchapterheader")
 local ReaderConfig = require("apps/reader/modules/readerconfig")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
+local Toast = require("ui/widget/toast")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -607,21 +608,31 @@ end
 ------------------------------------------------------------------------
 -- Paragraphs, with KOReader's paragraph style tweaks (ui/data/css_tweaks), for this book
 
-local FLUSH_TWEAK, INDENT_TWEAK = "paragraph_no_indent", "paragraph_indent"
+local FLUSH_TWEAK = "paragraph_no_indent"
+-- 首行缩进 sets the 2em indent of Chinese typesetting; KOReader's own 1.2em one reads as 首行缩进 too.
+local INDENT_TWEAK, NARROW_INDENT_TWEAK = "paragraph_indent_2em", "paragraph_indent"
 -- Over the indent, these leave unindented the first paragraph of a block (a common style, still 首行缩进), or all
 -- the others (a mix that is neither mode).
 local FOLLOWING_FLUSH_TWEAK = "paragraph_following_no_indent"
 local SPACING_TWEAK, HALF_SPACING_TWEAK = "paragraph_whitespace", "paragraph_whitespace_half"
+local NO_SPACING_TWEAK = "paragraph_no_whitespace"
+
+-- Whether the book's own style tweak (its CSS, last in the style sheet) sets `property`, over the tweaks of the panel.
+local function bookTweakSets(styletweak, property)
+    local css = styletweak.book_style_tweak_enabled and styletweak.book_style_tweak
+    return css and css:find(property, 1, true) ~= nil or false
+end
 
 --- The paragraph mode the style tweaks set: "flush" or "indent", or nil when they leave the first lines to the book's
 -- styles or indent only some of them.
 function ReaderTypesetPanel:paragraphMode()
     local styletweak = self.ui.styletweak
-    if not styletweak.enabled then return end
+    if not styletweak.enabled or bookTweakSets(styletweak, "text-indent") then return end
     if styletweak:isTweakEnabled(FLUSH_TWEAK) then
-        return "flush" -- also over the indent, later in the style sheet
+        return "flush" -- also over an indent set elsewhere, later in the style sheet
     end
-    if styletweak:isTweakEnabled(INDENT_TWEAK) and not styletweak:isTweakEnabled(FOLLOWING_FLUSH_TWEAK) then
+    if (styletweak:isTweakEnabled(INDENT_TWEAK) or styletweak:isTweakEnabled(NARROW_INDENT_TWEAK))
+            and not styletweak:isTweakEnabled(FOLLOWING_FLUSH_TWEAK) then
         return "indent"
     end
 end
@@ -629,7 +640,7 @@ end
 --- Whether the style tweaks add space between paragraphs: a line, or half a line.
 function ReaderTypesetPanel:paragraphSpacing()
     local styletweak = self.ui.styletweak
-    return styletweak.enabled
+    return styletweak.enabled and not bookTweakSets(styletweak, "margin")
         and (styletweak:isTweakEnabled(SPACING_TWEAK) or styletweak:isTweakEnabled(HALF_SPACING_TWEAK))
 end
 
@@ -646,24 +657,33 @@ end
 --- Sets the paragraph mode, "flush" or "indent", turning off the tweaks that go against it.
 function ReaderTypesetPanel:setParagraphMode(mode)
     if mode == "flush" then
-        self:setStyleTweaks{ { INDENT_TWEAK, false }, { FLUSH_TWEAK, true } }
+        self:setStyleTweaks{ { INDENT_TWEAK, false }, { NARROW_INDENT_TWEAK, false }, { FLUSH_TWEAK, true } }
     else
-        self:setStyleTweaks{ { FLUSH_TWEAK, false }, { FOLLOWING_FLUSH_TWEAK, false }, { INDENT_TWEAK, true } }
+        self:setStyleTweaks{
+            { FLUSH_TWEAK, false }, { FOLLOWING_FLUSH_TWEAK, false }, { NARROW_INDENT_TWEAK, false }, { INDENT_TWEAK, true },
+        }
     end
 end
 
 function ReaderTypesetPanel:setParagraphSpacing(on)
     if on then
-        self:setStyleTweaks{ { SPACING_TWEAK, true } } -- in place of half a line
-    else
-        self:setStyleTweaks{ { SPACING_TWEAK, false }, { HALF_SPACING_TWEAK, false } }
+        self:setStyleTweaks{ { SPACING_TWEAK, true } } -- in place of half a line, or of a global no-spacing default
+        return
     end
+    local tweaks = { { SPACING_TWEAK, false }, { HALF_SPACING_TWEAK, false } }
+    -- Turning spacing on turned a global no-spacing default off for this book: it applies again.
+    local styletweak = self.ui.styletweak
+    if styletweak.global_tweaks[NO_SPACING_TWEAK] and styletweak.doc_tweaks[NO_SPACING_TWEAK] == false then
+        table.insert(tweaks, { NO_SPACING_TWEAK, true })
+    end
+    self:setStyleTweaks(tweaks)
 end
 
 --- Whether paragraph changes would show: not with style tweaks turned off for this book (in their menu). Says so.
 function ReaderTypesetPanel:canSetParagraphs()
     if self.ui.styletweak.enabled then return true end
-    UIManager:show(InfoMessage:new{ text = _("Style tweaks are disabled for this book.") })
+    -- "ui" as it goes: it covers part of the gray card
+    UIManager:show(Toast:new{ text = _("Style tweaks are disabled for this book."), close_refresh_type = "ui" })
     return false
 end
 

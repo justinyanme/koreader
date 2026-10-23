@@ -961,7 +961,9 @@ describe("ReaderTypesetPanel module", function()
 
             tapAndPaint(indentCard(paragraph))
             assert.are.same({ TINT, INK }, fills(paragraph))
-            assert.is_true(layout() > 0)
+            -- two characters wide, as Chinese text is indented
+            local indent = layout()
+            assert.is_true(math.abs(indent - 2 * ui.document:getFontSize()) <= 1, indent)
             -- the pill names it, back on the panel
             back()
             assert.are.equal(_("First line indented"), paragraphPill(ui.config.panel).text)
@@ -998,6 +1000,7 @@ describe("ReaderTypesetPanel module", function()
             -- it stays on with the other mode
             tapAndPaint(flushCard(paragraph), 0.25)
             assert.are.same({ INK, TINT }, fills(paragraph))
+            assert.are.equal(0, (layout())) -- from the indent of the last test
             assert.is_true(toggleShowsOn(spacingRow(paragraph)))
             assert.are.equal(spaced_gap, select(2, layout()))
             tapAndPaint(spacingRow(paragraph).toggle)
@@ -1069,11 +1072,12 @@ describe("ReaderTypesetPanel module", function()
             tapAndPaint(spacingRow(paragraph), 0.1)
             assert.is_false(toggleShowsOn(spacingRow(paragraph)))
             ui:saveSettings()
-            assert.are.same({ paragraph_indent = true, margin_body_0 = true }, ui.doc_settings:readSetting("style_tweaks"))
+            -- the 2em indent in place of the mix, the other tweak kept
+            assert.are.same({ paragraph_indent_2em = true, margin_body_0 = true }, ui.doc_settings:readSetting("style_tweaks"))
             ui.menu:hideToolbar()
         end)
 
-        it("should say so and change nothing when style tweaks are off for this book", function()
+        it("should say so with a toast and change nothing when style tweaks are off for this book", function()
             closeReader(ui)
             ui = openReader(sample_epub, { style_tweaks_enabled = false, style_tweaks = { paragraph_no_indent = true } })
             local indent, gap = layout()
@@ -1082,18 +1086,70 @@ describe("ReaderTypesetPanel module", function()
             openParagraph(main)
             local paragraph = ui.config.panel
             assert.are.same({ TINT, TINT }, fills(paragraph))
+            local shown
             for __, target in ipairs{ indentCard(paragraph), spacingRow(paragraph) } do
+                -- the toast of the first tap doesn't take the second one: it only closes
                 tapAndPaint(target, 0.1)
-                local info = topWidget()
-                assert.are.equal(_("Style tweaks are disabled for this book."), info.text)
-                UIManager:close(info)
-                UIManager:forceRePaint()
+                local toast = topWidget()
+                assert.are_not.equal(shown, toast)
+                assert.is_true(toast.toast)
+                assert.are.equal(_("Style tweaks are disabled for this book."), toast.text)
+                assert.are.equal("ui", toast.close_refresh_type) -- over the gray card
                 assert.are.same({ TINT, TINT }, fills(ui.config.panel))
                 assert.is_false(toggleShowsOn(spacingRow(ui.config.panel)))
+                shown = toast
             end
+            UIManager:close(shown)
             assert.are.same({ indent, gap }, { layout() })
             ui:saveSettings()
             assert.are.same({ paragraph_no_indent = true }, ui.doc_settings:readSetting("style_tweaks"))
+            ui.menu:hideToolbar()
+        end)
+
+        it("should keep a global no-spacing default in effect after paragraph spacing goes on and off", function()
+            closeReader(ui)
+            local global = G_reader_settings:readSetting("style_tweaks")
+            G_reader_settings:saveSetting("style_tweaks", { paragraph_no_whitespace = true })
+            ui = openReader(sample_epub)
+            local __, gap = layout()
+            openPanel(ui)
+            openParagraph(ui.config.panel)
+            tapAndPaint(spacingRow(ui.config.panel), 0.1)
+            assert.is_true(select(2, layout()) > gap)
+            tapAndPaint(spacingRow(ui.config.panel), 0.1)
+            assert.is_false(toggleShowsOn(spacingRow(ui.config.panel)))
+            assert.are.equal(gap, select(2, layout()))
+            ui:saveSettings()
+            -- not left turned off for this book, as turning spacing on did
+            assert.are.same({ paragraph_no_whitespace = true }, ui.doc_settings:readSetting("style_tweaks"))
+            assert.are.same({ paragraph_no_whitespace = true }, G_reader_settings:readSetting("style_tweaks"))
+            ui.menu:hideToolbar()
+            closeReader(ui)
+            G_reader_settings:saveSetting("style_tweaks", global)
+            ui = openReader(sample_epub)
+        end)
+
+        it("should not claim a mode or spacing that the book's own style tweak may override", function()
+            local tweaks = { paragraph_no_indent = true, paragraph_whitespace = true }
+            local book_tweak = "p { text-indent: 2em !important; margin-top: 0 !important; }"
+            closeReader(ui)
+            ui = openReader(sample_epub, { style_tweaks = tweaks, book_style_tweak = book_tweak, book_style_tweak_enabled = true })
+            -- the page shows it: the book's style tweak, last in the style sheet, indents
+            assert.is_true(layout() > 0)
+            local main = openPanel(ui)
+            assert.are.equal(_("Paragraphs"), paragraphPill(main).text)
+            openParagraph(main)
+            assert.are.same({ TINT, TINT }, fills(ui.config.panel))
+            assert.is_false(toggleShowsOn(spacingRow(ui.config.panel)))
+            ui.menu:hideToolbar()
+            -- turned off, it overrides nothing
+            closeReader(ui)
+            ui = openReader(sample_epub, { style_tweaks = tweaks, book_style_tweak = book_tweak, book_style_tweak_enabled = false })
+            assert.are.equal(0, (layout()))
+            main = openPanel(ui)
+            assert.are.equal(_("First line flush"), paragraphPill(main).text)
+            openParagraph(main)
+            assert.is_true(toggleShowsOn(spacingRow(ui.config.panel)))
             ui.menu:hideToolbar()
         end)
     end)
