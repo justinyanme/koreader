@@ -255,6 +255,11 @@ function ShelfFileManager:onShowEinkSettings(target)
     return true
 end
 
+--- The interface font size changed (apps/settings/uifontsize): rebuilt with the new faces, as on rotation.
+function ShelfFileManager:onUIFontScaleChanged()
+    self:reinit()
+end
+
 function ShelfFileManager:onCloseWidget()
     self.shelf_view:stop()
     -- the file browser is out of the widget tree while 书架 shows: it needs its CloseWidget too
