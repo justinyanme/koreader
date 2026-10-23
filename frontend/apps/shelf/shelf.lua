@@ -10,6 +10,7 @@ is KOReader's own (BookList); a book without a sidecar is "new".
 
 local BookList = require("ui/widget/booklist")
 local DataStorage = require("datastorage")
+local DocSettings = require("docsettings")
 local DocumentRegistry = require("document/documentregistry")
 local filemanagerutil = require("apps/filemanager/filemanagerutil")
 local ReadHistory = require("readhistory")
@@ -113,7 +114,7 @@ function Shelf.load(scanned, bim, cover_specs)
     local books = {}
     for _, found in ipairs(scanned) do
         local file = found.file
-        if not removed[file] then
+        if not removed[ffiUtil.realpath(file) or file] then
             local info = cache[file]
             local use_meta = info and not info.ignore_meta
             local book_info = BookList.getBookInfo(file)
@@ -191,30 +192,111 @@ function Shelf.view(books, filter, sort, query)
     return shown, counts
 end
 
---- Returns the hidden books ({ [file] = time removed }). A book opened after its removal is back
--- on the shelf, and entries whose file is gone are pruned.
+-- Remember the filesystem boundary while the book is accessible. An unmounted card may
+-- leave its mountpoint directory behind, so existence alone does not establish availability.
+local function fileVolume(file)
+    local device = lfs.attributes(file, "dev")
+    if not device then return end
+    local dir = file:match("^(.*)/")
+    while dir ~= "" and dir ~= "/" do
+        local parent = dir:match("^(.*)/")
+        if parent == "" then parent = "/" end
+        if lfs.attributes(parent, "dev") ~= device then break end
+        dir = parent
+    end
+    return { volume = dir == "" and "/" or dir, device = device }
+end
+
+--- Hidden books, keyed by real path. Legacy timestamps acquire volume information when accessible.
 function Shelf.removed()
     local removed = G_reader_settings:readSetting("shelf_removed")
     if not removed then return {} end
-    local changed = false
-    for file, removed_at in pairs(removed) do
-        local hist_idx = ReadHistory:getIndexByFile(file)
-        if not lfs.attributes(file, "mode") or (hist_idx and ReadHistory.hist[hist_idx].time > removed_at) then
-            removed[file] = nil
-            changed = true
+    local kept, changed = {}, false
+    for file, record in pairs(removed) do
+        local path = ffiUtil.realpath(file)
+        if path then
+            local entry = type(record) == "table" and record or fileVolume(path) or record
+            kept[path] = entry
+            changed = changed or path ~= file or entry ~= record
+        elseif type(record) == "table" and record.volume and record.device
+                and lfs.attributes(record.volume, "dev") == record.device then
+            changed = true -- the volume is present, so the missing file really is gone
+        else
+            kept[file] = record -- unknown legacy volume or unavailable storage: retain the user's choice
         end
     end
     if changed then
-        G_reader_settings:saveSetting("shelf_removed", removed)
+        G_reader_settings:saveSetting("shelf_removed", kept)
     end
-    return removed
+    return kept
 end
 
---- Hides a book from the shelf. The file stays where it is.
-function Shelf.remove(file)
-    local removed = G_reader_settings:readSetting("shelf_removed") or {}
-    removed[file] = os.time()
+--- A symlink on the shelf and its target opened from history share one shelf state.
+function Shelf.isRemoved(file)
+    return Shelf.removed()[ffiUtil.realpath(file) or file] ~= nil
+end
+
+--- Whether a supported book's real path is inside home, excluding hidden and app folders.
+function Shelf.isInHome(file)
+    if image_suffixes[util.getFileNameSuffix(file):lower()] or not DocumentRegistry:hasProvider(file) then
+        return false
+    end
+    local path = ffiUtil.realpath(file)
+    local home = ffiUtil.realpath(Shelf.homeDir())
+    if not path or not home then return false end
+    local prefix = home:gsub("/$", "") .. "/"
+    if path:sub(1, #prefix) ~= prefix then return false end
+    local relative = path:sub(#prefix + 1)
+    for part in relative:gmatch("[^/]+") do
+        if part:sub(1, 1) == "." then return false end
+    end
+    if relative:match("%.sdr/") then return false end
+    for _, dir in ipairs{ DataStorage:getDataDir(), lfs.currentdir() } do
+        local excluded = ffiUtil.realpath(dir)
+        if excluded and excluded ~= home and excluded:sub(1, #prefix) == prefix
+                and path:sub(1, #excluded + 1) == excluded .. "/" then
+            return false
+        end
+    end
+    return true
+end
+
+--- Restores a hidden book, without changing its file or book status.
+function Shelf.restore(file)
+    local removed = Shelf.removed()
+    removed[ffiUtil.realpath(file) or file] = nil
     G_reader_settings:saveSetting("shelf_removed", removed)
+    G_reader_settings:flush()
+end
+
+--- Hides books (a list of their files) from the shelf. The files stay where they are.
+-- The settings are written at once, so the books stay hidden even if KOReader does not quit cleanly.
+function Shelf.remove(files)
+    local removed = Shelf.removed()
+    for _, file in ipairs(files) do
+        local path = ffiUtil.realpath(file) or file
+        removed[path] = fileVolume(path) or os.time()
+    end
+    G_reader_settings:saveSetting("shelf_removed", removed)
+    G_reader_settings:flush()
+end
+
+--- Sets a book's status (书籍状态: "reading", "complete" or "abandoned"), as KOReader's own status buttons do, and
+-- returns whether it was saved. A book never opened gets its settings file for it, which a folder may refuse
+-- (read-only, with KOReader's own docsettings folder unwritable too); the status is read back as the next start
+-- reads it, and the cached status only changes once it is there.
+function Shelf.setStatus(file, status)
+    local doc_settings = DocSettings:open(file)
+    local summary = doc_settings:readSetting("summary") or {}
+    summary.status = status
+    filemanagerutil.saveSummary(doc_settings, summary)
+    local saved = DocSettings:open(file):readSetting("summary")
+    if not (saved and saved.status == status) then
+        logger.warn("Shelf: could not save the status of", file)
+        return false
+    end
+    BookList.setBookInfoCacheProperty(file, "status", status)
+    return true
 end
 
 return Shelf

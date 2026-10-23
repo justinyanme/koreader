@@ -11,8 +11,8 @@ The page opens on the page that holds the current chapter, showing it even when 
 collapsed, and draws that chapter's page number ink-filled. Entries are measured once (without
 rendering) and only the shown page's rows are built.
 
-The search field opens the search page (apps/reader/modules/readersearchpage) over this page. Until
-the notes page takes over, 书签 opens the bookmarks of the old drawer (apps/reader/modules/readertocdrawer).
+The search field opens the search page (apps/reader/modules/readersearchpage) over this page. 书签
+opens the notes page (apps/reader/modules/readernotespage) on the bookmarks, through "ShowNotes".
 
 Opening and closing repaint the page; turning a page or collapsing a group repaints the content and
 the bar, and the title band too when ↓去底部 and ↑去顶部 swap (all "ui"). A jump closes the page

@@ -7,6 +7,11 @@ Replaces ReaderHighlight (apps/replacements reader_highlight slot):
   white selection popover: highlight, look up (查询, for CJK text) or translate
   (翻译, for other text, such as English), write note, copy, each an icon over
   its label;
+- the selection is an ink underline with an ink drop handle under each end (not
+  the engine's gray); dragging a handle moves that end across lines, and across
+  pages from the page corners as a long-press drag does, the popover hidden
+  meanwhile; expanding either way saves one highlight on release and shows
+  Delete highlight, unless an explicit legacy action is configured;
 - a tap on a highlight, or a long-press on a word of it, shows the same four
   actions with "Delete highlight" in the first place; after a long-press, the
   look-up is for the word pressed;
@@ -22,9 +27,11 @@ and waves keep showing, and the popovers offer no restyling
 
 Refreshes: both popovers and the toast are black and white, so they show and
 close with "fast" on their own rect, or "ui" where the page under them is gray
-(the toast is solid, so it always shows with "fast").
+(the toast is solid, so it always shows with "fast"). So do the selection's
+lines and handles when it changes or clears (the old and new ones together).
 Saving, restyling or deleting a highlight refreshes its own lines with "ui";
-nothing here refreshes the whole screen.
+nothing here refreshes the whole screen, but a selection across pages (the
+page scrolled), as upstream.
 ]]
 
 local BottomSheet = require("ui/widget/bottomsheet")
@@ -34,6 +41,7 @@ local Event = require("ui/event")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
+local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
@@ -80,6 +88,85 @@ function NoteMarks:paintTo(bb, x, y)
             -- raised into the line gap: page text cannot reflow around it
             self.icon:paintTo(bb, x + r.x + r.w, y + r.y - math.floor(self.size / 2))
         end
+    end
+end
+
+--- Paints the selection (DESIGN.md, Selection): a 1dp ink underline under the selected text, where a line
+-- highlight would be, and an ink drop handle hanging under each end. Remembers the handles it painted, which
+-- are what can be grabbed (ReaderHighlightBubble:handleAt()).
+local SelectionMarks = Widget:extend{
+    highlight = nil, -- ReaderHighlightBubble
+    handles = nil, -- screen rects of the painted handles, by end ("start", "end"), with the side they hang to
+    paints_over_footer = true, -- so that ReaderFooter paints it again when it repaints itself alone
+}
+
+-- Whether a line of a selection is on the screen, all of it, or some of it (across pages, the page scrolls
+-- under the selection).
+local function onScreen(r, partly)
+    if partly then
+        return r.y + r.h > 0 and r.y < Screen:getHeight()
+    end
+    return r.y >= 0 and r.y + r.h <= Screen:getHeight()
+end
+
+-- A disc with its top corner toward the text squared (it hangs to the other side): that corner points at the
+-- end of the selection.
+local function paintHandle(bb, x, y, d, hang)
+    local half = math.floor(d / 2)
+    bb:paintRoundedRect(x, y, d, d, Palette.ink, half)
+    bb:paintRect(hang == "left" and x + d - half or x, y, half, half, Palette.ink)
+end
+
+function SelectionMarks:paintTo(bb, x, y)
+    self.handles = nil
+    local highlight = self.highlight
+    if not (highlight.hold_pos and highlight.selected_text) then return end
+    local rects = highlight:selectionRects()
+    if #rects == 0 then return end
+    local tops, handles = highlight:selectionMarks(bb, rects)
+    if not tops then return end
+    for i, r in ipairs(rects) do
+        if onScreen(r, true) then
+            bb:paintRect(x + r.x, y + tops[i], r.w, Size.border.default, Palette.ink)
+        end
+    end
+    self.handles = handles
+    for _, h in pairs(handles) do
+        paintHandle(bb, x + h.x, y + h.y, h.w, h.hang)
+    end
+end
+
+--- The selection popover, which also takes the gestures that drag the selection's handles: on top, it gets
+-- every gesture on the page first. It paints nothing while hidden (a handle is being dragged).
+local SelectionPopover = SelectionBubble:extend{
+    page_gesture = nil, -- function(ges): a gesture outside the popover's cells; true if it was taken
+    hidden = false,
+}
+
+function SelectionPopover:init()
+    SelectionBubble.init(self)
+    local hold_pan_rate = G_reader_settings:readSetting("hold_pan_rate") or (Screen.low_pan_rate and 5.0 or 30.0)
+    local ranges = {}
+    for _, ges in ipairs{ "touch", "hold", "hold_pan", "hold_release", "pan", "pan_release", "swipe", "multiswipe" } do
+        local moves = ges == "pan" or ges == "hold_pan"
+        table.insert(ranges, GestureRange:new{ ges = ges, range = self.dimen, rate = moves and hold_pan_rate or nil })
+    end
+    self.ges_events.PageGesture = ranges
+end
+
+function SelectionPopover:onPageGesture(_, ges)
+    return self.page_gesture(ges)
+end
+
+-- A tap on a handle keeps the selection.
+function SelectionPopover:onTapClose(arg, ges)
+    if self.hidden or self.page_gesture(ges) then return true end
+    return SelectionBubble.onTapClose(self, arg, ges)
+end
+
+function SelectionPopover:paintTo(bb, x, y)
+    if not self.hidden then
+        SelectionBubble.paintTo(self, bb, x, y)
     end
 end
 
@@ -180,6 +267,8 @@ function ReaderHighlightBubble:init()
     ReaderHighlight.init(self)
     self._fallback_drawer = DEFAULT_DRAWER -- starred in the original menu while no default is saved
     self.view:registerViewModule("note_marks", NoteMarks:new{ highlight = self })
+    self.selection_marks = SelectionMarks:new{ highlight = self }
+    self.view:registerViewModule("selection_marks", self.selection_marks)
 end
 
 function ReaderHighlightBubble:onReadSettings(config)
@@ -276,7 +365,299 @@ function ReaderHighlightBubble:refreshTypeOver(region)
     return "fast"
 end
 
---- Clears the selection, repainting only its lines (upstream repaints the whole page).
+--- The tops of the selection's underline, one per rect: where a line highlight would be (DESIGN.md,
+-- Highlights), under the glyphs of each line of reflowable text, at the bottom of the box on fixed-layout pages.
+-- On a line that has one already, where that one is: the glyphs can no longer be told from it on the page.
+function ReaderHighlightBubble:underlineTops(bb, rects)
+    local tops = {}
+    if self.ui.paging then
+        for i, r in ipairs(rects) do tops[i] = r.y + r.h - 1 end
+        return tops
+    end
+    local lines, line_tops = {}, {} -- the segments of one line share its box's y and h
+    for _, r in ipairs(rects) do
+        local key = r.y .. ":" .. r.h
+        lines[key] = lines[key] or {}
+        table.insert(lines[key], r)
+    end
+    local highlighted = self.view.highlight.line_tops or {}
+    for key, segments in pairs(lines) do
+        local r = segments[1]
+        -- lines out of the screen (across pages) cannot be read: the bottom of their box
+        line_tops[key] = highlighted[key] or (onScreen(r, true) and self.view:underlineY(bb, segments)) or r.y + r.h - 1
+    end
+    for i, r in ipairs(rects) do tops[i] = line_tops[r.y .. ":" .. r.h] end
+    return tops
+end
+
+-- U+0590–U+08FF (Hebrew to Arabic Extended-A) and their presentation forms, U+FB1D–U+FDFF and U+FE70–U+FEFF
+local function hasRightToLeftText(text)
+    return text:find("\xD6[\x90-\xBF]") or text:find("[\xD7-\xDF]") or text:find("\xE0[\xA0-\xA3]")
+        or text:find("\xEF\xAC[\x9D-\xBF]") or text:find("\xEF[\xAD-\xB7]") or text:find("\xEF\xB9[\xB0-\xBF]")
+        or text:find("\xEF[\xBA\xBB]")
+end
+
+--- The two ends of the selection in the order of the text, "start" and "end": the index of the line rect each
+-- is on, the x of its edge there and the side its handle hangs to, away from the text. On a right-to-left
+-- line a selection starts at the right: its first and last characters tell. On fixed-layout pages, lines are
+-- taken as left to right, and right-to-left text has no ends.
+function ReaderHighlightBubble:selectionEnds(rects)
+    local first, last = rects[1], rects[#rects]
+    local starts_right, ends_left = false, false
+    if self.ui.rolling then
+        local doc, selected = self.ui.document, self.selected_text
+        local function charBox(xp0, xp1)
+            local boxes = xp0 and xp1 and doc:getScreenBoxesFromPositions(xp0, xp1, true)
+            return boxes and boxes[1]
+        end
+        local function mid(r) return r.x + r.w / 2 end
+        local a = charBox(selected.pos0, doc:getNextVisibleChar(selected.pos0))
+        local b = charBox(doc:getPrevVisibleChar(selected.pos1), selected.pos1)
+        starts_right = a and mid(a) > mid(first) or false
+        ends_left = b and mid(b) < mid(last) or false
+    elseif hasRightToLeftText(self.selected_text.text or "") then
+        return {}
+    end
+    return {
+        start = { index = 1, x = starts_right and first.x + first.w or first.x, hang = starts_right and "right" or "left" },
+        ["end"] = { index = #rects, x = ends_left and last.x or last.x + last.w, hang = ends_left and "left" or "right" },
+    }
+end
+
+--- The handles of the selection (screen rects, by end, with the side they hang to), given the tops of its
+-- underline: about 25dp ink drops hanging under its ends, flat tops level with the glyphs' bottom (4dp above
+-- the underline), as in WeChat Read. Kept on the screen; an end whose line is out of the screen (across pages)
+-- has none.
+function ReaderHighlightBubble:handleRects(rects, tops)
+    local d, rise = Screen:scaleBySize(25), Screen:scaleBySize(4)
+    local sw, sh = Screen:getWidth(), Screen:getHeight()
+    local handles = {}
+    for side, e in pairs(self:selectionEnds(rects)) do
+        if onScreen(rects[e.index]) then
+            handles[side] = Geom:new{
+                x = math.max(0, math.min(sw - d, e.hang == "left" and e.x - d or e.x)),
+                y = math.max(0, math.min(sh - d, tops[e.index] - rise)),
+                w = d,
+                h = d,
+                hang = e.hang,
+            }
+        end
+    end
+    return handles
+end
+
+--- The underline tops and handles of the selection on the page as painted (bb), kept while its lines stay
+-- where they are: repainted over the footer alone, the page already has the underline, which is not glyphs.
+-- Nothing (yet) when a changed selection is repainted over a page that still has the old one's marks.
+function ReaderHighlightBubble:selectionMarks(bb, rects)
+    local key = {}
+    for i, r in ipairs(rects) do key[i] = r.x .. "," .. r.y .. "," .. r.w .. "," .. r.h end
+    key = table.concat(key, ";")
+    local marks = self.painted_marks
+    local page_paints = self.view.highlight.page_paints
+    if not (marks and marks.selection == self.selected_text and marks.key == key) then
+        if marks and marks.page_paints == page_paints then return end -- the page repaint is on its way
+        local tops = self:underlineTops(bb, rects)
+        marks = { selection = self.selected_text, key = key, tops = tops, handles = self:handleRects(rects, tops) }
+        self.painted_marks = marks
+    end
+    marks.page_paints = page_paints
+    return marks.tops, marks.handles
+end
+
+--- What the handles can cover before they are painted (the glyphs set their height): from the top of their
+-- line down to the lowest they can hang, from an underline at the bottom of the box.
+function ReaderHighlightBubble:handleBounds(rects)
+    local lowest = {}
+    for i, r in ipairs(rects) do lowest[i] = r.y + r.h - 1 end
+    local bounds = {}
+    for side, h in pairs(self:handleRects(rects, lowest)) do
+        local top = math.min(h.y, (side == "start" and rects[1] or rects[#rects]).y)
+        bounds[side] = Geom:new{ x = h.x, y = top, w = h.w, h = h.y + h.h - top }
+    end
+    return bounds
+end
+
+--- The lines of the selection and its handles, on the screen: what changing or clearing it repaints.
+function ReaderHighlightBubble:selectionRegion()
+    local rects = self:selectionRects()
+    local region = self:linesRegion(rects)
+    if not region then return end
+    for _, bound in pairs(self:handleBounds(rects)) do
+        region = region:combine(bound)
+    end
+    local screen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
+    return region:intersectWith(screen) and region:intersect(screen) or nil
+end
+
+--- The popover's anchors: the selection, its last line down to the handles under it, so that a popover below
+-- the selection (at the top of the page) stays clear of them.
+function ReaderHighlightBubble:popoverAnchors(rects)
+    local anchors = {}
+    for i, r in ipairs(rects) do anchors[i] = r end
+    local last = rects[#rects]
+    local bottom = last.y + last.h
+    for _, bound in pairs(self:handleBounds(rects)) do
+        bottom = math.max(bottom, bound.y + bound.h)
+    end
+    anchors[#rects] = Geom:new{ x = last.x, y = last.y, w = last.w, h = bottom - last.y }
+    return anchors
+end
+
+--- The engine's own way of showing a selection (crengine's gray, the boxes ReaderView paints on fixed-layout
+-- pages) is not used: SelectionMarks paints it. Each new selection from the engine shows it again.
+function ReaderHighlightBubble:hideEngineSelection()
+    if self.ui.paging then
+        if self.hold_pos then
+            self.view.highlight.temp[self.hold_pos.page] = nil
+        end
+    else
+        self.ui.document:clearSelection()
+    end
+end
+
+--- Repaints the selection once it changed (ReaderHighlight hook point): the lines and handles of the old and
+-- new selections, "fast" where they are black and white; the whole page across pages, the page scrolled.
+function ReaderHighlightBubble:refreshSelection()
+    local scrolled = self.restore_page_mode_func ~= nil
+    local region = not scrolled and self:selectionRegion() or nil
+    local old = not scrolled and self.shown_selection_region or nil -- a selection lost leaves its old lines
+    local dirty = region and old and region:combine(old) or region or old
+    self.shown_selection_region = region
+    if dirty then
+        UIManager:setDirty(self.dialog, self:refreshTypeOver(dirty), dirty)
+    else
+        UIManager:setDirty(self.dialog, "ui")
+    end
+end
+
+function ReaderHighlightBubble:onHold(arg, ges)
+    local handled = ReaderHighlight.onHold(self, arg, ges)
+    self.selection_before_drag = self.selected_text
+    if self.hold_pos and self.selected_text then -- a word: its underline and handles
+        self:hideEngineSelection()
+        self.shown_selection_region = nil
+        self:refreshSelection()
+    end
+    return handled
+end
+
+function ReaderHighlightBubble:onHoldPan(arg, ges)
+    local handled = ReaderHighlight.onHoldPan(self, arg, ges)
+    -- also when the text did not change, and nothing is repainted: crengine selected it again
+    self:hideEngineSelection()
+    if self.ui.rolling and self.restore_page_mode_func and self.selected_text and self.selected_text.pos0 then
+        -- the page scrolled (or turned) from a corner: the selection's lines moved with it
+        self.selected_text.sboxes = self.ui.document:getScreenBoxesFromPositions(self.selected_text.pos0,
+            self.selected_text.pos1, true)
+    end
+    return handled
+end
+
+--- Which handle a screen position grabs, if any: the nearest one within a 44dp square around it.
+function ReaderHighlightBubble:handleAt(pos)
+    local reach = math.floor(Screen:scaleBySize(44) / 2)
+    local found, found_d
+    for side, h in pairs(self.selection_marks.handles or {}) do
+        local dx, dy = pos.x - (h.x + h.w / 2), pos.y - (h.y + h.h / 2)
+        if math.abs(dx) <= math.max(reach, h.w / 2) and math.abs(dy) <= math.max(reach, h.h / 2) then
+            local d = dx * dx + dy * dy
+            if not found_d or d < found_d then
+                found, found_d = side, d
+            end
+        end
+    end
+    return found
+end
+
+--- A gesture on the page while the selection popover is up: a hold or a pan from a handle drags it, until the
+-- finger lifts; a tap on a handle keeps the selection. Returns true when it took the gesture.
+function ReaderHighlightBubble:pageGesture(ges)
+    local kind = ges.ges
+    if kind == "touch" then
+        self.touch_pos = ges.pos -- a hold is reported where the finger is by then, which may be off the handle
+        return false
+    end
+    if not self.handle_drag then
+        if kind == "tap" then
+            return self:handleAt(ges.pos) ~= nil
+        end
+        if kind ~= "hold" and kind ~= "pan" and kind ~= "swipe" and kind ~= "multiswipe" then return false end
+        -- where the finger went down: pans say so, swipes are reported there
+        local start = ges.start_pos or (kind == "hold" and self.touch_pos) or ges.pos
+        local side = self.hold_pos and self.selected_text and self:handleAt(start)
+        if not side then return false end
+        self:startHandleDrag(side, start)
+    end
+    if kind == "pan" or kind == "hold_pan" then
+        self:dragHandleTo(ges.pos)
+    elseif kind == "pan_release" or kind == "hold_release" then
+        self:endHandleDrag(ges.pos)
+    elseif kind == "swipe" or kind == "multiswipe" then
+        self:endHandleDrag(ges.end_pos)
+    end
+    return true
+end
+
+--- Grabs a handle: the other end of the selection stays, as where a long-press started, and the grabbed one
+-- follows the finger at the distance it was grabbed from, so that the finger does not hide it. The drag goes
+-- through ReaderHighlight:onHoldPan(), for its selection across pages from the corners. The popover hides
+-- meanwhile.
+function ReaderHighlightBubble:startHandleDrag(side, pos)
+    self.selection_before_drag = self.selected_text
+    local rects = self:selectionRects()
+    local ends = self:selectionEnds(rects)
+    -- points in the first and the last character, next to the edge of the selection
+    local function point(e)
+        local r = rects[e.index]
+        return Geom:new{ x = e.x + (e.hang == "left" and 1 or -2), y = r.y + math.floor(r.h / 2), w = 0, h = 0 }
+    end
+    local fixed, moving = point(ends.start), point(ends["end"])
+    if side == "start" then
+        fixed, moving = moving, fixed
+    end
+    self.hold_pos = self.view:screenToPageTransform(fixed)
+    if self.ui.rolling then
+        -- where a selection across pages measures the scrolling from, and puts its marker once done
+        self.selected_text_start_xpointer = side == "start" and self.selected_text.pos1 or self.selected_text.pos0
+    end
+    self.allow_hold_pan_corner_scroll = false -- as after a long-press: not in the corner it starts in
+    self.was_in_some_corner = nil
+    self.handle_drag = { dx = moving.x - pos.x, dy = moving.y - pos.y }
+    local popover = self.highlight_dialog
+    if popover then
+        popover.hidden = true
+        UIManager:setDirty(self.dialog, popover.refresh_type, popover:getRefreshRegion())
+    end
+end
+
+--- Moves the grabbed end to the text at the finger, kept on the page.
+function ReaderHighlightBubble:dragHandleTo(pos)
+    local drag = self.handle_drag
+    local area = self.view:getScreenPageArea(self.hold_pos.page)
+    self:onHoldPan(nil, { pos = Geom:new{
+        x = math.max(area.x, math.min(area.x + area.w - 1, pos.x + drag.dx)),
+        y = math.max(area.y, math.min(area.y + area.h - 1, pos.y + drag.dy)),
+        w = 0,
+        h = 0,
+    } })
+end
+
+--- The finger lifted: use the same save/preference path as a continuous long-press drag.
+function ReaderHighlightBubble:endHandleDrag(pos)
+    if pos then
+        self:dragHandleTo(pos)
+    end
+    self.handle_drag = nil
+    if self.selected_text then
+        self:closeBubble()
+        self:onHoldRelease()
+    else
+        self:dismiss()
+    end
+end
+
+--- Clears the selection, repainting only its lines and handles (upstream repaints the whole page).
 -- With fast, uses "fast" where nothing gray is under it; otherwise "ui", as upstream save paths
 -- (dictionary, highlight prompt, select mode) clear right after painting a gray marker.
 function ReaderHighlightBubble:clear(clear_id, fast)
@@ -284,8 +665,11 @@ function ReaderHighlightBubble:clear(clear_id, fast)
         return ReaderHighlight.clear(self, clear_id)
     end
     -- selections spanning pages turn pages back: those need the whole page
-    local region = not self.restore_page_mode_func and self:linesRegion(self:selectionRects())
+    local region = not self.restore_page_mode_func and self:selectionRegion()
     self.hold_pos = nil
+    self.handle_drag = nil
+    self.selection_before_drag = nil
+    self.shown_selection_region = nil
     ReaderHighlight.clear(self, clear_id)
     self.selected_text = nil
     if region then
@@ -308,7 +692,8 @@ function ReaderHighlightBubble:closeBubble()
     local bubble = self.highlight_dialog
     self.highlight_dialog = nil
     if not bubble then return end
-    if not bubble.getRefreshRegion then -- upstream dialog
+    -- upstream dialog, or hidden while a handle was dragged: the page is already repainted there
+    if not bubble.getRefreshRegion or bubble.hidden then
         return UIManager:close(bubble)
     end
     local region = bubble:getRefreshRegion()
@@ -336,6 +721,25 @@ function ReaderHighlightBubble:onHoldRelease()
     end
     if self.clear_id or self.select_mode or not self.hold_pos or not self.selected_text then
         return ReaderHighlight.onHoldRelease(self)
+    end
+    if (G_reader_settings:has("default_highlight_action") and not self.is_word_selection)
+            or (self.is_word_selection and G_reader_settings:has("highlight_action_on_single_word"))
+            or self.ui.keyselection:isActive() then
+        return ReaderHighlight.onHoldRelease(self)
+    end
+    local before = self.selection_before_drag
+    local changed = before and (not util.tableEquals(before.pos0, self.selected_text.pos0)
+        or not util.tableEquals(before.pos1, self.selected_text.pos1))
+    if before and self.ui.paging then
+        -- PDF positions are raw touch points: compare the selected words, not finger jitter within them.
+        changed = before.pos0.page ~= self.selected_text.pos0.page
+            or before.pos1.page ~= self.selected_text.pos1.page
+            or not util.tableEquals(before.pboxes, self.selected_text.pboxes)
+    end
+    if changed and not self.is_word_selection then
+        self:_resetHoldTimer(true)
+        self:saveAndShowHighlight()
+        return true
     end
     self:_resetHoldTimer(true)
     -- a long-press on a word of a highlight (no drag) shows that highlight's popover, as a tap does
@@ -419,21 +823,15 @@ function ReaderHighlightBubble:onShowHighlightMenu(index)
     if not self.selected_text then return end
     local rects = self:selectionRects()
     if #rects == 0 then -- e.g. multi-page selection in select mode
+        self:closeBubble() -- one hidden while a handle was dragged would take every tap
         return ReaderHighlight.onShowHighlightMenu(self, index)
     end
     local text = util.cleanupSelectedText(self.selected_text.text)
-    local bubble = SelectionBubble:new{
+    local anchors = self:popoverAnchors(rects)
+    local bubble = SelectionPopover:new{
         rows = { {
             { icon = "eink/highlight", text = C_("Highlight bubble", "Highlight"), callback = function()
-                -- a selection across pages turns back to its first page when cleared: wait for the repaint
-                local turns_back = self.restore_page_mode_func ~= nil
-                local index = self:saveSelection()
-                if not index then return end
-                if turns_back then
-                    UIManager:nextTick(function() self:showHighlightBubble(index) end)
-                else
-                    self:showHighlightBubble(index, rects)
-                end
+                self:saveAndShowHighlight()
             end },
             self:lookupCell(text, function()
                 self:closeBubble()
@@ -453,10 +851,26 @@ function ReaderHighlightBubble:onShowHighlightMenu(index)
                 self:copyText(text)
             end },
         } },
-        anchor_rects = rects,
+        anchor_rects = anchors,
         tap_close_callback = function() self:dismiss() end,
+        page_gesture = function(ges) return self:pageGesture(ges) end,
     }
     self:showBubble(bubble)
+end
+
+--- Saves once on release or on the Highlight action, keeping Delete highlight immediately available.
+function ReaderHighlightBubble:saveAndShowHighlight()
+    local rects = self:selectionRects()
+    local anchors = #rects > 0 and self:popoverAnchors(rects) or nil
+    -- Clearing a selection across pages turns back: position the popover after that repaint.
+    local turns_back = self.restore_page_mode_func ~= nil
+    local index = self:saveSelection()
+    if not index then return end
+    if turns_back then
+        UIManager:nextTick(function() self:showHighlightBubble(index) end)
+    else
+        self:showHighlightBubble(index, anchors)
+    end
 end
 
 --- Saves the selection as a highlight in the default style; returns its index.

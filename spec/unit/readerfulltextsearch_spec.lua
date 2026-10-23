@@ -586,10 +586,10 @@ describe("ReaderFulltextSearch module", function()
             tapWidget(page.bookmarks_button)
             assert.is_false(UIManager:isWidgetShown(page))
             assert.is_false(UIManager:isWidgetShown(contents))
-            local drawer = ui.menu.drawer
-            assert.is_truthy(drawer)
-            assert.are.equal(drawer, topWidget())
-            assert.is_true(drawer.panel_rect ~= nil)
+            local notes = ui.menu.drawer
+            assert.is_truthy(notes)
+            assert.are.equal(notes, topWidget())
+            assert.is_truthy(notes.overview) -- the notes page
         end)
 
         it("should show again what was shown when a search is cancelled", function()
