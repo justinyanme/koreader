@@ -3,7 +3,7 @@ The old contents drawer, now only its bookmarks and notes (the contents moved to
 contents page, apps/reader/modules/readertocpage), kept as the way to them until the notes page
 replaces it.
 
-Opened by the contents page's 书签 (ReaderToolbar:showDrawer): a left panel with the book's
+Opened by the contents page's 书签 (ReaderToolbar:showBookmarks): a left panel with the book's
 cover, title, author and progress over two tabs, bookmarks and notes. Lists are paginated, never
 scrolled, and a group header never ends a page. Each tab is measured and paginated once per
 drawer (without rendering), and only the rows of the shown page are built.

@@ -49,13 +49,13 @@ local _ = require("gettext")
 local function dp(v) return Screen:scaleBySize(v) end
 
 local GUTTER = dp(24)
-local CHEVRON_W = dp(22) -- the column of group chevrons, before the top-level titles
+local CHEVRON_W = dp(22) -- the column of group chevrons, before the top-level titles, when there are groups
 local INDENT = dp(15) -- per level below the top one
 local ROW_H = dp(53)
 local FIELD_H = dp(40)
 local FIELD_TARGET_H = dp(50) -- the search field takes taps 5dp around it
 local NUMBER_GAP = dp(16) -- between a title and its page number
-local CURRENT_PAD = dp(8) -- each side of the current chapter's page number, in its ink pill
+local CURRENT_PAD = dp(8) -- each side of the current chapter's page number, inside its ink pill
 local COLLAPSED_SETTING = "contents_page_collapsed" -- entry index => title of each collapsed group
 
 local function text(str, face, color, max_width, bold)
@@ -108,6 +108,7 @@ function TocPage:init()
             self.group_end[group] = i
         end
     end
+    self.lead_w = next(self.group_end) and CHEVRON_W or 0 -- flat contents start at the gutter
     -- what the reader collapsed, as saved; the current chapter's group shows open whatever it says
     self.collapsed = {}
     for i, title in pairs(self.ui.doc_settings:readSetting(COLLAPSED_SETTING) or {}) do
@@ -140,9 +141,11 @@ function TocPage:measure(i)
     local entry = self.entries[i]
     local ui = self.ui
     local page = ui.bookmark:getBookmarkPageString(ui.rolling and entry.xpointer or entry.page)
-    local indent = CHEVRON_W + math.min(INDENT * ((entry.depth or 1) - self.top_depth), math.floor(self.content_w / 3))
+    local indent = self.lead_w + math.min(INDENT * ((entry.depth or 1) - self.top_depth), math.floor(self.content_w / 3))
     local title = ui.toc:cleanUpTocTitle(entry.title, true)
-    local title_w = self.content_w - indent - NUMBER_GAP - textWidth(page, "ui_label_large")
+    -- the current chapter's page number takes its pill's padding from the title, so it ends where the others do
+    local number_w = textWidth(page, "ui_label_large") + (i == self.current and 2 * CURRENT_PAD or 0)
+    local title_w = self.content_w - indent - NUMBER_GAP - number_w
     local lines = math.max(1, math.min(2, math.ceil(textWidth(title, "ui_body", true) / title_w)))
     m = {
         index = i, page = page, title = title, indent = indent, title_w = title_w, lines = lines,
@@ -261,19 +264,23 @@ function TocPage:buildRow(m)
     end
     local is_current = m.index == self.current
     local number = text(m.page, "ui_label_large", is_current and Palette.paper or Palette.ink)
-    local number_w = self.content_w - m.indent - m.title_w - NUMBER_GAP
-    local gap = NUMBER_GAP
     if is_current then
-        -- the pill reaches CURRENT_PAD into the gap and the gutter: its digits line up with the others'
         local h = number:getSize().h + dp(4)
         number = FrameContainer:new{
             bordersize = 0, background = Palette.ink, radius = math.floor(h / 2),
             padding = 0, padding_left = CURRENT_PAD, padding_right = CURRENT_PAD,
             CenterContainer:new{ dimen = Geom:new{ w = number:getSize().w, h = h }, number },
         }
-        number_w = number_w + 2 * CURRENT_PAD
-        gap = gap - CURRENT_PAD
     end
+    local number_box = RightContainer:new{
+        dimen = Geom:new{ w = self.content_w - m.indent - m.title_w - NUMBER_GAP, h = inner_h },
+        number,
+    }
+    local title = TextBoxWidget:new{
+        text = m.title, face = Font:getFace("ui_body"), width = m.title_w, bold = true,
+        height = m.lines * self.line_h, height_overflow_show_ellipsis = true,
+        fgcolor = Palette.ink, bgcolor = Palette.paper,
+    }
     local row = Tappable:new{
         callback = function() self:jump(self.entries[m.index]) end,
         VerticalGroup:new{
@@ -283,19 +290,16 @@ function TocPage:buildRow(m)
                 HorizontalGroup:new{
                     align = "center",
                     lead,
-                    TextBoxWidget:new{
-                        text = m.title, face = Font:getFace("ui_body"), width = m.title_w, bold = true,
-                        height = m.lines * self.line_h, height_overflow_show_ellipsis = true,
-                        fgcolor = Palette.ink, bgcolor = Palette.paper,
-                    },
-                    HorizontalSpan:new{ width = gap },
-                    RightContainer:new{ dimen = Geom:new{ w = number_w, h = inner_h }, number },
+                    title,
+                    HorizontalSpan:new{ width = NUMBER_GAP },
+                    number_box,
                 },
             },
             HorizontalGroup:new{ HorizontalSpan:new{ width = GUTTER }, rule(self.content_w) },
         },
     }
     row.toc_index, row.is_current, row.is_group, row.chevron = m.index, is_current, group, group and lead or nil
+    row.title, row.number = title, number_box
     return row
 end
 

@@ -109,6 +109,11 @@ describe("ReaderTocPage module", function()
         UIManager:forceRePaint()
     end
 
+    -- Where a row's page number (or the current chapter's pill) ends, once painted.
+    local function numberRight(row)
+        return row.number.dimen.x + row.number[1]:getSize().w
+    end
+
     local function openPage(ui)
         ui:handleEvent(Event:new("ShowToc"))
         UIManager:forceRePaint()
@@ -233,10 +238,17 @@ describe("ReaderTocPage module", function()
             assert.is_truthy(row)
             assert.are.equal(current, row.toc_index)
             assert.is_true(hasText(inkNumber(row), ui.bookmark:getBookmarkPageString(ui.toc.toc[current].xpointer)))
+            -- every page number, the pill included, ends at the gutter, where the dividers end
+            local right = Screen:getWidth() - Screen:scaleBySize(24)
             for _, r in ipairs(page.shown_rows) do
                 if r ~= row then assert.is_nil(inkNumber(r)) end
                 assert.is_truthy(find(r, function(w) return w.bold == true and w.text end))
+                assert.are.equal(right, numberRight(r))
             end
+            local pill = inkNumber(row)
+            assert.are.equal(right, pill.dimen.x + pill.dimen.w)
+            -- and keeps the 16dp gap from the title that other page numbers have
+            assert.is_true(pill.dimen.x - (row.title.dimen.x + row.title.dimen.w) >= Screen:scaleBySize(16))
             -- start pages at the right; a group's chevron, open
             local act1 = shownRow(page, function(r) return r.toc_index == 3 end)
             assert.is_true(act1.is_group)
@@ -282,6 +294,23 @@ describe("ReaderTocPage module", function()
             tapChevron(rowOf(page, 3))
             assert.is_truthy(shownRow(page, function(r) return r.toc_index == 4 end))
             assert.is_nil(ui.doc_settings:readSetting("contents_page_collapsed"))
+            back(page)
+        end)
+
+        it("should open on the page of the current chapter, past the first one, whatever is collapsed", function()
+            readAt(ui, #ui.toc.toc)
+            local current = ui.toc:getTocIndexByPage(ui.document:getXPointer())
+            local page = openPage(ui)
+            assert.is_true(page.page > 1)
+            assert.are.equal(current, shownRow(page, function(r) return r.is_current end).toc_index)
+            tapChevron(rowOf(page, 3))
+            back(page)
+            assert.are.same({ [3] = "Act I" }, ui.doc_settings:readSetting("contents_page_collapsed"))
+
+            -- Act I collapsed: still on the current chapter's page
+            page = openPage(ui)
+            assert.is_true(page.page > 1)
+            assert.are.equal(current, shownRow(page, function(r) return r.is_current end).toc_index)
             back(page)
         end)
 
@@ -398,6 +427,34 @@ describe("ReaderTocPage module", function()
             assert.is_nil(ui.menu.drawer)
         end)
 
+        it("should keep the chevron column only for contents with groups", function()
+            local gutter, chevron_w = Screen:scaleBySize(24), Screen:scaleBySize(22)
+            local page = openPage(ui)
+            local title = rowOf(page, 1) -- "Title", top level but not a group
+            assert.is_false(title.is_group)
+            assert.are.equal(gutter + chevron_w, title.title.dimen.x)
+            back(page)
+
+            -- the acts alone, without their scenes: flat, titles at the gutter
+            local orig_toc = ui.toc.toc
+            local flat = {}
+            for _, e in ipairs(orig_toc) do
+                if e.depth == 1 then table.insert(flat, e) end
+            end
+            ui.toc.toc = flat
+            local ok, err = pcall(function()
+                page = openPage(ui)
+                assert.are.equal(#flat, #page.shown_rows)
+                for _, row in ipairs(page.shown_rows) do
+                    assert.is_false(row.is_group)
+                    assert.are.equal(gutter, row.title.dimen.x)
+                end
+                back(page)
+            end)
+            ui.toc.toc = orig_toc
+            assert(ok, err)
+        end)
+
         it("should build only the shown rows of a very long, very deep table of contents, and measure it once", function()
             local TextBoxWidget = require("ui/widget/textboxwidget")
             local orig_toc = ui.toc.toc
@@ -426,6 +483,20 @@ describe("ReaderTocPage module", function()
                 if page.bar.capsule.next_enabled then nextPage(page) else tapRect(page.bar.capsule.prev_rect) end
                 assert.spy(measure).was_not_called()
                 assert.are.equal(#page.shown_rows, boxes)
+                -- an open group is never the last row of a page: it goes on with its entries
+                toFirstPage(page)
+                local checked = 0
+                while true do
+                    local rows = page.shown_rows
+                    if #rows > 1 then
+                        local last = rows[#rows]
+                        assert.is_false(last.is_group and isOpen(last), "page " .. page.page)
+                        checked = checked + 1
+                    end
+                    if not page.bar.capsule.next_enabled then break end
+                    nextPage(page)
+                end
+                assert.are.equal(page.page_count, checked)
                 back(page)
             end)
             TextBoxWidget.init = orig_init
