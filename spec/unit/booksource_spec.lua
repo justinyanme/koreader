@@ -804,8 +804,7 @@ describe("书源 (OPDS as a remote shelf)", function()
 
         it("keeps the page answering taps while a download runs on a tile not shown", function()
             local view = openSources(openFM())
-            view:turnPage(2) -- Book 9 may be on page 2 on small screens
-            if not view:cellOf({ key = "urn:uuid:book-9" }) then view:turnPage(1) end
+            view:turnPage(math.ceil(9 / view:top().per_page)) -- the page with Book 9, the slow one
             tap(view, "Book 9")
             tap(view, "eink/grid")
             tap(topWidget(), "Authors")
@@ -831,8 +830,7 @@ describe("书源 (OPDS as a remote shelf)", function()
 
         it("cancels a download on a second tap and removes the partial file", function()
             local view = openSources(openFM())
-            view:turnPage(2) -- Book 9 may be on page 2 on small screens
-            if not view:cellOf({ key = "urn:uuid:book-9" }) then view:turnPage(1) end
+            view:turnPage(math.ceil(9 / view:top().per_page)) -- the page with Book 9, the slow one
             local refreshes, restore = spyRefreshes()
             tap(view, "Book 9")
             local dl = view.downloads["urn:uuid:book-9"]
