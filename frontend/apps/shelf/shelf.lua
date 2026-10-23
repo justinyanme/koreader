@@ -20,8 +20,8 @@ local time = require("ui/time")
 local util = require("util")
 
 local Shelf = {
-    -- chip order; "abandoned" books only show up under "all"
-    filters = { "all", "reading", "new", "complete" },
+    -- the title menu's order: 全部, 在读, 未读, 读完, 搁置
+    filters = { "all", "reading", "new", "complete", "abandoned" },
 }
 
 -- image viewers are document providers too, but photos and screenshots are not books
@@ -174,7 +174,7 @@ end
 -- both narrowed to titles and authors containing `query`.
 function Shelf.view(books, filter, sort, query)
     query = query and query ~= "" and util.stringLower(query) or nil
-    local counts = { all = 0, reading = 0, new = 0, complete = 0 }
+    local counts = { all = 0, reading = 0, new = 0, complete = 0, abandoned = 0 }
     local shown = {}
     for _, book in ipairs(books) do
         if matches(book, query) then

@@ -1,19 +1,23 @@
 --[[--
-The redesigned home: FileManager with a bottom tab bar (书架 / 文件 / 我的).
+The redesigned home: FileManager with the bottom band of WeChat Read's shelf: the
+tab icons 书源 / 书架 / 我 at the left and the page capsule at the right, which
+turns the shelf's pages (it is gray on the other tabs, which page themselves).
 
 Requiring this module registers it in apps/replacements. It keeps the
 original FileManager layout as the 文件 tab, so modules and plugins that rely
 on file_chooser keep working, and the original menu stays reachable. Anything
 that moves file_chooser to a folder (Show folder, search results, shortcuts,
 plugins) brings the 文件 tab forward, and input meant for the file browser
-(swipe, Back, Home) only reaches it while it is showing.
+(swipe, Back, Home, page keys) only reaches it while it is showing.
 
 Each tab's `open(fm)` returns the widget for the content area, or nil when the
-tab opens something on top instead. #10 and #11 replace the files and me tabs.
+tab opens something on top instead (书源, a full-screen page over the shelf).
+文件 keeps its tab, after 我, until 导入 and 我 lead to it.
 ]]
 
 local BD = require("ui/bidi")
 local Device = require("device")
+local EinkControls = require("ui/widget/einkcontrols")
 local Event = require("ui/event")
 local FileChooser = require("ui/widget/filechooser")
 local FileManager = require("apps/filemanager/filemanager")
@@ -24,11 +28,11 @@ local Palette = require("ui/palette")
 local Replacements = require("apps/replacements")
 local ShelfView = require("apps/shelf/shelfview")
 local ShelfWidgets = require("apps/shelf/shelfwidgets")
+local Size = require("ui/size")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local lfs = require("libs/libkoreader-lfs")
-local _ = require("gettext")
 
 local ShelfFileManager = FileManager:extend{
     current_tab = "shelf",
@@ -36,16 +40,20 @@ local ShelfFileManager = FileManager:extend{
 }
 
 ShelfFileManager.tabs = {
-    { id = "shelf", icon = "shelf", text = _("Shelf"), open = function(fm)
+    -- only with the OPDS plugin, which holds the sources
+    { id = "sources", icon = "compass", available = function(fm) return fm.opds ~= nil end, open = function(fm)
+        fm.opds:onShowOPDSCatalog()
+    end },
+    { id = "shelf", icon = "shelf", open = function(fm)
         fm.shelf_view:reload()
         fm.shelf_view:update()
         return fm.shelf_view
     end },
-    { id = "files", icon = "folder", text = _("Files"), open = function(fm) return fm.files_ui end },
-    { id = "me", icon = "user", text = _("Me"), open = function(fm)
+    { id = "me", icon = "user", open = function(fm)
         fm.me_view:reset()
         return fm.me_view
     end },
+    { id = "files", icon = "folder", open = function(fm) return fm.files_ui end },
 }
 
 function ShelfFileManager:init()
@@ -61,7 +69,7 @@ function ShelfFileManager:init()
 end
 
 function ShelfFileManager:setupLayout()
-    local tabbar_h = ShelfWidgets.TabBar.height
+    local tabbar_h = EinkControls.BottomBar.height
     self.content_dimen = Geom:new{ x = 0, y = 0, w = self.dimen.w, h = self.dimen.h - tabbar_h }
     self.tabbar_dimen = Geom:new{ x = 0, y = self.content_dimen.h, w = self.dimen.w, h = tabbar_h }
     self.file_chooser_height = self.content_dimen.h
@@ -83,7 +91,7 @@ function ShelfFileManager:setupLayout()
         dimen = self.content_dimen:copy(),
         current[self.current_tab] or self.shelf_view,
     }
-    self.layout_group = VerticalGroup:new{ self.content, self:buildTabBar() }
+    self.layout_group = VerticalGroup:new{ self.content, self:buildBottomBar() }
     self[1] = FrameContainer:new{
         padding = 0,
         bordersize = 0,
@@ -92,16 +100,54 @@ function ShelfFileManager:setupLayout()
     }
     if Device:hasKeys() then
         self.key_events.Back = { { Device.input.group.Back } }
+        self.key_events.ShelfNextPage = { { Device.input.group.PgFwd } }
+        self.key_events.ShelfPrevPage = { { Device.input.group.PgBack } }
     end
 end
 
-function ShelfFileManager:buildTabBar()
-    return ShelfWidgets.TabBar:new{
-        width = self.dimen.w,
-        tabs = self.tabs,
-        current = self.current_tab,
-        on_change = function(id) self:switchTab(id) end,
+-- What the bottom band shows: the current tab, and the shelf's page (one page, gray, on other tabs).
+function ShelfFileManager:bottomBarState()
+    local view = self.current_tab == "shelf" and self.shelf_view
+    local page, pages = view and view.page or 1, view and view.pages or 1
+    return table.concat({ self.current_tab, page, pages }, "/"), page, pages
+end
+
+--- The bottom band: the tab icons, and the capsule turning the shelf's pages. Its paper ground covers the
+-- cut-off row of covers above it.
+function ShelfFileManager:buildBottomBar()
+    local state, page, pages = self:bottomBarState()
+    self.bottom_bar_state = state
+    local tabs = {}
+    for _, tab in ipairs(self.tabs) do
+        if not tab.available or tab.available(self) then
+            table.insert(tabs, tab)
+        end
+    end
+    return FrameContainer:new{
+        padding = 0,
+        bordersize = 0,
+        background = Palette.paper,
+        EinkControls.BottomBar:new{
+            width = self.dimen.w,
+            page = page,
+            pages = pages,
+            on_change = function(p) self.shelf_view:setPage(p) end, -- only enabled on 书架
+            left = ShelfWidgets.TabBar:new{
+                tabs = tabs,
+                current = self.current_tab,
+                height = EinkControls.BottomBar.height - Size.border.default,
+                on_change = function(id) self:switchTab(id) end,
+            },
+        },
     }
+end
+
+--- Rebuilds the bottom band if the current tab or the shelf's page changed, and says so; the caller repaints it.
+function ShelfFileManager:updateBottomBar()
+    if self:bottomBarState() == self.bottom_bar_state then return false end
+    self.layout_group[2]:free()
+    self.layout_group[2] = self:buildBottomBar()
+    return true
 end
 
 function ShelfFileManager:switchTab(id)
@@ -112,8 +158,7 @@ function ShelfFileManager:switchTab(id)
             if not widget then return end
             self.current_tab = id
             self.content[1] = widget
-            self.layout_group[2]:free()
-            self.layout_group[2] = self:buildTabBar()
+            self:updateBottomBar()
             UIManager:setDirty(self, "ui", self.content_dimen)
             UIManager:setDirty(self, "ui", self.tabbar_dimen)
             return
@@ -142,13 +187,35 @@ function ShelfFileManager:onSwipeFM(ges)
     elseif self.current_tab == "me" then
         return self.me_view:swipe(ges)
     end
+    -- as on full-screen pages: west or north to the next page, east or south to the previous one;
+    -- diagonal swipes go on (a long one takes a screenshot)
     local direction = BD.flipDirectionIfMirroredUILayout(ges.direction)
-    if direction == "west" then
+    if direction == "west" or direction == "north" then
         self.shelf_view:turnPage(1)
-    elseif direction == "east" then
+    elseif direction == "east" or direction == "south" then
         self.shelf_view:turnPage(-1)
+    else
+        return false
     end
     return true
+end
+
+-- Page keys turn the shelf's pages; on 文件 the file browser takes them first, as before.
+function ShelfFileManager:onShelfNextPage()
+    if self.current_tab ~= "shelf" then return false end
+    self.shelf_view:turnPage(1)
+    return true
+end
+
+function ShelfFileManager:onShelfPrevPage()
+    if self.current_tab ~= "shelf" then return false end
+    self.shelf_view:turnPage(-1)
+    return true
+end
+
+--- 设置 → 书架 changed the order (ShelfView.sortMenuItem); the settings page is still on top.
+function ShelfFileManager:onShelfSortChanged(sort)
+    self.shelf_view:setSort(sort)
 end
 
 -- Only reached on 书架 (file_chooser handles Back itself while 文件 shows it).

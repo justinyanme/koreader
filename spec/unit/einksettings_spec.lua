@@ -201,6 +201,7 @@ describe("Reorganized settings", function()
         { "screen", "Screen", { "Refresh and ghosting", "Sleep screen", "Night mode" } },
         { "network", "Network & sync", { "Wi-Fi", "Progress sync", "Wireless transfer and library" } },
         { "device", "Device", { "Physical buttons", "Gestures", "Power and sleep" } },
+        { "shelf", "Shelf", { "Sort by" } },
         { "advanced", "Advanced", { "Plugins", "All settings (original)" } },
     }
 
@@ -213,7 +214,7 @@ describe("Reorganized settings", function()
             fm:onClose()
         end)
 
-        it("shows exactly five groups with the issue's rows", function()
+        it("shows exactly six groups with the issues' rows", function()
             local page = openSettings(fm)
             local groups = {}
             for __, entry in ipairs(page.home) do
@@ -230,7 +231,8 @@ describe("Reorganized settings", function()
                     local ctx = ({ ["Full refresh rate"] = "Settings", ["Status bar"] = "Settings", ["Sleep screen"] = "Settings", ["Progress sync"] = "Settings" })[name]
                     table.insert(rows, ctx and C_(ctx, name) or _(name))
                 end
-                translated[i] = { g[1], C_("Settings group", g[2]), rows }
+                -- 书架 reuses the shelf tab's own name
+                translated[i] = { g[1], g[1] == "shelf" and _("Shelf") or C_("Settings group", g[2]), rows }
             end
             assert.are.same(translated, groups)
             assert.are.equal(_("Settings"), page.title)
