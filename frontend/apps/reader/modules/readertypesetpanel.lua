@@ -546,6 +546,13 @@ function ReaderTypesetPanel:fontCards(width)
     local available = cre.getFontFaces()
     local system_face = FontList:getSystemFontFace()
     local current = self.ui.font.font_face
+    local function fontDetails(face)
+        local file, index = cre.getFontFaceFilenameAndFaceIndex(face)
+        if not file then file, index = cre.getFontFaceFilenameAndFaceIndex(face, nil, true) end
+        local name = face == system_face and _("System font")
+            or (file and FontList:getLocalizedFontName(file, index)) or face
+        return name, file, index
+    end
     local faces, seen = {}, {}
     local function add(face)
         if not seen[face] and util.arrayContains(available, face) then
@@ -578,10 +585,7 @@ function ReaderTypesetPanel:fontCards(width)
             })
         else
             local face = faces[i]
-            local file, index = cre.getFontFaceFilenameAndFaceIndex(face)
-            if not file then file, index = cre.getFontFaceFilenameAndFaceIndex(face, nil, true) end
-            local name = face == system_face and _("System font")
-                or (file and FontList:getLocalizedFontName(file, index)) or face
+            local name, file, index = fontDetails(face)
             table.insert(row, FontCard:new{
                 width = card_w, name = name,
                 face = file and Font:getFace(file, 14 * Font.ui_scale, index),
@@ -594,9 +598,7 @@ function ReaderTypesetPanel:fontCards(width)
             })
         end
     end
-    local file, index = cre.getFontFaceFilenameAndFaceIndex(current)
-    local current_name = current == system_face and _("System font")
-        or (file and FontList:getLocalizedFontName(file, index)) or current
+    local current_name = fontDetails(current)
     return VerticalGroup:new{
         align = "left",
         TextWidget:new{
