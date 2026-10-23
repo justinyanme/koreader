@@ -272,6 +272,19 @@ end
 function ShelfView:update(region)
     local start = time.now()
     self.shown, self.counts = Shelf.view(self.books, self.filter, self.sort, self.query)
+    -- a selected book that is no longer shown (gone in a rescan) is no longer selected: the count is what can be seen,
+    -- and the book comes back unselected
+    if self.selected then
+        local shown = {}
+        for _, book in ipairs(self.shown) do
+            shown[book.file] = true
+        end
+        for file in pairs(self.selected) do
+            if not shown[file] then
+                self.selected[file] = nil
+            end
+        end
+    end
     local per_page = self.grid.cols * self.grid.rows
     self.pages = math.max(1, math.ceil(#self.shown / per_page))
     self.page = math.min(self.page, self.pages)
@@ -780,18 +793,31 @@ function ShelfView:removeBooks(books)
     UIManager:show(Toast:new{ text = text, close_refresh_type = "ui" }) -- it is over covers
 end
 
---- Sets the status of `books`, which is saved with each book, and ends selection mode if on.
+--- Sets the status of `books`, which is saved with each book, and ends selection mode if on. A book whose status
+-- could not be saved keeps the one it had, and the toast says how many were.
 function ShelfView:markBooks(books, status)
+    local saved = 0
     for _, book in ipairs(books) do
-        Shelf.setStatus(book.file, status)
-        book.status = status
+        -- one book failing (even with an error) leaves the others to go on
+        local ok, done = pcall(Shelf.setStatus, book.file, status)
+        if ok and done then
+            book.status = status
+            saved = saved + 1
+        elseif not ok then
+            logger.warn("Shelf: setting the status of", book.file, "failed:", done)
+        end
     end
     self.selected = nil
     self:update("title")
-    UIManager:show(Toast:new{
-        text = T(N_("Marked 1 book as %2", "Marked %1 books as %2", #books), #books, mark_texts[status]),
-        close_refresh_type = "ui",
-    })
+    local text
+    if saved == #books then
+        text = T(N_("Marked 1 book as %2", "Marked %1 books as %2", saved), saved, mark_texts[status])
+    elseif saved == 0 then
+        text = T(N_("Could not save the status of 1 book.", "Could not save the status of %1 books.", #books), #books)
+    else
+        text = T(_("Marked %1 of %2 books as %3. The rest could not be saved."), saved, #books, mark_texts[status])
+    end
+    UIManager:show(Toast:new{ text = text, close_refresh_type = "ui" })
 end
 
 --- The book sheet that 文件 shows on a long press (FilesChooser); its rows are also what tests drive.

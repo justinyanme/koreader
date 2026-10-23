@@ -121,6 +121,8 @@ function ShelfFileManager:bottomBarState()
     elseif self.current_tab == "files" then
         page, pages = self.file_chooser.page, self.file_chooser.page_num or 1
     end
+    -- ActionBar takes `enabled` when it is built: keeping it in the key is what rebuilds the band (updateBottomBar)
+    -- once the first book is selected or the last one left out
     local left = actions and (actions.enabled and "actions" or "actions-off") or "tabs"
     return table.concat({ self.current_tab, page, pages, left }, "/"), page, pages, actions
 end

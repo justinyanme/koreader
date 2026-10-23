@@ -222,14 +222,22 @@ function Shelf.remove(files)
     G_reader_settings:flush()
 end
 
---- Sets a book's status (书籍状态: "reading", "complete" or "abandoned"), as KOReader's own status buttons do.
--- A book never opened gets its settings file for it.
+--- Sets a book's status (书籍状态: "reading", "complete" or "abandoned"), as KOReader's own status buttons do, and
+-- returns whether it was saved. A book never opened gets its settings file for it, which a folder may refuse
+-- (read-only, with KOReader's own docsettings folder unwritable too); the status is read back as the next start
+-- reads it, and the cached status only changes once it is there.
 function Shelf.setStatus(file, status)
     local doc_settings = DocSettings:open(file)
     local summary = doc_settings:readSetting("summary") or {}
     summary.status = status
     filemanagerutil.saveSummary(doc_settings, summary)
+    local saved = DocSettings:open(file):readSetting("summary")
+    if not (saved and saved.status == status) then
+        logger.warn("Shelf: could not save the status of", file)
+        return false
+    end
     BookList.setBookInfoCacheProperty(file, "status", status)
+    return true
 end
 
 return Shelf

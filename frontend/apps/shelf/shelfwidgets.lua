@@ -365,7 +365,8 @@ function TabBar:init()
 end
 
 --- Actions in the tab icons' place, laid out as TabBar: selection mode's 移出书架 and 标记为. While not `enabled`
--- (nothing selected), they are gray as in the reference and take no taps.
+-- (nothing selected), they are gray as in the reference and take no taps. `enabled` is read when built: a change
+-- needs a new ActionBar (ShelfFileManager keeps it in the band's state for that).
 local ActionBar = HorizontalGroup:extend{
     items = nil, -- { { icon, callback } }
     enabled = true,

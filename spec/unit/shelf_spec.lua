@@ -626,6 +626,35 @@ describe("Shelf home (FileManager replacement)", function()
             return T(NC_("Shelf", "1 book selected", "%1 books selected", n), n)
         end
 
+        -- Every refresh is "ui", each requested one lies inside one of `allowed`, and each rect of `covered` is
+        -- inside a requested one.
+        local function assertUiRefreshes(refreshes, allowed, covered)
+            assert.is_true(#refreshes > 0)
+            for __, r in ipairs(refreshes) do
+                assert.are.equal("ui", r.type)
+                if r.requested then
+                    local inside = false
+                    for __, rect in ipairs(allowed) do
+                        if rect:contains(r.region) then inside = true end
+                    end
+                    assert.is_true(inside, tostring(r.region))
+                end
+            end
+            for __, rect in ipairs(covered) do
+                local repainted = false
+                for __, r in ipairs(refreshes) do
+                    if r.requested and r.region:contains(rect) then repainted = true end
+                end
+                assert.is_true(repainted, tostring(rect))
+            end
+        end
+
+        -- From the title row down to the band.
+        local function belowHeader(view)
+            local row = view:titleRect()
+            return Geom:new{ x = 0, y = row.y, w = view.width, h = view.height - (row.y - view.dimen.y) }
+        end
+
         before_each(function()
             G_reader_settings:delSetting("shelf_filter")
             G_reader_settings:delSetting("shelf_sort")
@@ -694,12 +723,9 @@ describe("Shelf home (FileManager replacement)", function()
             tap(remove.dimen)
             tap(mark.dimen)
             assert.are.equal(fm, topWidget())
-            -- from the title row down and the band, as "ui"
-            assert.is_true(#refreshes > 0)
-            for __, r in ipairs(refreshes) do
-                assert.are.equal("ui", r.type or "ui")
-                if r.requested then assert.is_true(r.region.y >= row.y) end
-            end
+            -- from the title row down and the band, as "ui": the title row, the covers' rings and the band
+            assertUiRefreshes(refreshes, { belowHeader(view), fm.tabbar_dimen },
+                { row, coverRect(view, 1), fm.tabbar_dimen })
             -- a tap on a cover selects it and never opens the book
             assert.is_false(framed(view, 2))
             refreshes, restore = spyRefreshes()
@@ -710,15 +736,10 @@ describe("Shelf home (FileManager replacement)", function()
             assert.is_true(framed(view, 2))
             assert.is_false(framed(view, 1))
             assert.is_truthy(find(view, selectedTitle(1)))
-            -- only the cover, its frame, the title row and the band were repainted
+            -- only the cover with its frame, the title row and the band (its actions now enabled) were repainted
             local cover = coverRect(view, 2)
             local around = Geom:new{ x = cover.x - dp(5), y = cover.y - dp(5), w = cover.w + dp(10), h = cover.h + dp(10) }
-            for __, r in ipairs(refreshes) do
-                assert.are.equal("ui", r.type or "ui")
-                if r.requested then
-                    assert.is_true(around:contains(r.region) or row:contains(r.region) or fm.tabbar_dimen:contains(r.region))
-                end
-            end
+            assertUiRefreshes(refreshes, { around, row, fm.tabbar_dimen }, { cover, row, fm.tabbar_dimen })
             tap(coverRect(view, 3))
             assert.is_truthy(find(view, selectedTitle(2)))
             -- a second tap leaves it out again
@@ -750,10 +771,8 @@ describe("Shelf home (FileManager replacement)", function()
             assert.is_truthy(find(view, selectedTitle(1)))
             assert.is_true(framed(view, 4))
             assert.is_truthy(find(fm, "eink/shelf.remove"))
-            for __, r in ipairs(refreshes) do
-                assert.are.equal("ui", r.type or "ui")
-                if r.requested then assert.is_true(r.region.y >= view:titleRect().y) end
-            end
+            assertUiRefreshes(refreshes, { belowHeader(view), fm.tabbar_dimen },
+                { view:titleRect(), coverRect(view, 4), fm.tabbar_dimen })
             -- another long press selects that one too, and one on a selected cover leaves it out
             gesture("hold", coverRect(view, 5).x + dp(10), coverRect(view, 5).y + dp(10))
             assert.is_truthy(find(view, selectedTitle(2)))
@@ -795,10 +814,8 @@ describe("Shelf home (FileManager replacement)", function()
             assert.is_nil(find(view, _("Select all")))
             assert.is_truthy(find(view, _("Deselect all")))
             for i = 1, per_page do assert.is_true(framed(view, i)) end
-            for __, r in ipairs(refreshes) do
-                assert.are.equal("ui", r.type or "ui")
-                if r.requested then assert.is_true(r.region.y >= view:titleRect().y) end
-            end
+            assertUiRefreshes(refreshes, { belowHeader(view), fm.tabbar_dimen },
+                { view:titleRect(), coverRect(view, 1), coverRect(view, per_page) })
             for __ = 2, view.pages do tap(capsule(fm).next_rect) end
             assert.is_true(framed(view, count))
             -- leaving one out brings 全选 back
@@ -814,6 +831,184 @@ describe("Shelf home (FileManager replacement)", function()
             tap(remove.dimen)
             assert.are.equal(fm, topWidget())
             fm:onClose()
+        end)
+
+        it("keeps selection mode and the selection when the home is rebuilt (rotation) or refreshed", function()
+            local fm, view = openShelf(home)
+            tap(find(view, _("Select")).dimen)
+            tap(coverRect(view, 2))
+            tap(coverRect(view, 3))
+            local function stillSelecting()
+                view = fm.shelf_view
+                assert.is_truthy(find(view, selectedTitle(2)))
+                assert.is_true(framed(view, 2) and framed(view, 3))
+                assert.is_false(framed(view, 1))
+                assert.is_nil(find(fm, "eink/shelf.bold"))
+                assert.is_truthy(find(fm, "eink/shelf.remove"))
+            end
+            -- rotation lays the home out again, with a new shelf view
+            local before = view
+            fm:reinit()
+            UIManager:forceRePaint()
+            assert.are_not.equal(before, fm.shelf_view)
+            stillSelecting()
+            -- a refresh (books changed on the device) walks the home folder again
+            fm:onRefresh()
+            UIManager:forceRePaint()
+            stillSelecting()
+            -- and the actions still take the selection
+            tap(find(fm, "eink/mark").dimen)
+            assert.are.equal(T(N_("Mark 1 book as", "Mark %1 books as", 2), 2), topWidget().text)
+            tap(find(topWidget(), _("Cancel")).dimen)
+            fm:onClose()
+        end)
+
+        it("follows a rescan: a selected book that leaves is no longer counted, nor selected when it comes back", function()
+            local away = home .. "_away_s03.txt"
+            local new_book = home .. "/s00.txt"
+            local ok, err = pcall(function()
+                local fm, view = openShelf(home)
+                tap(find(view, _("Select")).dimen)
+                tap(coverRect(view, 2))
+                tap(coverRect(view, 3))
+                assert.is_truthy(find(view, selectedTitle(2)))
+                -- s03 is moved off the home folder (over USB, say): gone, and out of the count
+                os.rename(bookPath(3), away)
+                fm:onRefresh()
+                UIManager:forceRePaint()
+                assert.is_nil(find(view, title(3)))
+                assert.is_truthy(find(view, selectedTitle(1)))
+                assert.is_true(framed(view, 2))
+                -- a book that comes in is not selected
+                local f = io.open(new_book, "w")
+                f:write("Sample text.\n")
+                f:close()
+                lfs.touch(new_book, 3000, 3000)
+                fm:onRefresh()
+                UIManager:forceRePaint()
+                assert.is_truthy(find(view, title(0)))
+                assert.is_false(framed(view, 0))
+                assert.is_truthy(find(view, selectedTitle(1)))
+                -- s03 back: on the shelf again, not selected
+                os.rename(away, bookPath(3))
+                fm:onRefresh()
+                UIManager:forceRePaint()
+                assert.is_truthy(find(view, title(3)))
+                assert.is_false(framed(view, 3))
+                assert.is_truthy(find(view, selectedTitle(1)))
+                -- 全选 counts what is shown
+                tap(find(view, _("Select all")).dimen)
+                assert.is_truthy(find(view, selectedTitle(count + 1)))
+                fm:onClose()
+            end)
+            if lfs.attributes(away, "mode") then os.rename(away, bookPath(3)) end
+            os.remove(new_book)
+            assert(ok, err)
+        end)
+
+        it("takes no taps on the search field or its clear button while selecting", function()
+            local fm, view = openShelf(home)
+            local function inputDialog()
+                for __, window in ipairs(UIManager._window_stack) do
+                    if window.widget.getInputText then return window.widget end
+                end
+            end
+            -- a search narrows the shelf in place
+            tap(find(view, _("Search books")).dimen)
+            local dialog = inputDialog()
+            assert.is_truthy(dialog)
+            dialog:setInputText("s0")
+            tap(find(dialog, _("Search")).dimen)
+            assert.is_nil(inputDialog())
+            assert.are.equal(9, #view.shown)
+            tap(find(view, _("Select")).dimen)
+            -- the field and its clear button do nothing while selecting
+            local refreshes, restore = spyRefreshes()
+            tap(find(view, "s0").dimen)
+            local clear = find(view, "close")
+            tap(clear.dimen)
+            restore()
+            assert.is_nil(inputDialog())
+            assert.are.equal(fm, topWidget())
+            assert.are.equal(9, #view.shown)
+            assert.is_truthy(find(view, _("Select books")))
+            assert.are.same({}, refreshes)
+            -- out of selection mode, they work again
+            tap(find(view, _("Cancel")).dimen)
+            tap(clear.dimen)
+            assert.are.equal(count, #view.shown)
+            fm:onClose()
+        end)
+
+        it("says which statuses could not be saved, and leaves those books as they were", function()
+            -- a folder that takes no settings file: read-only, with KOReader's own docsettings folder blocked too
+            -- (by a file where the book's folder there would go), so DocSettings has nowhere to fall back to
+            local folder = home .. "/zz_ro"
+            local book = folder .. "/ro.txt"
+            local fallback = DocSettings:getSidecarDir(book, "dir")
+            local util_ = require("util")
+            local ok, err = pcall(function()
+                lfs.mkdir(folder)
+                local f = io.open(book, "w")
+                f:write("Sample text.\n")
+                f:close()
+                lfs.touch(book, 3000, 3000) -- first on the shelf
+                f = io.open(folder .. "/ro.sdr", "w") -- in case the tests run as root, where the mode is ignored
+                f:close()
+                os.execute("chmod 555 '" .. folder .. "'")
+                util_.makePath((fallback:match("^(.*)/")))
+                f = io.open(fallback, "w")
+                f:close()
+                local fm, view = openShelf(home)
+                local finished = C_("Status of single book", "Finished")
+                local function holdReadOnly()
+                    local cell = find(view, "ro")
+                    gesture("hold", cell.dimen.x + dp(10), cell.dimen.y + dp(10))
+                end
+                assert.is_truthy(find(view, "ro"))
+                -- three books, one of which cannot be saved
+                tap(find(view, _("Select")).dimen)
+                tap(find(view, "ro").dimen)
+                tap(coverRect(view, 1))
+                tap(coverRect(view, 2))
+                tap(find(fm, "eink/mark").dimen)
+                tap(find(topWidget(), finished).dimen)
+                assert.are.equal(T(_("Marked %1 of %2 books as %3. The rest could not be saved."), 2, 3, finished),
+                    toastText())
+                closeToasts()
+                assert.are.same({ all = count + 1, reading = 0, new = count - 1, complete = 2, abandoned = 0 }, view.counts)
+                assert.are.equal("new", view.shown[1].status)
+                assert.is_false(DocSettings:hasSidecarFile(book))
+                assert.is_nil(find(find(view, "ro"), finished))
+                assert.are.equal("complete", DocSettings:open(bookPath(1)):readSetting("summary").status)
+                -- that book alone
+                holdReadOnly()
+                tap(find(fm, "eink/mark").dimen)
+                tap(find(topWidget(), C_("Status of single book", "On hold")).dimen)
+                assert.are.equal(T(N_("Could not save the status of 1 book.", "Could not save the status of %1 books.", 1), 1),
+                    toastText())
+                closeToasts()
+                assert.are.equal("new", view.shown[1].status)
+                -- read-only alone, the status goes to KOReader's docsettings folder, and is saved
+                os.remove(fallback)
+                holdReadOnly()
+                tap(find(fm, "eink/mark").dimen)
+                tap(find(topWidget(), C_("Status of single book", "On hold")).dimen)
+                assert.are.equal(T(N_("Marked 1 book as %2", "Marked %1 books as %2", 1), 1,
+                    C_("Status of single book", "On hold")), toastText())
+                closeToasts()
+                assert.are.equal("abandoned", DocSettings:open(book):readSetting("summary").status)
+                fm:onClose()
+            end)
+            DocSettings:open(book):purge()
+            os.execute("chmod 755 '" .. folder .. "'")
+            os.remove(fallback)
+            ffiUtil.purgeDir(folder)
+            for _, path in ipairs{ book, bookPath(1), bookPath(2) } do
+                DocSettings:open(path):purge()
+                require("ui/widget/booklist").resetBookInfoCache(path)
+            end
+            assert(ok, err)
         end)
 
         it("takes only the books of the current filter with 全选", function()
@@ -1310,9 +1505,10 @@ describe("Shelf home (FileManager replacement)", function()
                 assert.is_nil(view.extracting)
                 -- the title row was repainted without the progress, under the menu
                 local title_repainted = false
+                assert.is_true(#refreshes > 0)
                 for __, r in ipairs(refreshes) do
-                    assert.are.equal("ui", r.type or "ui")
-                    if r.requested and r.region:intersectWith(view:titleRect()) then title_repainted = true end
+                    assert.are.equal("ui", r.type)
+                    if r.requested and r.region:contains(view:titleRect()) then title_repainted = true end
                 end
                 assert.is_true(title_repainted)
                 -- a tap beside the menu closes it
