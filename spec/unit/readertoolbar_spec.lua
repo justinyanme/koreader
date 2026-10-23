@@ -1,5 +1,5 @@
 describe("ReaderToolbar module", function()
-    local DocumentRegistry, DocSettings, ReaderUI, ReaderToolbar, Replacements, UIManager, Event, Geom, Screen
+    local DocumentRegistry, DocSettings, ReaderUI, ReaderToolbar, Replacements, UIManager, Event, Geom, Screen, _
     local sample_epub = "spec/front/unit/data/juliet.epub"
     local sample_pdf = "spec/front/unit/data/sample.pdf"
 
@@ -15,6 +15,7 @@ describe("ReaderToolbar module", function()
         Event = require("ui/event")
         Geom = require("ui/geometry")
         Screen = require("device").screen
+        _ = require("gettext")
         Replacements.reader_menu = ReaderToolbar
     end)
 
@@ -128,31 +129,53 @@ describe("ReaderToolbar module", function()
             assert.are.equal(ui, topWidget())
         end)
 
-        it("should jump to the next chapter and return to the last position from the progress panel", function()
+        local function cell(text)
+            return findText(ui.menu.bars.bottom, text)
+        end
+
+        local function openFromToolbar(text)
+            tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
+            UIManager:forceRePaint()
+            tapWidget(cell(text))
+            UIManager:forceRePaint()
+            return ui.menu.panel
+        end
+
+        it("should keep both bars while the progress panel is open, between the page and the bottom bar", function()
             local start_page = ui:getCurrentPage()
             local next_chapter = ui.toc:getNextChapter(start_page)
             assert.is_truthy(next_chapter)
 
             tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
             UIManager:forceRePaint()
-            local refreshes = refreshesOf(function()
-                tapWidget(findText(ui.menu.bars, require("gettext")("Progress")))
-            end)
-            local sheet = ui.menu.sheet
-            assert.are.equal(sheet, topWidget())
-            assert.is_nil(ui.menu.bars)
-            for _, r in ipairs(refreshes) do
-                assert.are.equal("ui", r.mode)
-            end
-            assert.are.same(sheet:getRefreshRegion(), refreshes[#refreshes].region)
-            assert.are.equal(2, #refreshes) -- the top bar and the sheet
+            local bars = ui.menu.bars
+            -- no panel: every entry has its plain icon
+            assert.is_nil(find(bars.bottom, function(w) return type(w.icon) == "string" and w.icon:find("%.bold$") end))
+            assert.is_truthy(find(bars.bottom, function(w) return w.icon == "eink/toc" end))
+            local refreshes = refreshesOf(function() tapWidget(cell(_("Progress"))) end)
+            local panel = ui.menu.panel
+            assert.is_truthy(panel)
+            assert.are.equal("progress", ui.menu.panel_name)
+            -- one window: the bars stay, the panel joins them
+            assert.are.equal(bars, ui.menu.bars)
+            assert.are.equal(bars, topWidget())
+            assert.is_true(bars.show_top)
+            local rect = panel:getRefreshRegion()
+            assert.are.equal(bars.bottom_rect.y, rect.y + rect.h)
+            assert.is_true(rect.y >= bars.top_rect.h)
+            assert.are.same({ { mode = "ui", region = rect:combine(bars.bottom_rect) } }, refreshes)
+            -- the open panel's icon is filled; the panel has no title bar and no close button
+            assert.is_truthy(find(bars.bottom, function(w) return w.icon == "eink/progress.bold" end))
+            assert.is_nil(find(panel, function(w) return w.icon == "eink/close" end))
+            assert.is_nil(find(panel, function(w) return w.text == _("Progress") end))
 
-            tapWidget(findText(sheet, require("gettext")("Next chapter")))
+            tapWidget(findText(panel, _("Next chapter")))
             assert.are.equal(next_chapter, ui:getCurrentPage())
-            assert.are.equal(sheet, topWidget())
+            assert.are.equal(panel, ui.menu.panel)
+            assert.are.equal(bars, topWidget())
 
             UIManager:forceRePaint()
-            local back = find(sheet, function(w)
+            local back = find(panel, function(w)
                 return w.callback and w.dimen and find(w, function(c)
                     return type(c.text) == "string" and c.text:find("Return to last position", 1, true)
                 end) ~= nil
@@ -161,9 +184,190 @@ describe("ReaderToolbar module", function()
             tapWidget(back)
             assert.are.equal(start_page, ui:getCurrentPage())
 
+            -- its own entry closes the panel; the bars stay
             UIManager:forceRePaint()
-            refreshes = refreshesOf(function() sheet:onClose() end)
-            assert.are.same({ { mode = "ui", region = sheet:getRefreshRegion() } }, refreshes)
+            rect = panel:getRefreshRegion()
+            refreshes = refreshesOf(function() tapWidget(cell(_("Progress"))) end)
+            assert.is_nil(ui.menu.panel)
+            assert.are.equal(bars, topWidget())
+            assert.are.same({ { mode = "ui", region = rect:combine(bars.bottom_rect) } }, refreshes)
+            assert.is_truthy(find(bars.bottom, function(w) return w.icon == "eink/progress" end))
+            ui.menu:hideToolbar()
+            UIManager:forceRePaint()
+        end)
+
+        it("should switch panels in place from the bars, one panel at a time, without turning the page", function()
+            local page = ui:getCurrentPage()
+            local progress = openFromToolbar(_("Progress"))
+            local bars = ui.menu.bars
+            local windows = #UIManager._window_stack
+            local old_rect = progress:getRefreshRegion()
+            local refreshes = refreshesOf(function() tapWidget(cell(_("Brightness"))) end)
+            local brightness = ui.menu.panel
+            assert.are_not.equal(progress, brightness)
+            assert.are.equal("brightness", ui.menu.panel_name)
+            assert.are.equal(bars, topWidget())
+            assert.are.equal(windows, #UIManager._window_stack)
+            local band = old_rect:combine(brightness:getRefreshRegion()):combine(bars.bottom_rect)
+            assert.are.same({ { mode = "ui", region = band } }, refreshes)
+            assert.is_truthy(find(bars.bottom, function(w) return w.icon == "eink/light.bold" end))
+            assert.is_nil(find(bars.bottom, function(w) return w.icon == "eink/progress.bold" end))
+
+            -- the top bar's more opens its panel the same way
+            local brightness_band = brightness:getRefreshRegion():combine(bars.bottom_rect)
+            refreshes = refreshesOf(function()
+                tapWidget(find(bars.top, function(w) return w.icon == "eink/more" and w.callback end))
+            end)
+            assert.are.equal("more", ui.menu.panel_name)
+            assert.are.equal(windows, #UIManager._window_stack)
+            local more_band = ui.menu.panel:getRefreshRegion():combine(bars.bottom_rect)
+            assert.are.same({ { mode = "ui", region = brightness_band:combine(more_band) } }, refreshes)
+            assert.is_nil(find(bars.bottom, function(w) return type(w.icon) == "string" and w.icon:find("%.bold$") end))
+            -- the open entry, below the page's right third, closes only the panel
+            tapWidget(find(bars.top, function(w) return w.icon == "eink/more" and w.callback end))
+            assert.is_nil(ui.menu.panel)
+            assert.are.equal(bars, topWidget())
+            assert.are.equal(page, ui:getCurrentPage())
+            ui.menu:hideToolbar()
+            UIManager:forceRePaint()
+            assert.are.equal(ui, topWidget())
+        end)
+
+        it("should leave the page keys to the open panel, without turning the page", function()
+            local Key = require("device/key")
+            local function pageKey(name) UIManager:sendEvent(Event:new("KeyPress", Key:new(name, {}))) end
+            local page = ui:getCurrentPage()
+            pageKey("LPgFwd") -- without the toolbar, the key turns the page
+            assert.are.equal(page + 1, ui:getCurrentPage())
+            pageKey("LPgBack")
+            assert.are.equal(page, ui:getCurrentPage())
+
+            local panel = openFromToolbar(_("Progress"))
+            pageKey("LPgFwd")
+            pageKey("LPgBack")
+            UIManager:forceRePaint()
+            assert.are.equal(page, ui:getCurrentPage())
+            assert.are.equal(panel, ui.menu.panel)
+            assert.are.equal(ui.menu.bars, topWidget())
+            ui.menu:hideToolbar()
+            UIManager:forceRePaint()
+        end)
+
+        it("should close the bars and the panel on rotation, and lay them out again for the new screen", function()
+            local function runTasks() for _ = 1, 3 do UIManager:_checkTasks() end end
+            local panel = openFromToolbar(_("Progress"))
+            local bars = ui.menu.bars
+            assert.is_truthy(panel)
+            local ok, err = pcall(function()
+                ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_CLOCKWISE))
+                runTasks()
+                UIManager:forceRePaint()
+                assert.is_true(Screen:getWidth() > Screen:getHeight())
+                assert.is_nil(ui.menu.bars)
+                assert.is_nil(ui.menu.panel)
+                for _, window in ipairs(UIManager._window_stack) do
+                    assert.are_not.equal(bars, window.widget)
+                end
+                assert.are.equal(ui, topWidget())
+
+                panel = openFromToolbar(_("Progress"))
+                local rect = panel:getRefreshRegion()
+                assert.are.equal(Screen:getWidth(), rect.w)
+                assert.are.equal(Screen:getHeight(), ui.menu.bars.bottom_rect.y + ui.menu.bars.bottom_rect.h)
+                assert.are.equal(ui.menu.bars.bottom_rect.y, rect.y + rect.h)
+                ui.menu:hideToolbar()
+            end)
+            ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_UPRIGHT))
+            runTasks()
+            UIManager:forceRePaint()
+            assert(ok, err)
+        end)
+
+        it("should keep the bookmark icon in step with the page the panel jumps to", function()
+            local start_page = ui:getCurrentPage()
+            local panel = openFromToolbar(_("Progress"))
+            local bars = ui.menu.bars
+            local function bookmarkButton()
+                return find(bars.top, function(w)
+                    return (w.icon == "eink/bookmark" or w.icon == "eink/bookmark-on") and w.callback
+                end)
+            end
+            tapWidget(bookmarkButton())
+            UIManager:forceRePaint()
+            assert.are.equal("eink/bookmark-on", bookmarkButton().icon)
+
+            tapWidget(findText(panel, _("Next chapter")))
+            UIManager:forceRePaint()
+            assert.are_not.equal(start_page, ui:getCurrentPage())
+            assert.are.equal("eink/bookmark", bookmarkButton().icon)
+
+            tapWidget(find(panel, function(w)
+                return w.callback and w.dimen and find(w, function(c)
+                    return type(c.text) == "string" and c.text:find("Return to last position", 1, true)
+                end) ~= nil
+            end))
+            UIManager:forceRePaint()
+            assert.are.equal(start_page, ui:getCurrentPage())
+            assert.are.equal("eink/bookmark-on", bookmarkButton().icon)
+            tapWidget(bookmarkButton()) -- remove the test bookmark
+            UIManager:forceRePaint()
+            assert.is_false(ui.bookmark:isPageBookmarked())
+            ui.menu:hideToolbar()
+            UIManager:forceRePaint()
+        end)
+
+        it("should close the panel and both bars on a tap on the page, without turning the page", function()
+            local panel = openFromToolbar(_("Progress"))
+            local bars = ui.menu.bars
+            local page = ui:getCurrentPage()
+            -- a tap on the panel itself, away from its controls, stays there
+            local rect = panel:getRefreshRegion()
+            tap(rect.x + 2, rect.y + 2)
+            assert.are.equal(panel, ui.menu.panel)
+            assert.are.equal(bars, topWidget())
+
+            local band = rect:combine(bars.bottom_rect)
+            -- the right third of the page, between the top bar and the panel: a page turn tap otherwise
+            local refreshes = refreshesOf(function() tap(Screen:getWidth() - 10, bars.top_rect.h + 10) end)
+            assert.is_nil(ui.menu.panel)
+            assert.is_nil(ui.menu.bars)
+            assert.are.equal(ui, topWidget())
+            assert.are.equal(page, ui:getCurrentPage())
+            assert.are.same({
+                { mode = "ui", region = bars.top_rect },
+                { mode = "ui", region = band },
+            }, refreshes)
+        end)
+
+        it("should leave the panel, then the bars, on Back", function()
+            local Key = require("device/key")
+            local function back() UIManager:sendEvent(Event:new("KeyPress", Key:new("Back", {}))) end
+            local panel = openFromToolbar(_("Brightness"))
+            local bars = ui.menu.bars
+            local band = panel:getRefreshRegion():combine(bars.bottom_rect)
+            local refreshes = refreshesOf(back)
+            assert.is_nil(ui.menu.panel)
+            assert.are.equal(bars, topWidget())
+            assert.are.same({ { mode = "ui", region = band } }, refreshes)
+            back()
+            UIManager:forceRePaint()
+            assert.is_nil(ui.menu.bars)
+            assert.are.equal(ui, topWidget())
+        end)
+
+        it("should open a panel's target after closing the panel and the bars", function()
+            local panel = openFromToolbar(_("Brightness"))
+            assert.is_truthy(panel)
+            tapWidget(find(ui.menu.bars.top, function(w) return w.icon == "eink/more" and w.callback end))
+            UIManager:forceRePaint()
+            local tile = find(ui.menu.panel, function(w) return w.label == _("Book information") and w.callback end)
+            tapWidget(tile)
+            UIManager:forceRePaint()
+            assert.is_nil(ui.menu.panel)
+            assert.is_nil(ui.menu.bars)
+            assert.are_not.equal(ui, topWidget())
+            UIManager:close(topWidget())
+            UIManager:forceRePaint()
             assert.are.equal(ui, topWidget())
         end)
 
@@ -224,23 +428,25 @@ describe("ReaderToolbar module", function()
             assert(ok, err)
         end)
 
-        it("should refresh only the brightness sheet, and fully only for night mode", function()
-            ui.menu:openPanel("brightness")
-            UIManager:forceRePaint()
-            local sheet = ui.menu.sheet
-            local rect = sheet:getRefreshRegion()
-            local plus = find(sheet, function(w) return w.icon == "eink/plus" and w.callback ~= nil end)
+        it("should refresh only the brightness panel, and fully only for night mode", function()
+            local panel = openFromToolbar(_("Brightness"))
+            local bars = ui.menu.bars
+            assert.are.equal(bars, topWidget())
+            local rect = panel:getRefreshRegion()
+            local plus = find(panel, function(w) return w.icon == "eink/plus" and w.callback ~= nil end)
             assert.is_truthy(plus)
             local refreshes = refreshesOf(function() tapWidget(plus) end)
-            assert.are.same({ mode = "ui", region = rect }, refreshes[#refreshes])
+            local panel_refreshed = false
             for _, r in ipairs(refreshes) do
-                -- (the footer below the sheet also refreshes itself on frontlight changes)
+                panel_refreshed = panel_refreshed or r.region == rect or require("util").tableEquals(r.region, rect)
+                -- (the footer, under the bottom bar, also refreshes itself on frontlight changes)
                 assert.are.equal("ui", r.mode)
-                assert.is_true(rect:contains(r.region))
+                assert.is_true(rect:contains(r.region) or bars.bottom_rect:contains(r.region))
             end
+            assert.is_true(panel_refreshed)
 
             local function nightToggle()
-                return find(ui.menu.sheet, function(w) return w.checked ~= nil and w.callback ~= nil end)
+                return find(ui.menu.panel, function(w) return w.checked ~= nil and w.callback ~= nil end)
             end
             local was_night = G_reader_settings:isTrue("night_mode")
             local toggle = nightToggle()
@@ -259,18 +465,43 @@ describe("ReaderToolbar module", function()
             tapWidget(toggle)
             UIManager:forceRePaint()
             assert.are.equal(was_night, G_reader_settings:isTrue("night_mode"))
-            ui.menu:closeSheet()
+            ui.menu:hideToolbar()
             UIManager:forceRePaint()
         end)
     end)
 
     describe("with a PDF", function()
-        it("should show the toolbar on a center tap", function()
+        it("should keep both bars with the progress panel, and open the original bottom bar from Font", function()
             local ui = openReader(sample_pdf)
+            local page = ui:getCurrentPage()
             tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
             assert.is_truthy(ui.menu.bars)
             assert.are.equal(ui.menu.bars, topWidget())
-            ui.menu:hideToolbar()
+            UIManager:forceRePaint()
+            local bars = ui.menu.bars
+            tapWidget(findText(bars.bottom, require("gettext")("Progress")))
+            UIManager:forceRePaint()
+            assert.are.equal("progress", ui.menu.panel_name)
+            assert.are.equal(bars, topWidget())
+            assert.is_true(bars.show_top)
+            local rect = ui.menu.panel:getRefreshRegion()
+            assert.are.equal(bars.bottom_rect.y, rect.y + rect.h)
+            -- a tap on the page closes both, without turning the page
+            tap(Screen:getWidth() - 10, bars.top_rect.h + 10)
+            UIManager:forceRePaint()
+            assert.is_nil(ui.menu.bars)
+            assert.are.equal(page, ui:getCurrentPage())
+
+            tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
+            UIManager:forceRePaint()
+            tapWidget(findText(ui.menu.bars.bottom, require("gettext")("Font")))
+            UIManager:forceRePaint()
+            assert.is_nil(ui.menu.bars)
+            assert.is_nil(ui.menu.panel)
+            assert.is_truthy(ui.config.config_dialog)
+            assert.are.equal(ui.config.config_dialog, topWidget())
+            ui.config.config_dialog:closeDialog()
+            UIManager:forceRePaint()
             closeReader(ui)
         end)
     end)

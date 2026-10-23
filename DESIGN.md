@@ -187,7 +187,7 @@ Scope: this system governs every screen the redesign draws in KOReader: the shel
 
 **Creative North Star: "Ink on Paper, Chrome on Request"**
 
-The page owns the screen. A swipe up, or a tap in the middle, brings two quiet bands: a top bar of icons on the right and a bottom bar that starts with a back arrow. Typesetting and progress open as panels that slot between the page and the bottom bar, with both toolbars still in place, so the reader can switch panels or leave without closing anything first. Everything longer than a panel (contents, notes, search results, lookup, settings) is a full-screen page with a back arrow at the bottom left and a joined pager at the bottom right. Overlays are white with an ink outline. The world is white paper and black ink. Grays appear only where they do a named job: rules, tracks, resting tiles, temporary marks, disabled states. Structure comes from 1dp rules and outlines, never from shadow or motion.
+The page owns the screen. A swipe up, or a tap in the middle, brings two quiet bands: a top bar of icons on the right and a bottom bar that starts with a back arrow. Typesetting and progress open as panels that slot between the page and the bottom bar, with the bottom bar still in place (and the top bar too, except over typesetting), so the reader can switch panels or leave without closing anything first. Everything longer than a panel (contents, notes, search results, lookup, settings) is a full-screen page with a back arrow at the bottom left and a joined pager at the bottom right. Overlays are white with an ink outline. The world is white paper and black ink. Grays appear only where they do a named job: rules, tracks, resting tiles, temporary marks, disabled states. Structure comes from 1dp rules and outlines, never from shadow or motion.
 
 WeChat Read's e-ink edition is the pinned look and interaction model. A deviation is a defect, unless the owner ruled a local substitute (see Local substitutes) or KOReader has a capability that WeChat Read lacks, which then moves to a secondary entry instead of being dropped.
 
@@ -253,7 +253,7 @@ Generated typographic covers draw from three extra fills: **Cover Stock** (cover
 - **Figure** (700, 24dp, tabular): the three figures of the progress panel, each followed by a 13dp unit (%, 分钟, 条).
 - **Excerpt** (400, 18dp, 1.45): quoted book text on note cards, clamped to 3 lines with an ellipsis; lookup cards use the same role.
 - **Title** (700, 16dp): the 导入 and 选择 actions, selection-mode titles, settings and 我 row titles (17dp on 我), and centered page titles (设置). Confirm-layer actions are 15dp in the same weight.
-- **Body** (400, 16dp, 1.45): contents rows (their page numbers at 14dp, tabular), search-history rows and other list rows.
+- **Body** (400, 16dp, 1.45): search-history rows and other list rows. Contents rows set their titles in 700, as in the reference, and their page numbers in 400 at 14dp, tabular.
 - **Label** (13dp): book titles under covers (700, one line), font-tile names, meta lines, row subtitles, captions under progress figures, the toast, the confirm-layer question (700, 14dp) and popover labels (700, 12dp).
 - **Caption** (400, 12dp, tabular figures): the page header and footer, and labels inside tracks (700).
 
@@ -303,7 +303,7 @@ Line weights map onto `size.lua`:
 ## Components
 
 ### Buttons and pills
-- **Outline pill:** paper fill, 1dp ink outline, ink label. Used for 返回原进度, the paragraph entry (首行顶格 ›), 开启自动翻页 (full width, 35dp) and the contents page's 书签.
+- **Outline pill:** paper fill, 1dp ink outline, ink label. Used for 返回原进度, the paragraph entry (首行顶格 ›), 开启自动翻页 (full width, 35dp) and the contents page's 书签 (with a bookmark icon, 42dp like the pager beside it, as in the reference).
 - **Text action:** 16dp bold ink text with an optional circled line icon, such as 导入, 选择, 全选, 取消, 保存. No outline.
 - **Disabled:** outline and glyph go to rule gray, labels to faded gray.
 - **Focus:** 2dp ink outline inset 3dp. No hover state on device.
@@ -326,7 +326,7 @@ The progress track is 35dp tall and runs the gutter width without ± buttons. Ch
 - **Paragraph card:** about 275 × 139dp, 12dp radius, a line icon over a 14dp bold label (首行顶格, 首行缩进). Selected is ink fill with paper content; the other is tint. The 段间距 toggle sits at the foot of the 首行缩进 card.
 
 ### Inputs / Fields
-- **Search field:** a pill with a 1dp ink outline, a search icon and 16dp text; 50dp tall on the shelf and the home search page, 40dp on the contents page. A filled field shows a round clear button at the right. Placeholders are pencil gray.
+- **Search field:** a pill with a 1dp ink outline, a search icon and 16dp text; 50dp tall on the shelf and the home search page, 40dp on the contents page. A filled field shows a round clear button at the right. Placeholders are pencil gray; the contents page's 搜索全书内容 is bold ink, as in the reference.
 - **Toggle:** about 47 × 23dp. Off is paper with a 1.5dp ink outline and an ink knob at the left; on is ink with a paper knob at the right.
 - **Thought editor:** a compact band docked on top of the keyboard over the wash. A back column (← 返回) is split off by a rule; next to it are a thought icon, the input (placeholder 写下这一刻的想法…) and the quoted excerpt behind a short ink bar; 保存 sits at the right. There is no privacy pill.
 - **Labelled field** (forms in sheets, such as 添加书源): a 13dp label column beside a 40dp pill input with a 1dp ink outline. Rows are 52dp minimum. The label column is 92dp, because labels such as "Client Secret" must fit on one line. A form commits with one solid button, disabled until its required fields are filled.
@@ -336,9 +336,9 @@ The progress track is 35dp tall and runs the gutter width without ± buttons. Ch
 - **Shelf title row:** the 书架 title is a menu. Tapping it lists 全部 / 在读 / 未读 / 读完 / 搁置, each with its count, in a selection-popover card pointing at the title, the current filter framed. The title then reads the current filter with a ▾ (在读 ▾); 全部 reads plain 书架. The filter is kept until changed. Sorting lives in 设置 → 书架, default 最近阅读.
 - **Selection mode:** a long press on a cover enters it with that book selected; 选择 enters it with none. While it is on, a tap on a cover only toggles it. The title row becomes 全选 (or 取消全选, covering the whole shelf, not just the page) at the left, 已选择 N 本书籍 in the middle and 取消 at the right, all 16dp bold. Each cover gets a 25dp ring at its lower right; a selected cover gets a 4–5dp ink frame and an ink check in the ring. The bottom band swaps the tab icons for the two local actions, 移出书架 and 标记为.
 - **Nav bar** (subpages merged before this round, such as 书源 and the 我 subpages): 52dp with a 1dp ink rule at the bottom, a 52dp back column at the left and a centered 16dp bold title. Those pages keep it until their own tickets move them to the full-screen page form below; new pages do not use it.
-- **Full-screen page:** a headline at the top left with an optional text action at the right (↓去底部, 仅显示书签 / 显示全部, 取消). Content follows, then the bottom band: a 28dp back arrow at the left, optional outline pills, and the joined pager.
+- **Full-screen page:** a headline at the top left with an optional text action at the right (↓去底部, 仅显示书签 / 显示全部, 取消). On the contents page ↓去底部 (14dp, as in the reference) becomes ↑去顶部 on the last page, and there is none with a single page. Content follows, then the bottom band: a 28dp back arrow at the left, optional outline pills, and the joined pager.
 - **Joined pager:** a 133 × 42dp pill split in two by a 1dp rule: ︿ (previous page) at the left, ﹀ (next page) at the right. An enabled half has an ink outline and glyph; a disabled half has rule-gray ones. These arrows page the list only and never turn book pages.
-- **List row:** at least 53dp, with a 1dp rule-gray divider. Contents rows put a 16dp title at the left (indented about 15dp per level, with a collapse chevron before a group) and the page number at the right. Settings and 我 rows are about 92dp: a bold title over a 13dp subtitle, and a toggle or a chevron at the right; 我 rows lead with a 37dp circled icon.
+- **List row:** at least 53dp, with a 1dp rule-gray divider. Contents rows put a 16dp title at the left (indented about 15dp per level, with a collapse chevron before a group; contents without groups keep no chevron column) and the page number at the right. As in the reference, only a top-level entry with entries under it is a group; the groups a reader collapses stay collapsed for that book, but the page shows the current chapter even inside one. The reference has no sample of the current chapter, so it takes the mark of a current item (the font tiles'): its page number is paper on an ink pill, which ends where the other page numbers and the dividers do. Settings and 我 rows are about 92dp: a bold title over a 13dp subtitle, and a toggle or a chevron at the right; 我 rows lead with a 37dp circled icon.
 
 ### Reader toolbars
 A swipe up, or a tap in the middle, brings two paper bands; while they show, a tap on the page closes them without turning the page. The **top bar** (about 50dp) puts line icons at the right, about 76dp apart, in this order: 书签, 书架状态, 更多. Future 繁简 and 手写 entries go to the left of 书签; nothing holds their place now. The bookmark icon shows whether this page has a bookmark; the 书架状态 icon carries a check while the book is on the shelf. The **bottom bar** (58dp) has a back arrow at the left, a 1dp rule-gray vertical rule about 25dp tall, then four icons with no labels sharing the rest evenly: 目录, 笔记, 进度, 字体. There is no fifth slot for 听, not even a blank one. The icon of the open panel is drawn filled. Each bar has a 1dp rule-gray inner edge, and both appear and hide with a `ui` refresh limited to their own rects.
@@ -346,10 +346,10 @@ A swipe up, or a tap in the middle, brings two paper bands; while they show, a t
 **Open-book hint:** each time a book opens, ↑ 上滑显示工具栏 sits centered on the footer line in 13dp pencil gray. It goes away the first time the toolbars show, or after about a minute; turning pages does not bring it back.
 
 ### Panels
-The 排版面板 and the 进度面板 are paper bands between the page and the bottom bar, with a 1dp rule-gray top edge and square corners. There is no title bar and no close button. Back leaves one layer at a time, starting with the panel, and another bottom icon switches to its panel in place. The page above stays readable and live.
+The 排版面板 and the 进度面板 are paper bands between the page and the bottom bar, with a 1dp rule-gray top edge and square corners. There is no title bar and no close button. The bottom bar always stays. The top bar stays over the 进度面板 (and the brightness and 更多 panels) and hides over the 排版面板, as the references show. Back leaves one layer at a time, starting with the panel, and another bottom icon switches to its panel in place. The page above stays readable and live.
 
 - **排版面板:** a title row (字体设置 in headline at the left; at the right an outline pill naming the current paragraph mode, 首行顶格 › or 首行缩进 ›), then four track rows about 44dp apart: 字号, 字重, 行距, 边距. Below them, 当前选择 · font name (16dp bold), then the font grid in three rows. 查看更多 › opens the full-screen font page.
-- **Paragraph panel:** opened from the pill. The top bar hides and the bottom bar shows only the back arrow. The panel holds the two paragraph cards.
+- **Paragraph panel:** opened from the pill. The top bar stays hidden and the bottom bar shows only the back arrow. The panel holds the two paragraph cards.
 - **进度面板:** three columns split by 1dp rule-gray vertical rules: the position (figure and %) over 约 N 小时后读完, the reading time over 阅读时长, and the note count over 笔记. The estimate line is left out when there are no statistics. Tapping the note count opens the notes page. Below are the progress track and 开启自动翻页.
 - **返回原进度:** after the first jump from the progress panel, an outline pill ‹ 返回原进度 (about 95 × 34dp, 13dp) sits centered just above the panel, and a gray dot marks the origin on the track: marker gray over the passed ink part, and outlined in 1dp ink over the gray part so it stays visible. The dot is not tappable. Tapping the pill returns to the 原进度 and closes the panel and the toolbars.
 - **Auto page turn** (`03-progress/02-auto-page-turn.png`, `03-auto-page-turn-settings.png`): 开启自动翻页 starts it. While it runs, an outline pill with a sliders icon and 自动翻页设置 (13dp) sits at the page's bottom left. The pill opens the settings panel: a ∨ at the left that only folds the panel away, 自动阅读 centered, and a 划线导读 toggle at the right (reflowable books only). Below is a speed scale from 慢 to 快 with the five speeds 1.0 / 1.5 / 2.0 / 3.0 / 4.0 (60 / 40 / 30 / 20 / 15 s per page), the current one circled in ink. Last is a full-width outline pill 关闭自动翻页, the only control that stops it. The 划线导读 line is a short ink rule under the current line that steps down line by line, splitting the page interval evenly.
@@ -397,6 +397,7 @@ These follow their reference screenshots directly, using the parts above:
 - **Lookup** (`07-selection-and-lookup/19-chinese-lookup-settled.png`, `22-english-translation-result.png`): a stack of cards: the headword, one card per dictionary named on the card, the 维基百科 card with ›, a centered 加入生词本 card, and an 在本书中搜索 › row card.
 - **我** (`13-reading-preferences/01-profile-entry.png`): the name (display), 累计阅读 X 小时 Y 分钟 with figure-sized numbers, 本周阅读 … | 连续 N 天, then rows.
 - **Settings** (`13-reading-preferences/02-settings.png`): a centered title, then toggle and chevron rows.
+- **Interface font size** (`13-reading-preferences/03-interface-font-size.png`): 字体大小 under 设置 → 阅读, showing the current size. The page has the heading 点击滑块设置界面字体大小 (title) over a label-sized note that the book's text is sized in the reader. Above the bottom band sits a track between the − and + circles, with the five sizes as steps (no step marks), 小 and 大 inside its ends and the current size's name (12dp bold) above the knob, whose ring is 1.5dp as in the reference. A tap on the track or on − / + applies the size at once and repaints the page above the band with `ui`. − and + are gray at the ends.
 - **Thought card and detail** (`07-selection-and-lookup/08-private-thought-detail.png`, `09-private-thought-full-detail.png`): tapping a thought mark shows a card with the quote and the thought; the card opens a full-screen detail with the quote (which leads back to the text), edit and delete. No avatar, likes or comments; a static 仅自己可见 is allowed.
 - **Book end** (`15-supplement/21-finish-page-mark-button.png`, `12-book-ending/04-book-end.png`): 全书完 with 标记读完 or the finished state and local statistics; the toolbars still open here.
 - **Image preview** (`09-images/02-image-preview.png`): the image centered on an ink ground; a double tap toggles fit and zoom.
@@ -442,7 +443,7 @@ KOReader capabilities that WeChat Read lacks stay reachable from a secondary ent
 ### Do:
 - **Do** separate structure with 1dp rule-gray rules and outline touchable units in 1dp ink.
 - **Do** show the current choice as an ink fill with paper text.
-- **Do** open typesetting and progress as panels between the page and the bottom bar, with both toolbars still showing.
+- **Do** open typesetting and progress as panels between the page and the bottom bar, with the bottom bar still showing; the top bar stays over progress and hides over typesetting.
 - **Do** put contents, notes, search results, lookup and settings on full-screen pages with the back arrow at the bottom left and the joined pager at the bottom right.
 - **Do** use icons without labels in the tab bar and the reader toolbars, and labels under icons in the selection popover.
 - **Do** confirm destructive or hiding actions with the confirm layer over the wash.
@@ -457,7 +458,7 @@ KOReader capabilities that WeChat Read lacks stay reachable from a secondary ent
 - **Don't** use drop shadows, blur or gradients for depth, or any scrim other than the wash.
 - **Don't** animate anything on the product surface.
 - **Don't** make lists scroll.
-- **Don't** put new adjustments in a rounded sheet with a close button, or hide the toolbars when a panel opens.
+- **Don't** put new adjustments in a rounded sheet with a close button, or hide the bottom bar when a panel opens.
 - **Don't** gray secondary text that the reference sets in ink.
 - **Don't** set controls or excerpts in the serif, or book text in the UI sans unless the reader chose it.
 - **Don't** draw a button for a service the fork does not have, not even disabled.
