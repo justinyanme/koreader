@@ -9,6 +9,7 @@ local util = require("util")
 local _ = require("gettext")
 
 local ReaderStatus = WidgetContainer:extend{
+    DEFAULT_END_ACTION = "book_end",
 }
 
 function ReaderStatus:init()
@@ -54,9 +55,14 @@ function ReaderStatus:onEndOfBook()
 
     local collate = G_reader_settings:readSetting("collate")
     local next_file_enabled = collate ~= "access" and collate ~= "date"
-    local settings = G_reader_settings:readSetting("end_document_action") or "pop-up"
+    local settings = G_reader_settings:readSetting("end_document_action") or self.DEFAULT_END_ACTION
     local top_widget = UIManager:getTopmostVisibleWidget() or {}
-    if settings == "pop-up" and top_widget.name ~= "end_document" then
+    if settings == self.DEFAULT_END_ACTION then
+        if not self.book_end then
+            self.book_end = require("apps/reader/modules/readerbookend"):new{ ui = self.ui, status = self }
+            UIManager:show(self.book_end, "ui", self.book_end.dimen)
+        end
+    elseif settings == "pop-up" and top_widget.name ~= "end_document" then
         local button_dialog
         local buttons = {
             {
@@ -166,6 +172,39 @@ function ReaderStatus:onEndOfBook()
     end
 end
 
+function ReaderStatus:closeBookEnd()
+    if self.close_book_end then UIManager:unschedule(self.close_book_end) end
+    if self.book_end then
+        UIManager:close(self.book_end, "ui", self.book_end.dimen)
+        self.book_end = nil
+    end
+end
+
+function ReaderStatus:onAnnotationsModified()
+    if self.book_end then self.book_end:refresh() end
+end
+
+function ReaderStatus:onPageUpdate()
+    -- Rotation reflows the document before SetDimensions reaches this module.
+    if self.book_end then
+        self.close_book_end = self.close_book_end or function() self:closeBookEnd() end
+        UIManager:nextTick(self.close_book_end)
+    end
+end
+
+function ReaderStatus:onSetDimensions(dimen)
+    local page = self.book_end
+    if page then
+        if self.close_book_end then UIManager:unschedule(self.close_book_end) end
+        page.dimen.w, page.dimen.h = dimen.w, dimen.h
+        page:build()
+        UIManager:setDirty(page, "ui", page.dimen)
+    end
+end
+
+ReaderStatus.onPosUpdate = ReaderStatus.onPageUpdate
+ReaderStatus.onCloseDocument = ReaderStatus.closeBookEnd
+
 function ReaderStatus:openFileBrowser()
     local file = self.document.file
     self.ui:onClose()
@@ -217,6 +256,7 @@ function ReaderStatus:markBook(mark_read)
 end
 
 local end_actions = {
+    ReaderStatus.DEFAULT_END_ACTION,
     "pop-up",
     "nothing",
     "book_status",
@@ -228,6 +268,7 @@ local end_actions = {
     "book_status_file_browser",
 }
 local end_actions_texts = {
+    _("Book end page"),
     _("Ask with popup dialog"),
     _("Do nothing"),
     _("Book status"),
