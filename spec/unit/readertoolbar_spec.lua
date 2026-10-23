@@ -40,9 +40,8 @@ describe("ReaderToolbar module", function()
         return ui
     end
 
+    -- As the reader closes a book: CloseDocument reaches its modules (the footer's and the hint's tasks go).
     local function closeReader(ui)
-        ui:closeDocument()
-        UIManager:close(ui)
         ui:onClose()
     end
 

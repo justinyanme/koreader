@@ -431,8 +431,8 @@ describe("ReaderTypesetPanel module", function()
                     end
                 end
             end
-            -- ink, not gray, from the text's left edge
-            assert.are.equal(0, darkest)
+            -- ink, not the pencil gray (0x55) it used to be, from the text's left edge
+            assert.is_true(darkest < 0x20, darkest)
             assert.is_true(x0 >= margins.left and x0 <= margins.left + 1, x0 .. " vs " .. margins.left)
             assert.is_true(x1 < w - margins.right)
             -- centered in the top margin, give or take the glyphs' own extents

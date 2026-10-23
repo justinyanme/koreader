@@ -37,7 +37,7 @@ function ReaderToolbarHint:init()
     self.content = HorizontalGroup:new{
         align = "center",
         IconWidget:new{ icon = "eink/swipe-up", width = arrow, height = arrow, alpha = true },
-        HorizontalSpan:new{ width = Screen:scaleBySize(4) },
+        HorizontalSpan:new{ width = Screen:scaleBySize(2) },
         TextWidget:new{ text = _("Swipe up to show the toolbar"), face = Font:getFace("ui_micro"), fgcolor = Palette.ink_2 },
     }
 end
@@ -46,9 +46,10 @@ function ReaderToolbarHint:paintTo(bb, x, y)
     if not self.shown then return end
     local size = self.content:getSize()
     local pad = Screen:scaleBySize(8)
-    -- the footer's text sits in the middle of a band of its height, above its bottom padding
+    -- the footer's text sits in the middle of a band of its height, above its bottom padding; the reference's
+    -- hint sits a little higher than the time and page beside it
     local footer = self.view.footer
-    local center_y = Screen:getHeight() - footer.bottom_padding - math.floor(footer.height / 2)
+    local center_y = Screen:getHeight() - footer.bottom_padding - math.floor(footer.height / 2) - Screen:scaleBySize(3)
     self.dimen = Geom:new{
         x = math.floor((Screen:getWidth() - size.w) / 2) - pad,
         y = math.min(center_y - math.floor(size.h / 2), Screen:getHeight() - size.h),

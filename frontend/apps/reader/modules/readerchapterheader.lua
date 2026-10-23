@@ -1,7 +1,7 @@
 --[[--
 Page header of the e-ink redesign (see DESIGN.md, Layout: reading page): a
 circled ‹ and the current chapter title, drawn in the top margin of reflowable
-books, as in WeChat Read (00-entry/02-book-open.png): 11dp serif ink, centered
+books, as in WeChat Read (00-entry/02-book-open.png): 10dp serif ink, centered
 in the top margin and aligned with the text.
 
 crengine's own header (the alt status bar) has no chapter-only mode, so this is
@@ -24,7 +24,7 @@ local ReaderChapterHeader = Widget:extend{
 }
 
 ReaderChapterHeader.FACE = "NotoSerif-Regular.ttf" -- CJK titles fall back to Noto Sans CJK SC
-ReaderChapterHeader.SIZE = 11
+ReaderChapterHeader.SIZE = 10
 ReaderChapterHeader.GAP = 4 -- dp, minimum above the header and between it and the text
 ReaderChapterHeader.ICON = 12 -- dp, the circled ‹ before the title
 ReaderChapterHeader.ICON_GAP = 4 -- dp

@@ -195,7 +195,7 @@ local FOOTER = {
         page_progress = true, time = true,
         pages_left = false, battery = false, percentage = false, book_time_to_read = false, chapter_time_to_read = false,
         dynamic_filler = true, all_at_once = true, disable_progress_bar = true, progress_margin = true, text_book_margins = true,
-        item_prefix = "compact_items", items_separator = "none",
+        item_prefix = "letters", items_separator = "none", -- "87 / 648", not compact items' "87/648"
         text_font_size = 11, text_font_face = "./fonts/noto/NotoSerif-Regular.ttf",
         container_bottom_padding = 26,
     },
