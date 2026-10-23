@@ -1,4 +1,4 @@
--- The page after the last body page (Q01/Q02/Q04). Its position stays in the document;
+-- The page after the last body page (Q01-Q04). Its position stays in the document;
 -- a backward turn returns to that page, and a jump from the toolbars dismisses this one.
 local BD = require("ui/bidi")
 local BookList = require("ui/widget/booklist")
@@ -6,6 +6,7 @@ local Button = require("ui/widget/button")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Event = require("ui/event")
+local FinishedBooks = require("finishedbooks")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local FullscreenPage = require("ui/widget/fullscreenpage")
@@ -117,11 +118,67 @@ function BookEnd:buildStatistics(width)
     }
 end
 
+-- 读完的第 N 本, filling the inner circle of `size` as in the reference: the template's first line small, 18% down,
+-- over its number large, just below the middle, between the rest of that line small.
+local function finishedEmblem(number, size)
+    -- @translators The emblem of a finished book, numbering it among the books marked finished; Chinese: 读完的第\n%1本. The first line is shown small, the number (%1) large and the words beside it small.
+    local template = _.pgettext("Book end", "Finished book\nNo. %1")
+    local caption, line = template:match("^(.-)\n(.*)$")
+    if not caption then caption, line = "", template end
+    local before, after = line:match("^(.-)%%1(.*)$")
+    if not before then before, after = line, "" end
+    local function row(number_size)
+        local digits = TextWidget:new{
+            text = tostring(number), face = Font:getFace("ui_headword", number_size), padding = 0, fgcolor = Palette.ink,
+        }
+        local function word(str)
+            local widget = statText(str, math.floor(number_size * 0.45), nil, true)
+            return VerticalGroup:new{ VerticalSpan:new{ width = digits:getBaseline() - widget:getBaseline() }, widget }
+        end
+        local group = HorizontalGroup:new{ align = "top" }
+        if before ~= "" then table.insert(group, word(before)) end
+        table.insert(group, digits)
+        if after ~= "" then table.insert(group, word(after)) end
+        return group, digits
+    end
+    local max_w = size - dp(28)
+    local number_size = math.floor(62 * size / dp(128)) -- smaller in a smaller circle (landscape)
+    local number_row, digits = row(number_size)
+    if number_row:getSize().w > max_w then
+        number_size = math.floor(number_size * max_w / number_row:getSize().w)
+        number_row:free()
+        number_row, digits = row(number_size)
+    end
+    local label = statText(caption, 11, max_w, true)
+    local label_top = math.floor(size * 0.185 - label:getSize().h / 2)
+    -- Lining figures are about 0.7em high, so their middle is 0.35em above the baseline.
+    local row_top = math.floor(size / 2 + dp(6) + 0.35 * digits.face.size) - digits:getBaseline()
+    return CenterContainer:new{
+        dimen = Geom:new{ w = size, h = size }, ignore = "height",
+        VerticalGroup:new{
+            align = "center", VerticalSpan:new{ width = label_top }, label,
+            VerticalSpan:new{ width = math.max(0, row_top - label_top - label:getSize().h) }, number_row,
+        },
+    }
+end
+
+-- Whether the book was marked or unmarked finished since the page was built; book details does it
+-- without a reader event.
+function BookEnd:finishedChanged()
+    local summary = self.ui.doc_settings:readSetting("summary")
+    return self.finished ~= (summary.status == "complete") or self.finished_time ~= summary.finished_time
+end
+
 function BookEnd:build()
     local sw, sh = self.dimen.w, self.dimen.h
     local width = math.min(dp(460), sw - 2 * dp(24))
-    local finished = self.ui.doc_settings:readSetting("summary").status == "complete"
-    self.finished = finished
+    -- The finished number is counted for the status shown, not again when notes or rotation rebuild the page.
+    if self:finishedChanged() then
+        local summary = self.ui.doc_settings:readSetting("summary")
+        self.finished, self.finished_time = summary.status == "complete", summary.finished_time
+        self.finished_number = FinishedBooks.number(self.ui.document.file, summary)
+    end
+    local finished = self.finished
     local column = VerticalGroup:new{ align = "center" }
     local function at(y, widget)
         table.insert(column, VerticalSpan:new{ width = math.max(0, y - column:getSize().h) })
@@ -133,15 +190,22 @@ function BookEnd:build()
         face = Font:getFace("ui_headword", 20), max_width = width,
     })
     local diameter = math.min(dp(128), math.floor(sh * 0.18))
-    -- @translators The single word in the circular book-end emblem; Chinese: 完.
-    local glyph = TextWidget:new{ text = _.pgettext("Book end", "End"), face = Font:getFace("ui_headword", 90) }
-    local size = math.min(90, math.floor(90 * (diameter - dp(16)) / glyph:getSize().w))
-    glyph:free()
-    glyph = TextWidget:new{ text = _.pgettext("Book end", "End"), face = Font:getFace("ui_headword", size) }
-    at(math.floor(sh * 0.122), FrameContainer:new{
+    local inner = diameter - 2 * Size.border.default
+    local emblem
+    if self.finished_number then
+        emblem = finishedEmblem(self.finished_number, inner)
+    else
+        -- @translators The single word in the circular book-end emblem; Chinese: 完.
+        emblem = TextWidget:new{ text = _.pgettext("Book end", "End"), face = Font:getFace("ui_headword", 90) }
+        local size = math.min(90, math.floor(90 * (diameter - dp(16)) / emblem:getSize().w))
+        emblem:free()
+        emblem = TextWidget:new{ text = _.pgettext("Book end", "End"), face = Font:getFace("ui_headword", size) }
+    end
+    self.emblem = FrameContainer:new{
         bordersize = Size.border.default, padding = 0, radius = math.floor(diameter / 2), color = Palette.ink_3,
-        CenterContainer:new{ dimen = Geom:new{ w = diameter - 2 * Size.border.default, h = diameter - 2 * Size.border.default }, glyph },
-    })
+        CenterContainer:new{ dimen = Geom:new{ w = inner, h = inner }, emblem },
+    }
+    at(math.floor(sh * 0.122), self.emblem)
     self.mark_button = nil
     if not finished then
         local label = text(_.pgettext("Book end", "Mark as finished"), "ui_label_large", width)
@@ -180,7 +244,7 @@ end
 
 -- Book details changes the same summary without a reader event; read it back when uncovered.
 function BookEnd:paintTo(bb, x, y)
-    if self.finished ~= (self.ui.doc_settings:readSetting("summary").status == "complete") then
+    if self:finishedChanged() then
         self:refresh()
     end
     FullscreenPage.paintTo(self, bb, x, y)
@@ -188,10 +252,10 @@ end
 
 function BookEnd:markFinished()
     local summary = self.ui.doc_settings:readSetting("summary")
-    local old_status, old_modified = summary.status, summary.modified
+    local old_status, old_modified, old_finished = summary.status, summary.modified, summary.finished_time
     self.status:markBook(true)
     if not self.ui.doc_settings:flush() then
-        summary.status, summary.modified = old_status, old_modified
+        summary.status, summary.modified, summary.finished_time = old_status, old_modified, old_finished
         BookList.setBookInfoCacheProperty(self.ui.document.file, "status", old_status)
         UIManager:show(Toast:new{ text = _("Could not save the book status.") })
         return

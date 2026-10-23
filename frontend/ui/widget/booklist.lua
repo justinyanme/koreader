@@ -390,6 +390,12 @@ end
 
 -- BookInfo
 
+-- The finished books (finishedbooks), once listed, read a book again when its status or settings file changes.
+local function bookInfoChanged(file)
+    local FinishedBooks = package.loaded["finishedbooks"]
+    if FinishedBooks then FinishedBooks.changed(file) end
+end
+
 function BookList.setBookInfoCache(file, doc_settings)
     local book_info = {
         been_opened      = true,
@@ -423,6 +429,7 @@ function BookList.setBookInfoCache(file, doc_settings)
         book_info.has_annotations = highlight and next(highlight) and true
     end
     BookList.book_info_cache[file] = book_info
+    bookInfoChanged(file)
 end
 
 function BookList.setBookInfoCacheProperty(file, prop_name, prop_value)
@@ -433,10 +440,14 @@ function BookList.setBookInfoCacheProperty(file, prop_name, prop_value)
         BookList.book_info_cache[file][prop_name] = prop_value
         BookList.book_info_cache[file].been_opened = true
     end
+    if prop_name == "status" or prop_name == "been_opened" then
+        bookInfoChanged(file)
+    end
 end
 
 function BookList.resetBookInfoCache(file)
     BookList.book_info_cache[file] = nil
+    bookInfoChanged(file)
 end
 
 function BookList.hasBookInfoCache(file)
@@ -476,6 +487,17 @@ end
 function BookList.getBookStatus(file)
     local book_info = BookList.getBookInfo(file)
     return book_info.been_opened and book_info.status or "new"
+end
+
+--- Sets the status in a book's summary. A book that becomes finished also gets the time it was marked
+-- finished (`finished_time`), which orders the finished books: `modified` cannot, as a review changes it too.
+function BookList.setSummaryStatus(summary, status)
+    if status ~= "complete" then
+        summary.finished_time = nil
+    elseif summary.status ~= "complete" then
+        summary.finished_time = os.time()
+    end
+    summary.status = status
 end
 
 local status_strings = {

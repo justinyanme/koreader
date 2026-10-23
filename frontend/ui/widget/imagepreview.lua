@@ -1,0 +1,111 @@
+--[[--
+Image preview of the e-ink redesign (see DESIGN.md, Image preview): an image of the text
+shown over the whole screen, centered on an ink ground, with no title or buttons, as WeChat
+Read shows a tapped illustration (09-images/02-image-preview.png).
+
+- a double tap zooms in to twice the fitting size (or as far as ImageViewer's limit allows),
+  the point tapped staying under the finger, and the next one fits it again
+  (09-images/03-image-preview-zoom.png); ImageViewer's pinches, spreads, drags, swipes and
+  keys keep working;
+- a tap closes it, back to the same place in the text, and so do Back and ImageViewer's
+  closing swipes; the side thirds still step through the frames of an animated image;
+- the image lies on paper, so that its transparent parts read as they do on the page.
+
+ReaderHighlightBubble opens it for a tap on an image (from the middle of the page only, for an
+image over half of it). A long-press still opens ImageViewer
+itself, with its buttons (original size, rotation) and, without multitouch, the bottom-left
+corner that saves the view (a two-finger tap does here).
+
+Refreshes: showing and closing it repaint the screen with "ui" (dithered when showing), as a
+full-screen page does, never with a flash; zooming and panning are ImageViewer's "ui" too.
+A hold without moving still asks for ImageViewer's full refresh, which the reader requests.
+
+@usage
+    UIManager:show(ImagePreview:new{ image = image })
+]]
+
+local Device = require("device")
+local GestureRange = require("ui/gesturerange")
+local ImageViewer = require("ui/widget/imageviewer")
+local Palette = require("ui/palette")
+local UIManager = require("ui/uimanager")
+local WidgetContainer = require("ui/widget/container/widgetcontainer")
+local Screen = Device.screen
+
+--- Paints paper under the part of its ImageWidget that is shown, then the image.
+local Paper = WidgetContainer:extend{}
+
+function Paper:paintTo(bb, x, y)
+    local shown = self[1]:getShownRect()
+    if shown.w > 0 and shown.h > 0 then
+        bb:paintRect(x + shown.x, y + shown.y, shown.w, shown.h, Palette.paper)
+    end
+    self[1]:paintTo(bb, x, y)
+end
+
+local ImagePreview = ImageViewer:extend{
+    fullscreen = true,
+    with_title_bar = false,
+    disable_double_tap = false, -- for the zoom, while the preview is on top
+    close_refresh_type = "ui",
+    double_tap_zoom = 2, -- times the fitting size
+}
+
+function ImagePreview:init()
+    ImageViewer.init(self)
+    self.main_frame.background = Palette.ink
+    if Device:isTouchDevice() then
+        self.ges_events.DoubleTap = { GestureRange:new{ ges = "double_tap", range = self.region } }
+    end
+end
+
+function ImagePreview:_new_image_wg()
+    ImageViewer._new_image_wg(self)
+    self.image_container[1] = Paper:new{ self._image_wg }
+end
+
+function ImagePreview:onShow()
+    self.dithered = true
+    UIManager:setDirty(self, function()
+        return "ui", self.main_frame.dimen, true
+    end)
+    return true
+end
+
+function ImagePreview:onTap(_, ges)
+    local x = ges.pos.x / Screen:getWidth()
+    if self._images_list and (x < 1/3 or x > 2/3) then
+        return ImageViewer.onTap(self, _, ges) -- the previous or next frame
+    end
+    return self:onClose()
+end
+
+function ImagePreview:onDoubleTap(_, ges)
+    if self.scale_factor ~= 0 then -- zoomed: fit again
+        self.scale_factor = 0
+        self._center_x_ratio, self._center_y_ratio = 0.5, 0.5
+        self:update()
+        return true
+    end
+    self:_refreshScaleFactor()
+    local fit = self.scale_factor
+    -- the limits _applyNewScaleFactor() clamps to, which it gets the first time as we do
+    if not self._min_scale_factor or not self._max_scale_factor then
+        self._min_scale_factor, self._max_scale_factor = self._image_wg:getScaleFactorExtrema()
+    end
+    local zoom = math.min(fit * self.double_tap_zoom, self._max_scale_factor) / fit
+    if zoom <= 1 then -- as large as it may be already: it stays fitted
+        self.scale_factor = 0
+        return true
+    end
+    -- The point tapped stays under the finger: the center moves from it (as ratios of the image) by its
+    -- offset from the middle of the screen at the new size. ImageWidget still centers a side that fits.
+    local dx, dy = ges.pos.x - Screen:getWidth() / 2, ges.pos.y - Screen:getHeight() / 2
+    local x, y = self._image_wg:getPanByCenterRatio(dx, dy)
+    self._center_x_ratio = x - dx / (self._image_wg:getCurrentWidth() * zoom)
+    self._center_y_ratio = y - dy / (self._image_wg:getCurrentHeight() * zoom)
+    self:_applyNewScaleFactor(fit * zoom)
+    return true
+end
+
+return ImagePreview
