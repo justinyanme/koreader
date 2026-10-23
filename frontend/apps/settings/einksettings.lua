@@ -2,17 +2,19 @@
 Settings of the e-ink redesign (see the prototype's settings subpage): five groups,
 laid out in ui/elements/eink_settings_order.lua, ending with the original menu.
 
-A full-screen paper page, opened by the "ShowEinkSettings" event in the reader
-(ReaderToolbar) and the file manager (ShelfFileManager). Rows are backed by the
-original menu's items: a group row opens its items, and their entries open as
-pages of uniform rows (name, current value, then a chevron, a toggle or a check
-mark). Lists are paginated. The page keeps TouchMenu's state names (item_table,
-item_table_stack, page) and methods (updateItems, closeMenu, backToUpperMenu), so
-the items' callbacks work unchanged.
+A full-screen page (ui/widget/fullscreenpage), opened by the "ShowEinkSettings"
+event in the reader (ReaderToolbar) and the file manager (ShelfFileManager): the
+centered title on top, the back arrow and the page capsule at the bottom. Rows are
+backed by the original menu's items: a group row opens its items, and their entries
+open as pages of uniform rows (name, current value, then a chevron, a toggle or a
+check mark). The back arrow goes back up a level, and closes the page from the top.
+The page keeps TouchMenu's state names (item_table, item_table_stack, page) and
+methods (updateItems, closeMenu, backToUpperMenu), so the items' callbacks work
+unchanged.
 
-Opening and closing the page, going into and back from a page of entries, and
-turning a list page refresh with "ui". Toggling refreshes the toggle ("fast"), and
-other rows only when they changed ("ui").
+Opening and closing the page and going into and back from a page of entries refresh
+it whole with "ui"; turning a list page refreshes the list and the bottom bar ("ui").
+Toggling refreshes the toggle ("fast"), and other rows only when they changed ("ui").
 ]]
 
 local CenterContainer = require("ui/widget/container/centercontainer")
@@ -20,7 +22,7 @@ local Device = require("device")
 local EinkControls = require("ui/widget/einkcontrols")
 local Event = require("ui/event")
 local Font = require("ui/font")
-local FrameContainer = require("ui/widget/container/framecontainer")
+local FullscreenPage = require("ui/widget/fullscreenpage")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
@@ -43,8 +45,6 @@ local _ = require("gettext")
 local function dp(n) return Screen:scaleBySize(n) end
 
 local GUTTER = dp(24)
-local NAV_H = dp(52)
-local PAGER_H = dp(44)
 local ROW_H = dp(56)
 local HEADER_H = dp(36)
 
@@ -152,7 +152,7 @@ function Row:onHoldRow()
     return true
 end
 
-local EinkSettings = InputContainer:extend{
+local EinkSettings = FullscreenPage:extend{
     ui = nil, -- ReaderUI or FileManager: gets "ShowOriginalMenu"
     menu = nil, -- its ReaderMenu or FileManagerMenu, whose items back the rows
     target = nil, -- group or row id to open on
@@ -174,14 +174,9 @@ function EinkSettings.show(ui, menu, target)
 end
 
 function EinkSettings:init()
-    self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
-    self.covers_fullscreen = true
+    self.title = _("Settings")
+    FullscreenPage.init(self)
     self.content_w = self.dimen.w - 2 * GUTTER
-    self.list_rect = Geom:new{ x = 0, y = NAV_H, w = self.dimen.w, h = self.dimen.h - NAV_H }
-    self.ges_events.TapBlock = { GestureRange:new{ ges = "tap", range = self.dimen } } -- nothing reaches the page below
-    if Device:hasKeys() then
-        self.key_events.Back = { { Device.input.group.Back } }
-    end
     if self.menu.tab_item_table == nil then
         self.menu:setUpdateItemTable()
     end
@@ -190,7 +185,6 @@ function EinkSettings:init()
     self.home = self:buildHome()
     self.item_table, self.item_table_stack = self.home, {}
     self.title_stack, self.page_stack = {}, {}
-    self.title = _("Settings")
     self.choice_tables = setmetatable({}, { __mode = "k" })
     self:build()
     if self.target then
@@ -402,83 +396,64 @@ function EinkSettings:buildRow(spec)
     }
 end
 
-function EinkSettings:buildNavBar()
-    local back_w = NAV_H
-    local h = NAV_H - Size.border.default
-    local back = Row:new{
-        width = back_w, height = h,
-        on_tap = function() self:backToUpperMenu() end,
-        CenterContainer:new{ dimen = Geom:new{ w = back_w, h = h },
-            IconWidget:new{ icon = "eink/back", width = dp(24), height = dp(24), alpha = true } },
-    }
-    return VerticalGroup:new{
-        HorizontalGroup:new{
-            back,
-            CenterContainer:new{ dimen = Geom:new{ w = self.dimen.w - 2 * back_w, h = h },
-                text(self.title, "ui_title", Palette.ink, self.dimen.w - 2 * back_w, true) },
-            HorizontalSpan:new{ width = back_w },
-        },
-        rule(self.dimen.w, Palette.ink),
-    }
-end
-
---- (Re)builds the page; returns the shown row specs, each with its screen rect.
-function EinkSettings:build()
+--- The shown list page, without widgets: its row specs, each with its screen rect, the page and the page count.
+function EinkSettings:layout()
     local specs = self:rowSpecs()
-    local list_h = self.dimen.h - NAV_H - PAGER_H
-    self.pages = TocDrawer.paginate(specs, list_h)
+    local rect = self.content_rect
+    self.pages = TocDrawer.paginate(specs, rect.h)
     self.page = math.max(1, math.min(self.page, #self.pages))
-    local list = VerticalGroup:new{ align = "left" }
-    local shown = { title = self.title, page = self.page }
-    local y = NAV_H
+    local shown = { title = self.title, page = self.page, page_count = #self.pages }
+    local y = rect.y
     for _, i in ipairs(self.pages[self.page] or {}) do
         local spec = specs[i]
-        table.insert(list, self:buildRow(spec))
         spec.rect = Geom:new{ x = 0, y = y, w = self.dimen.w, h = spec.h }
-        if spec.toggle then
-            local size = spec.toggle:getSize()
-            spec.toggle_rect = Geom:new{ x = GUTTER + self.content_w - size.w, y = y + math.floor((ROW_H - Size.border.default - size.h) / 2),
-                w = size.w, h = size.h }
-        end
         y = y + spec.h
         table.insert(shown, spec)
     end
-    table.insert(list, VerticalSpan:new{ width = math.max(0, list_h - (y - NAV_H)) })
-    if self[1] then
-        self[1]:free()
-    end
-    self[1] = FrameContainer:new{
-        bordersize = 0, padding = 0, background = Palette.paper,
-        VerticalGroup:new{
-            align = "left",
-            self:buildNavBar(),
-            list,
-            EinkControls.Pager:new{
-                width = self.dimen.w, page = self.page, pages = #self.pages,
-                on_change = function(p) self:goToPage(p) end,
-            },
-        },
-    }
-    self.shown = shown
     return shown
 end
 
---- Rebuilds after a change and refreshes what changed: the toggle of `toggled` ("fast"), other changed rows ("ui").
+--- The rows of the shown list page and the number of pages; `self.shown` gets their specs.
+function EinkSettings:buildContent()
+    local shown = self:layout()
+    local list = VerticalGroup:new{ align = "left" }
+    for _, spec in ipairs(shown) do
+        table.insert(list, self:buildRow(spec))
+        if spec.toggle then
+            local size = spec.toggle:getSize()
+            spec.toggle_rect = Geom:new{ x = GUTTER + self.content_w - size.w,
+                y = spec.rect.y + math.floor((ROW_H - Size.border.default - size.h) / 2), w = size.w, h = size.h }
+        end
+    end
+    self.shown = shown
+    return list, shown.page_count
+end
+
+--- After a change, rebuilds and refreshes what changed: the toggle of `toggled` ("fast"), other changed rows ("ui"),
+-- or the whole list when its rows moved. When nothing shown changed, it keeps the page as painted: rebuilt widgets
+-- only take their place (and their gesture ranges) when repainted, and a repaint always refreshes the screen.
 function EinkSettings:refreshChanged(toggled)
     if self.closed then return end
-    local old = self.shown
-    local new = self:build()
-    if #old ~= #new or old.title ~= new.title or old.page ~= new.page then
-        UIManager:setDirty(self, "ui", self.list_rect)
+    local old, new = self.shown, self:layout()
+    if #old ~= #new or old.title ~= new.title or old.page ~= new.page or old.page_count ~= new.page_count then
+        self:build()
+        UIManager:setDirty(self, "ui", old.title ~= new.title and self.dimen or self.body_rect)
         return
     end
+    local changed = {}
     for i, spec in ipairs(new) do
         if spec.sig ~= old[i].sig then
-            if spec.item == toggled and spec.toggle_rect then
-                UIManager:setDirty(self, "fast", spec.toggle_rect)
-            else
-                UIManager:setDirty(self, "ui", spec.rect)
-            end
+            table.insert(changed, i)
+        end
+    end
+    if #changed == 0 then return end
+    self:build()
+    for _, i in ipairs(changed) do
+        local spec = self.shown[i]
+        if spec.item == toggled and spec.toggle_rect then
+            UIManager:setDirty(self, "fast", spec.toggle_rect)
+        else
+            UIManager:setDirty(self, "ui", spec.rect)
         end
     end
 end
@@ -530,13 +505,6 @@ function EinkSettings:hold(spec)
     end
 end
 
-function EinkSettings:goToPage(page)
-    if page == self.page then return end
-    self.page = page
-    self:build()
-    UIManager:setDirty(self, "ui", self.list_rect)
-end
-
 -- TouchMenu API for menu item callbacks
 
 function EinkSettings:updateItems()
@@ -568,13 +536,6 @@ end
 
 EinkSettings.onClose = EinkSettings.closeMenu
 
-function EinkSettings:onTapBlock()
-    return true
-end
-
-function EinkSettings:onBack()
-    self:backToUpperMenu()
-    return true
-end
+EinkSettings.goBack = EinkSettings.backToUpperMenu
 
 return EinkSettings
