@@ -758,16 +758,17 @@ describe("Shelf home (FileManager replacement)", function()
             assert.is_false(pager.prev_enabled or pager.next_enabled)
             press("LPgBack")
             assert.are.equal(view.pages, view.page)
-            -- on 文件 (from 我) the file browser takes the page keys, as before
+            -- on 文件 (from 我) the file browser takes the page keys, as before, and the capsule turns its pages
             tap(find(fm.me_view, _("Files")).dimen)
             assert.are.equal("files", fm.current_tab)
             local fc_page = fm.file_chooser.page
             press("RPgFwd")
             assert.are.equal(fc_page + 1, fm.file_chooser.page)
+            assert.are.equal(fm.file_chooser.page, capsule(fm).page)
+            tap(capsule(fm).prev_rect)
+            assert.are.equal(fc_page, fm.file_chooser.page)
             assert.are.equal(view.pages, view.page)
             -- back to 我, then on 书架, on the page it was left
-            tap(capsule(fm).dimen) -- gray on 文件: nothing happens
-            assert.are.equal("files", fm.current_tab)
             tap(fm.layout_group[2][1].back.dimen)
             assert.are.equal("me", fm.current_tab)
             tap(find(fm, "eink/shelf").dimen)

@@ -134,6 +134,27 @@ function ShelfView:reload(rescan)
     end
 end
 
+-- What the shelf draws of its books, and their order: compared before and after a rescan.
+local function booksKey(books)
+    local keys = {}
+    for i, book in ipairs(books) do
+        keys[i] = table.concat({ book.file, book.title, book.status, tostring(book.has_cover),
+            book.last_read or "", book.mtime or "" }, "\0")
+    end
+    table.sort(keys)
+    return table.concat(keys, "\n")
+end
+
+--- Walks the home folder again (导入 closed: books may have come in), and redraws the grid only if the books
+-- or what it shows of them changed.
+function ShelfView:rescan()
+    local before = booksKey(self.books)
+    self:reload(true)
+    if booksKey(self.books) ~= before then
+        self:update("grid")
+    end
+end
+
 function ShelfView:pendingFiles()
     local pending = {}
     for _, book in ipairs(self.books) do

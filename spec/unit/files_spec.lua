@@ -169,7 +169,7 @@ describe("Files page (FileManager replacement)", function()
         fm:onClose()
     end)
 
-    it("pages long folders, and refreshes only the content area with ui", function()
+    it("pages long folders, and refreshes only the content area, and the band when its pager changes, with ui", function()
         local fm, fc = openFiles()
         local refreshes, restore = spyRefreshes()
         gesture("tap", tappable(fc[1], "many"))
@@ -181,20 +181,48 @@ describe("Files page (FileManager replacement)", function()
         assert.is_true(#refreshes >= 3)
         for _, r in ipairs(refreshes) do
             assert.are.equal("ui", r.type)
-            assert.is_true(r.region.y + r.region.h <= fm.content_dimen.h)
+            assert.is_true(r.region.y + r.region.h <= fm.content_dimen.h or r.region == fm.tabbar_dimen)
         end
         assert.are.equal(home, fc.path)
         fm:onClose()
     end)
 
-    it("turns pages with the pager", function()
+    it("turns pages with the band's joined pager, which follows the page, gray at the ends", function()
         local fm, fc = openFiles("many")
-        local pager = fc[1][1][4]
-        local next_button = find(pager, function(w) return w.callback and w.ges_events and w.dimen end)
-        -- the first enabled button is "next" on page 1
-        gesture("tap", next_button)
+        local function capsule() return fm.layout_group[2][1].capsule end
+        -- no pager of its own: the list runs down to the band
+        assert.is_nil(find(fc[1], function(w) return w.icon == "chevron.right" end))
+        assert.are.equal(fm.content_dimen.h, fc.title_h + fc.crumbs_h + fc.list_h)
+        assert.is_true(fc.page_num > 1)
+        assert.is_false(capsule().prev_enabled)
+        assert.is_true(capsule().next_enabled)
+        -- a page turn repaints the list and the band, with ui
+        local refreshes, restore = spyRefreshes()
+        gesture("tap", { dimen = capsule().next_rect })
+        UIManager:forceRePaint()
+        restore()
         assert.are.equal(2, fc.page)
         assert.is_false(has(texts(fc[1]), "01.txt"))
+        assert.is_true(capsule().prev_enabled)
+        local band_repainted = false
+        for _, r in ipairs(refreshes) do
+            assert.are.equal("ui", r.type)
+            if r.region:contains(fm.tabbar_dimen) then band_repainted = true end
+        end
+        assert.is_true(band_repainted)
+        -- turned another way (a swipe), the capsule follows too; at the last page its down half is gray
+        for _ = 3, fc.page_num do
+            fm:onSwipeFM{ direction = "west", pos = Geom:new{ x = 10, y = 10, w = 0, h = 0 } }
+        end
+        assert.are.equal(fc.page_num, fc.page)
+        assert.is_false(capsule().next_enabled)
+        gesture("tap", { dimen = capsule().next_rect })
+        assert.are.equal(fc.page_num, fc.page)
+        gesture("tap", { dimen = capsule().prev_rect })
+        assert.are.equal(fc.page_num - 1, fc.page)
+        -- back on 书架, the capsule turns the shelf again
+        fm:closeFiles()
+        assert.are.equal(fm.shelf_view.page, capsule().page)
         fm:onClose()
     end)
 

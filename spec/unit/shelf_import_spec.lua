@@ -92,6 +92,20 @@ describe("Shelf home, 导入 and 文件", function()
         assert.is_true(whole)
     end
 
+    -- some refreshes were asked for, all "ui", and each of `rects` lies in one of them
+    local function assertUiCovering(refreshes, rects)
+        assert.is_true(#refreshes > 0)
+        for __, r in ipairs(refreshes) do assert.are.equal("ui", r.type) end
+        for __, rect in ipairs(rects) do
+            local covered = false
+            for i = 1, #refreshes do
+                local region = refreshes[i].region
+                if region and region:contains(rect) then covered = true end
+            end
+            assert.is_true(covered, tostring(rect))
+        end
+    end
+
     local function addFile(name, source)
         local path = home .. "/" .. name
         lfs.mkdir((path:match("^(.*)/")))
@@ -233,9 +247,11 @@ describe("Shelf home, 导入 and 文件", function()
             assert.is_true(tile.dimen.x > card.x and tile.dimen.x + tile.dimen.w < card.x + card.w, label)
         end
 
-        -- a tap outside the card and the × changes nothing, and never reaches the shelf below: here, its 书源 tab
-        local sources_tab = find(fm, "eink/compass")
-        tap(sources_tab.dimen)
+        -- a tap outside the card and the × is the page's own, and changes nothing: here, over the shelf's 书源 tab
+        local sources_tab = find(fm, "eink/compass").dimen
+        assert.is_true(page:handleEvent(Event:new("Gesture", { ges = "tap",
+            pos = Geom:new{ x = sources_tab.x + math.floor(sources_tab.w / 2), y = sources_tab.y + 1, w = 0, h = 0 } })))
+        UIManager:forceRePaint()
         assert.are.equal(page, topWidget())
         assert.is_false(isShown(BookSourceView))
         -- the × goes back to the shelf with a ui refresh of the whole screen; so does Back
@@ -277,7 +293,7 @@ describe("Shelf home, 导入 and 文件", function()
         assert.are.equal(fm.files_ui, fm.content[1])
         assert.is_truthy(band(fm).back)
         assert.is_nil(find(fm, "eink/shelf.bold"))
-        for __, r in ipairs(refreshes) do assert.are.equal("ui", r.type) end
+        assertUiCovering(refreshes, { fm.content_dimen, fm.tabbar_dimen })
         -- the file browser works as before: into a folder, and Back goes up to home
         fm.file_chooser:changeToPath(home)
         UIManager:forceRePaint()
@@ -313,6 +329,43 @@ describe("Shelf home, 导入 and 文件", function()
         press("Back")
         assert.are.equal("shelf", fm.current_tab)
         G_reader_settings:delSetting("back_in_filemanager")
+    end)
+
+    it("goes back from 文件 to 导入 without rebuilding the shelf under it, and brings the shelf up to date on closing", function()
+        local fm, view = openShelf()
+        local leaves = home .. "/sub/leaves.epub"
+        local function status()
+            for __, book in ipairs(view.books) do
+                if book.file == leaves then return book.status end
+            end
+        end
+        assert.are.equal("new", status())
+        local page = openImport(fm)
+        tap(find(page, _("Files")).dimen)
+        -- a status set in 文件, from a book's sheet
+        fm.file_chooser:changeToPath(home .. "/sub")
+        UIManager:forceRePaint()
+        local row = find(fm.files_ui, "leaves.epub")
+        gesture("hold", row.dimen.x + dp(10), row.dimen.y + dp(10))
+        tap(find(topWidget(), _("Mark as finished")).dimen)
+        local updates = 0
+        local orig_update = view.update
+        view.update = function(...)
+            updates = updates + 1
+            return orig_update(...)
+        end
+        local ok, err = pcall(function()
+            tap(band(fm).back.dimen)
+            assert.are.equal(ImportPage, getmetatable(topWidget()).__index)
+            assert.are.equal(fm.shelf_view, fm.content[1])
+            assert.are.equal(0, updates)
+            tap(topWidget().close_button.dimen)
+            fastforward_ui_events() -- the UI loop: due tasks, then the repaint
+            assert.are.equal(1, updates)
+            assert.are.equal("complete", status())
+        end)
+        view.update = nil
+        assert(ok, err)
     end)
 
     it("takes 书源 over it, and leaving 书源 comes back to it", function()
@@ -360,6 +413,41 @@ describe("Shelf home, 导入 and 文件", function()
         assert(ok, err)
     end)
 
+    it("closes at once, and rescans the home folder after the shelf is repainted, redrawing only what changed", function()
+        local Shelf = require("apps/shelf/shelf")
+        local fm, view = openShelf()
+        fastforward_ui_events()
+        local count = #view.shown
+        local page = openImport(fm)
+        -- the order of things as the UI loop runs them on the device
+        local order = {}
+        local orig_repaint, orig_scan = UIManager._repaint, Shelf.scan
+        UIManager._repaint = function(...)
+            if #order == 0 or order[#order] ~= "repaint" then table.insert(order, "repaint") end
+            return orig_repaint(...)
+        end
+        Shelf.scan = function(...)
+            table.insert(order, "scan")
+            return orig_scan(...)
+        end
+        local ok, err = pcall(function()
+            -- nothing came in: the shelf shows again, is walked after that repaint, and nothing else is redrawn
+            local close = page.close_button.dimen
+            local refreshes, restore = spyRefreshes()
+            UIManager:sendEvent(Event:new("Gesture", { ges = "tap", pos = Geom:new{ x = close.x + 5, y = close.y + 5, w = 0, h = 0 } }))
+            assert.are.equal(fm, topWidget())
+            assert.are.same({ "repaint" }, order) -- drawn before the tap's handler returns
+            fastforward_ui_events() -- the UI loop: due tasks, then the repaint
+            restore()
+            assert.are.same({ "repaint", "scan", "repaint" }, order)
+            assert.are.equal(1, #refreshes) -- the close, of the whole screen
+            assertUiCovering(refreshes, { Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() } })
+            assert.are.equal(count, #view.shown)
+        end)
+        UIManager._repaint, Shelf.scan = orig_repaint, orig_scan
+        assert(ok, err)
+    end)
+
     it("shows books that came in while it was open once it closes", function()
         local fm, view = openShelf()
         local count = #view.shown
@@ -367,6 +455,13 @@ describe("Shelf home, 导入 and 文件", function()
         -- as copied over USB or sent by calibre
         local path = addFile("arrived.epub", "juliet.epub")
         tap(page.close_button.dimen)
+        assert.are.equal(count, #view.shown) -- not walked yet: the shelf shows again first
+        local refreshes, restore = spyRefreshes()
+        fastforward_ui_events() -- the UI loop: due tasks, then the repaint
+        restore()
+        -- the grid and the band are redrawn, nothing above
+        assertUiCovering(refreshes, { view:gridRect() })
+        for __, r in ipairs(refreshes) do assert.is_true(r.region.y >= view:gridRect().y) end
         assert.are.equal(count + 1, #view.shown)
         local found = false
         for __, book in ipairs(view.shown) do
@@ -425,7 +520,7 @@ describe("Shelf home, 导入 and 文件", function()
         assert.are.equal("files", fm.current_tab)
         assert.are.equal(fm.files_ui, fm.content[1])
         assert.are.equal(home, fm.file_chooser.path)
-        for __, r in ipairs(refreshes) do assert.are.equal("ui", r.type) end
+        assertUiCovering(refreshes, { fm.content_dimen, fm.tabbar_dimen })
         tap(find(fm.files_ui, "sub").dimen)
         tap(band(fm).back.dimen)
         assert.are.equal("me", fm.current_tab)

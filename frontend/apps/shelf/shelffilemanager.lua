@@ -105,15 +105,19 @@ function ShelfFileManager:setupLayout()
     end
 end
 
--- What the bottom band shows: the current tab (or 文件), and the shelf's page (one page, gray, elsewhere).
+-- What the bottom band shows: the current tab (or 文件), and the page of 书架 or 文件 (one page, gray, on 我).
 function ShelfFileManager:bottomBarState()
-    local view = self.current_tab == "shelf" and self.shelf_view
-    local page, pages = view and view.page or 1, view and view.pages or 1
+    local page, pages = 1, 1
+    if self.current_tab == "shelf" then
+        page, pages = self.shelf_view.page, self.shelf_view.pages
+    elseif self.current_tab == "files" then
+        page, pages = self.file_chooser.page, self.file_chooser.page_num or 1
+    end
     return table.concat({ self.current_tab, page, pages }, "/"), page, pages
 end
 
---- The bottom band: the tab icons (the back arrow on 文件), and the capsule turning the shelf's pages. Its paper
--- ground covers the cut-off row of covers above it.
+--- The bottom band: the tab icons (the back arrow on 文件), and the capsule turning the pages of 书架 or 文件.
+-- Its paper ground covers the cut-off row of covers above it.
 function ShelfFileManager:buildBottomBar()
     local state, page, pages = self:bottomBarState()
     self.bottom_bar_state = state
@@ -140,16 +144,23 @@ function ShelfFileManager:buildBottomBar()
             width = self.dimen.w,
             page = page,
             pages = pages,
-            on_change = function(p) self.shelf_view:setPage(p) end, -- only enabled on 书架
+            on_change = function(p) -- only enabled on 书架 and 文件
+                if self.current_tab == "files" then
+                    self.file_chooser:onGotoPage(p)
+                else
+                    self.shelf_view:setPage(p)
+                end
+            end,
             left = tab_bar,
             on_back = function() self:closeFiles() end,
         },
     }
 end
 
---- Rebuilds the bottom band if the current tab or the shelf's page changed, and says so; the caller repaints it.
+--- Rebuilds the bottom band if the current tab or its page changed, and says so; the caller repaints it.
 function ShelfFileManager:updateBottomBar()
-    if self:bottomBarState() == self.bottom_bar_state then return false end
+    -- 文件 lists its first folder while FileManager lays itself out, before there is a band
+    if not self.layout_group or self:bottomBarState() == self.bottom_bar_state then return false end
     self.layout_group[2]:free()
     self.layout_group[2] = self:buildBottomBar()
     return true
@@ -178,7 +189,8 @@ function ShelfFileManager:switchTab(id)
 end
 
 --- Shows 文件, from 导入, 我 or a folder change. Leaving it returns to the tab it was opened from (书架 when the
--- home opened on it), then calls `on_back` (导入 shows itself again).
+-- home opened on it). With `on_back` (导入, which opens over 书架) it calls that instead to show its page again:
+-- 书架 goes back as it was, not rebuilt under the page, which brings it up to date when it closes.
 function ShelfFileManager:openFiles(on_back)
     if self.current_tab == "files" then return end
     self.files_from, self.files_on_back = self.current_tab, on_back
@@ -190,8 +202,12 @@ function ShelfFileManager:closeFiles()
     if self.current_tab ~= "files" then return end
     local from, on_back = self.files_from, self.files_on_back
     self.files_from, self.files_on_back = nil, nil
-    self:switchTab(from or "shelf")
-    if on_back then on_back() end
+    if on_back then
+        self:showContent("shelf", self.shelf_view)
+        on_back()
+    else
+        self:switchTab(from or "shelf")
+    end
 end
 
 -- file_chooser moved to a folder: show it (skipping the initial PathChanged sent by init)

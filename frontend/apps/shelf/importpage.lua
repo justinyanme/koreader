@@ -8,7 +8,8 @@ folder. Each section ends with a gray tile, where the reference has its illustra
 The page copies nothing itself. 书源 opens over it, so leaving 书源 comes back here; 文件 shows in the file
 manager under it, so the page closes and shows again when 文件 is left. The calibre tile starts the plugin's
 wireless connection, which reports its own progress. Showing and closing repaint the whole screen with "ui".
-Closing refreshes the home, so the shelf lists what came into the home folder meanwhile (over USB, say).
+Closing rescans the home folder once the shelf shows again, so the shelf lists what came into it
+meanwhile (over USB, say); the grid is only redrawn if that changed it.
 ]]
 
 local BD = require("ui/bidi")
@@ -239,12 +240,20 @@ function ImportPage:dismiss()
     UIManager:close(self)
 end
 
---- The × and Back: back to the shelf, the home refreshed for what came in while the page was open.
+--- The × and Back: back to the shelf, rescanned for what came in while the page was open.
 function ImportPage:close()
     if self.closed then return end
     self.closed = true
-    self.ui:onRefresh() -- repainted by the close
     UIManager:close(self, "ui", self.dimen)
+    -- the shelf on screen first: walking a large home folder (all of the shared storage, on Android) takes a
+    -- while. Tasks run before the repaint, even tickAfterNext's with a coarse clock, so it is drawn now.
+    UIManager:forceRePaint()
+    local fm = self.ui
+    UIManager:nextTick(function()
+        if UIManager:isWidgetShown(fm) then
+            fm.shelf_view:rescan()
+        end
+    end)
 end
 
 --- The calibre tile: starts the plugin's wireless connection, which shows its own progress and errors (and

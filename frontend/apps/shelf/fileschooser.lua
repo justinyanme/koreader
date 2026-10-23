@@ -3,14 +3,15 @@
 
 Only the rendering changes: a "Files" title with the plus-menu button, path
 crumbs from the home folder, folder rows with their book counts, file rows
-with a format tag, author and size, and status, a paged list and an
-empty-folder hint. Item tables, sorting, selection, the file dialog and
+with a format tag, author and size, and status, a paged list (turned by the
+joined pager in the file manager's band) and an empty-folder hint. Item tables, sorting, selection, the file dialog and
 navigation stay FileChooser's, so everything that drives file_chooser keeps
 working. Long-pressing a book opens the shelf's book sheet, plus "More" for
 the original file dialog.
 
 Every change of folder or page repaints the chooser (the content area above
-the band) with one "ui" refresh (DESIGN.md, Refresh mapping).
+the band) with one "ui" refresh (DESIGN.md, Refresh mapping), and the band
+too when its pager changed.
 ]]
 
 local BookList = require("ui/widget/booklist")
@@ -53,7 +54,6 @@ local GUTTER = dp(24)
 local TITLE_H = dp(14) + dp(29) + dp(6) -- top padding + 22dp headline + bottom padding
 local CRUMBS_H = dp(26)
 -- both grow with the interface font size: see FilesChooser:_recalculateDimen()
-local PAGER_H = dp(44)
 local GAP = dp(14)
 
 --- A list row that also takes D-pad focus (2dp ink outline).
@@ -147,7 +147,7 @@ function FilesChooser:_recalculateDimen()
         self.title_h = math.max(TITLE_H, dp(14) - dp(4) + title_probe)
         self.crumbs_h = math.max(CRUMBS_H, crumb_probe + Size.border.default)
     end
-    self.list_h = self.dimen.h - self.title_h - self.crumbs_h - PAGER_H
+    self.list_h = self.dimen.h - self.title_h - self.crumbs_h
     self.perpage = math.max(1, math.floor(self.list_h / self.row_h))
     self.page_num = self:getPageNumber(#self.item_table)
     if self.page > self.page_num then
@@ -185,7 +185,6 @@ function FilesChooser:updateItems(select_number)
             self.title_row,
             self:buildCrumbs(),
             TopContainer:new{ dimen = Geom:new{ w = self.dimen.w, h = self.list_h }, list },
-            self:buildPager(),
         },
     }
     if (focused or Device:hasDPad()) and #self.layout > 0 then
@@ -199,6 +198,10 @@ function FilesChooser:updateItems(select_number)
     end
     self.path_items[self.path] = first + (select_number or 1)
     UIManager:setDirty(self.show_parent, "ui", self.dimen)
+    -- the band's joined pager follows the page (a no-op while 文件 is not showing)
+    if self.ui:updateBottomBar() then
+        UIManager:setDirty(self.show_parent, "ui", self.ui.tabbar_dimen)
+    end
 end
 
 --- Redraws the title row only (the plus button turns into a check in select mode).
@@ -400,15 +403,6 @@ function FilesChooser:buildEmpty()
             },
         },
     }
-end
-
-function FilesChooser:buildPager()
-    local pager = self.page_num > 1 and ShelfWidgets.Pager:new{
-        page = self.page,
-        pages = self.page_num,
-        on_change = function(page) self:onGotoPage(page) end,
-    } or VerticalSpan:new{ width = 0 }
-    return CenterContainer:new{ dimen = Geom:new{ w = self.dimen.w, h = PAGER_H }, pager }
 end
 
 function FilesChooser:onRowHold(item)
