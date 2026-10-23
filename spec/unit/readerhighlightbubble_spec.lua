@@ -108,6 +108,20 @@ describe("ReaderHighlightBubble module", function()
         end
     end
 
+    -- every widget find() could reach for which `pred` holds, each once
+    local function findAll(widget, pred)
+        local found, seen = {}, {}
+        local function walk(w)
+            if type(w) ~= "table" or seen[w] then return end
+            seen[w] = true
+            if pred(w) then table.insert(found, w) end
+            for _, child in ipairs(w) do walk(child) end
+            for _, key in ipairs{ "frame", "content" } do walk(rawget(w, key)) end
+        end
+        walk(widget)
+        return found
+    end
+
     local function cell(bubble, text)
         return find(bubble, function(w)
             return w.callback and w.dimen and find(w, function(c) return c.text == text or c.drawer == text end) ~= nil
@@ -1141,6 +1155,9 @@ describe("ReaderHighlightBubble module", function()
                     assert.is_true(hasRefresh(refreshes, "ui", Screen:getSize()))
                     assert.is_true(cards.detail)
                     assert.is_truthy(find(cards, function(w) return w.text == "Only visible to you" end), "local visibility label")
+                    -- its two rules are lighter than rule gray, as in the reference
+                    local light_rule = require("ui/palette").light_rule
+                    assert.are.equal(2, #findAll(cards, function(w) return rawequal(w.background, light_rule) end))
                     assert.is_nil(cell(cards, "Like"))
                     assert.is_nil(cell(cards, "Comment"))
                 end

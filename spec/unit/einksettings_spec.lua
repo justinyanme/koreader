@@ -115,6 +115,17 @@ describe("Reorganized settings", function()
         return Screen.bb:getPixel(x, y):getColor8().a
     end
 
+    -- the darkest painted gray level in `rect`
+    local function darkestIn(rect)
+        local v = 0xFF
+        for y = rect.y, rect.y + rect.h - 1 do
+            for x = rect.x, rect.x + rect.w - 1 do
+                v = math.min(v, gray(x, y))
+            end
+        end
+        return v
+    end
+
     local function find(widget, pred)
         if type(widget) ~= "table" then return end
         if pred(widget) then return widget end
@@ -673,6 +684,10 @@ describe("Reorganized settings", function()
             assert.are.equal(page.content_rect.y + page.content_rect.h, page.bar.dimen.y)
             assert.are.equal(screen.h, page.bar.dimen.y + page.bar.dimen.h)
             assert.are.equal(Palette.rule:getColor8().a, gray(math.floor(screen.w / 2), page.bar.dimen.y))
+            -- the rows are divided by the same rule gray, the reference's 0xBB
+            local first = page.shown[1].rect
+            assert.are.equal(0xBB, Palette.rule:getColor8().a)
+            assert.are.equal(Palette.rule:getColor8().a, gray(math.floor(screen.w / 2), first.y + first.h - 1))
             -- no back in the title band any more: the title sits alone above the list
             assert.are.equal(page.title_rect.y + page.title_rect.h, page.content_rect.y)
             assert.is_true(back.dimen.x < screen.w / 4 and back.dimen.y >= page.bar.dimen.y)
@@ -712,6 +727,9 @@ describe("Reorganized settings", function()
             assert.are.equal(Palette.rule:getColor8().a, gray(left_x, top))
             assert.are.equal(Palette.ink:getColor8().a, gray(right_x, top))
             assert.are.equal(Palette.ink:getColor8().a, gray(pager.next_rect.x, top + math.floor(pager.dimen.h / 2)))
+            -- the glyphs too: the disabled one in rule gray like its outline, the enabled one in ink
+            assert.are.equal(Palette.rule:getColor8().a, darkestIn(pager.prev_icon.dimen))
+            assert.are.equal(Palette.ink:getColor8().a, darkestIn(pager.next_icon.dimen))
             local refreshes = refreshesOf(function() tap(pager.prev_rect) end)
             assert.are.equal(1, page.page)
             assert.are.same({}, refreshes)
@@ -750,6 +768,8 @@ describe("Reorganized settings", function()
                 assert.are.equal(Palette.rule:getColor8().a, gray(x, pager.dimen.y))
             end
             assert.are.equal(Palette.rule:getColor8().a, gray(divider_x, pager.dimen.y + math.floor(pager.dimen.h / 2)))
+            assert.are.equal(Palette.rule:getColor8().a, darkestIn(pager.prev_icon.dimen))
+            assert.are.equal(Palette.rule:getColor8().a, darkestIn(pager.next_icon.dimen))
             local refreshes = refreshesOf(function()
                 tap(pager.prev_rect)
                 tap(pager.next_rect)
