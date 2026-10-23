@@ -27,6 +27,31 @@ function AutoTurn:isActive()
     return self.enabled and self.autoturn_sec > 0
 end
 
+function AutoTurn:_resetGuide()
+    if not self.guide then return end
+    UIManager:unschedule(self.guide_task)
+    self.guide:setLine(nil)
+    if not self:isActive() or not self.guide_enabled or self.suspended then return end
+    self.guide:reset()
+    self.guide:setLine(1)
+    if not self.settings and #self.guide.lines > 0 then
+        UIManager:scheduleIn(self.autoturn_sec / #self.guide.lines, self.guide_task)
+    end
+end
+
+function AutoTurn:_advanceGuide()
+    local count = #self.guide.lines
+    if count == 0 then return end -- Covers and blank pages have no reading lines.
+    local elapsed = self.settings and 0 or time.to_number(UIManager:getElapsedTimeSinceBoot() - self.last_action_time)
+    local interval = self.autoturn_sec / count
+    local index = math.min(count, math.floor(elapsed / interval) + 1)
+    local top = UIManager:getTopmostVisibleWidget()
+    self.guide:setLine((top == self.ui or top == self.settings) and index or nil)
+    if not self.settings then
+        UIManager:scheduleIn(elapsed < self.autoturn_sec and math.max(0.01, index * interval - elapsed) or interval, self.guide_task)
+    end
+end
+
 function AutoTurn:_schedule()
     if not self:isActive() or self.suspended or self.settings then
         logger.dbg("AutoTurn:_schedule is disabled")
@@ -61,6 +86,10 @@ end
 
 function AutoTurn:_unschedule()
     PluginShare.pause_auto_suspend = false
+    if self.guide then
+        UIManager:unschedule(self.guide_task)
+        self.guide:setLine(nil)
+    end
     if self.scheduled then
         logger.dbg("AutoTurn: unschedule")
         UIManager:unschedule(self.task)
@@ -76,6 +105,7 @@ function AutoTurn:_start(silent)
         PluginShare.pause_auto_suspend = true
         self.last_action_time = time_since_boot
         self:_schedule()
+        self:_resetGuide()
 
         if silent then return end
 
@@ -105,6 +135,7 @@ function AutoTurn:setInterval(seconds, distance, silent)
     G_reader_settings:saveSetting("autoturn_timeout_seconds", seconds)
     G_reader_settings:saveSetting("autoturn_distance", self.autoturn_distance)
     self:_start(silent)
+    if self.settings then self:_resetGuide() end
     if self.pill and not self.settings then
         UIManager:setDirty(self.ui.view.dialog, "ui", self.pill.dimen)
     end
@@ -134,9 +165,14 @@ function AutoTurn:showSettings()
     self:_unschedule()
     self.settings = require("apps/reader/modules/readerautoturn").Settings:new{ autoturn = self }
     UIManager:show(self.settings, "ui", self.settings.panel:getRefreshRegion())
+    self:_resetGuide()
 end
 
 function AutoTurn:onReaderReady()
+    if self.ui.rolling and not self.guide then
+        self.guide = require("apps/reader/modules/readerautoturn").Guide:new{ autoturn = self }
+        self.ui.view:registerViewModule("autoturn_guide", self.guide)
+    end
     if not usesQuickControls(self.ui) then return end
     if self.pill then self.pill:free() end
     self.pill = require("apps/reader/modules/readerautoturn").Pill:new{ autoturn = self }
@@ -164,11 +200,13 @@ function AutoTurn:init()
     self.autoturn_sec = G_reader_settings:readSetting("autoturn_timeout_seconds", 0)
     self.autoturn_distance = G_reader_settings:readSetting("autoturn_distance", 1)
     self.enabled = false
+    self.guide_enabled = G_reader_settings:isTrue("autoturn_reading_guide")
     G_reader_settings:delSetting("autoturn_enabled") -- old versions persisted activation; only timing preferences survive now.
     self.ui.menu:registerToMainMenu(self)
     self.task = function()
         self:_schedule()
     end
+    self.guide_task = function() self:_advanceGuide() end
 end
 
 function AutoTurn:onCloseWidget()
@@ -186,12 +224,22 @@ function AutoTurn:onCloseDocument()
         self.pill:free()
         self.pill = nil
     end
+    if self.guide then
+        self.ui.view.view_modules.autoturn_guide = nil
+        self.guide:free()
+        self.guide = nil
+    end
 end
 
 function AutoTurn:onInputEvent()
     logger.dbg("AutoTurn: onInputEvent")
     self.last_action_time = UIManager:getElapsedTimeSinceBoot()
+    self:_resetGuide()
 end
+
+AutoTurn.onPageUpdate = AutoTurn.onInputEvent
+AutoTurn.onPosUpdate = AutoTurn.onInputEvent
+AutoTurn.onDocumentRerendered = AutoTurn.onInputEvent
 
 -- We do not want autoturn to turn pages during the suspend process.
 -- Unschedule it and restart after resume.
