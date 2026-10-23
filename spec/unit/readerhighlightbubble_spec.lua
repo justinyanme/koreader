@@ -679,7 +679,7 @@ describe("ReaderHighlightBubble module", function()
                 sheet.input:setText(string.rep("A long thought\\n", 20))
                 UIManager:forceRePaint()
                 local pos = ui.document:getXPointer()
-                UIManager:sendEvent(Event:new("KeyPress", Key:new("PageForward", {})))
+                UIManager:sendEvent(Event:new("KeyPress", Key:new("LPgFwd", {})))
                 assert.are.equal(pos, ui.document:getXPointer())
                 UIManager:sendEvent(Event:new("KeyPress", Key:new("Back", {})))
                 UIManager:forceRePaint()
@@ -702,6 +702,34 @@ describe("ReaderHighlightBubble module", function()
             Font:setUIScale(old_scale)
             G_reader_settings:saveSetting("virtual_keyboard_enabled", keyboard_enabled)
             assert(ok, err)
+        end)
+
+        it("should delete a direct thought cleared from the original bookmark editor", function()
+            select(ui, Geom:new{ x = 400, y = 110 })
+            tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+            UIManager:forceRePaint()
+            noteSheet().input:setText("Original entry compatibility")
+            tapWidget(cell(noteSheet(), "Save"))
+            UIManager:forceRePaint()
+            ui:handleEvent(Event:new("ShowBookmark"))
+            UIManager:forceRePaint()
+            local row = find(ui.bookmark.bookmark_menu, function(w) return w.entry and w.entry.note and w.dimen end)
+            UIManager:sendEvent(Event:new("Gesture", { ges = "hold", pos = Geom:new{
+                x = row.dimen.x + math.floor(row.dimen.w / 2),
+                y = row.dimen.y + math.floor(row.dimen.h / 2),
+            } }))
+            UIManager:forceRePaint()
+            tapWidget(cell(topWidget(), "Edit note"))
+            UIManager:forceRePaint()
+            local dialog = shown(require("ui/widget/inputdialog"))
+            assert.are.equal("Original entry compatibility", dialog:getInputText())
+            dialog:setInputText("")
+            tapWidget(cell(dialog, "Save"))
+            UIManager:forceRePaint()
+            assert.are.equal(0, #ui.annotation.annotations)
+            assert.is_nil(find(topWidget(), function(w) return w.entry and w.entry.note end))
+            UIManager:close(ui.bookmark.bookmark_menu)
+            ui.bookmark.bookmark_menu = nil
         end)
 
         it("should not bring back a looked-up highlight on a long-press on nothing (C1)", function()
@@ -1429,6 +1457,40 @@ describe("ReaderHighlightBubble module", function()
                 assert(ok, err)
                 return lowest, off_screen
             end
+
+            it("should save or discard a thought across pages and return to the original page", function()
+                local page = ui.view.state.page
+                local w, h = Screen:getWidth(), Screen:getHeight()
+                for _, save in ipairs{ false, true } do
+                    gesture("hold", { x = 300, y = 30 })
+                    UIManager:forceRePaint()
+                    gesture("hold_pan", { x = 300, y = 400 })
+                    gesture("hold_pan", { x = 300, y = 450 })
+                    gesture("hold_pan", { x = w - 5, y = h - 5 })
+                    UIManager:forceRePaint()
+                    gesture("hold_release", { x = w - 5, y = h - 5 })
+                    UIManager:forceRePaint()
+                    assert.are.equal("scroll", ui.view.view_mode, tostring(save))
+                    local selected = ui.highlight.selected_text
+                    tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+                    UIManager:forceRePaint()
+                    local sheet = noteSheet()
+                    assert.are.equal(0, #ui.annotation.annotations)
+                    sheet.input:setText("Across pages")
+                    tapWidget(cell(sheet, save and "Save" or "Back"))
+                    UIManager:forceRePaint()
+                    assert.are.equal("page", ui.view.view_mode)
+                    assert.are.equal(page, ui.view.state.page)
+                    if save then
+                        assert.are.equal(1, #ui.annotation.annotations)
+                        assert.are.equal("note", ui.annotation.annotations[1].origin)
+                        assert.are.equal(selected.pos0, ui.annotation.annotations[1].pos0)
+                        assert.are.equal(selected.pos1, ui.annotation.annotations[1].pos1)
+                    else
+                        assertNoNotes(ui)
+                    end
+                end
+            end)
 
             it("should draw a long-press drag from the first line on across pages, its lines off the screen left out", function()
                 local page = ui.view.state.page

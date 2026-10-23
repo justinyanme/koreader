@@ -1351,11 +1351,7 @@ function ReaderHighlight:showHighlightNoteOrDialog(index)
                         text = _("Delete note"),
                         callback = function()
                             UIManager:close(textviewer)
-                            local annotation = self.ui.annotation.annotations[index]
-                            annotation.note = nil
-                            self.ui:handleEvent(Event:new("AnnotationsModified",
-                                    { annotation, nb_highlights_added = 1, nb_notes_added = -1 }))
-                            self:writePdfAnnotation("content", annotation, "")
+                            self.ui.annotation:setNote(index, "")
                             if self.view.highlight.note_mark then -- refresh note marker
                                 UIManager:setDirty(self.dialog, "ui")
                             end
@@ -2333,7 +2329,7 @@ function ReaderHighlight:saveHighlight(extend_to_sentence)
 end
 
 function ReaderHighlight:writePdfAnnotation(action, item, content)
-    if not (self.document.is_pdf and self.highlight_write_into_pdf and item.drawer) then
+    if item.origin == "note" or not (self.document.is_pdf and self.highlight_write_into_pdf and item.drawer) then
         return
     end
     logger.dbg("write to pdf document", action, item)

@@ -95,7 +95,12 @@ function NoteMarks:paintTo(bb, x, y)
         if r then
             -- raised into the line gap: page text cannot reflow around it
             local mark = Geom:new{ x = r.x + r.w, y = r.y - math.floor(self.size / 2), w = self.size, h = self.size }
-            self.targets[index] = mark
+            local touch = Screen:scaleBySize(44)
+            self.targets[index] = Geom:new{
+                x = math.max(0, math.min(Screen:getWidth() - touch, mark.x - math.floor((touch - mark.w) / 2))),
+                y = math.max(0, math.min(Screen:getHeight() - touch, mark.y - math.floor((touch - mark.h) / 2))),
+                w = touch, h = touch,
+            }
             self.icon:paintTo(bb, x + mark.x, y + mark.y)
         end
     end
@@ -1027,7 +1032,6 @@ function ReaderHighlightBubble:showHighlightBubble(index, rects, word)
             { icon = "eink/thought",
               text = item.note and C_("Highlight bubble", "Edit note") or C_("Highlight bubble", "Write note"),
               callback = function()
-                self:closeBubble()
                 self:showNoteSheet(index)
               end },
             { icon = "eink/copy", text = C_("Text", "Copy"), callback = function()
@@ -1049,39 +1053,17 @@ function ReaderHighlightBubble:deleteHighlight(index)
     UIManager:setDirty(self.dialog, "ui", region) -- whole page when not visible, as upstream
 end
 
--- Direct thoughts live in the sidecar only: never create/delete a PDF underline at the same range.
-function ReaderHighlightBubble:writePdfAnnotation(action, item, content)
-    if item.origin ~= "note" then
-        return ReaderHighlight.writePdfAnnotation(self, action, item, content)
-    end
-end
-
---- Sets or clears (empty text) the note of a highlight, as ReaderBookmark:setBookmarkNote().
+--- Updates the note through the shared lifecycle, repainting its text and marker.
 function ReaderHighlightBubble:setNote(index, text)
-    local annotation = self.ui.annotation.annotations[index]
-    local value = text ~= "" and text or nil
-    if not value and annotation.origin == "note" then
-        return self:deleteHighlight(index)
-    end
-    local type_before = self.ui.bookmark.getBookmarkType(annotation)
-    annotation.note = value
-    self:writePdfAnnotation("content", annotation, value or "")
-    local type_after = self.ui.bookmark.getBookmarkType(annotation)
-    if type_before == type_after then
-        self.ui:handleEvent(Event:new("AnnotationsModified", { annotation }))
-    elseif type_before == "highlight" then
-        self.ui:handleEvent(Event:new("AnnotationsModified", { annotation, nb_highlights_added = -1, nb_notes_added = 1 }))
-    else
-        self.ui:handleEvent(Event:new("AnnotationsModified", { annotation, nb_highlights_added = 1, nb_notes_added = -1 }))
-    end
-    UIManager:setDirty(self.dialog, "ui", self:linesRegion(self:highlightRects(index)))
+    local region = self:linesRegion(self:highlightRects(index))
+    self.ui.annotation:setNote(index, text)
+    UIManager:setDirty(self.dialog, "ui", region)
 end
 
 --- New thoughts stay drafts until Save; existing thoughts keep their value on Back.
 function ReaderHighlightBubble:showNoteSheet(index)
     local item = index and self.ui.annotation.annotations[index] or util.tableDeepCopy(self.selected_text)
     if not item then return end
-    self:closeBubble()
     local gap, back_w, icon_w = Screen:scaleBySize(20), Screen:scaleBySize(75), Screen:scaleBySize(36)
     local content_w = Screen:getWidth() - back_w - 2 * gap
     local sheet
@@ -1092,7 +1074,7 @@ function ReaderHighlightBubble:showNoteSheet(index)
         hint = _("Write your thoughts on this moment…"),
         face = Font:getFace("ui_body"),
         width = content_w - icon_w - button_w,
-        height = math.max(Screen:scaleBySize(38), 2 * Font:getFace("ui_body").size),
+        height = math.max(Screen:scaleBySize(44), 2 * Font:getFace("ui_body").size),
         scroll = true, bordersize = 0, padding = 0, margin = 0,
     }
     local quote = TextBoxWidget:new{
@@ -1122,7 +1104,7 @@ function ReaderHighlightBubble:showNoteSheet(index)
         },
         bottom_inset = 0,
         wash = NoteWash:new{},
-        on_close = function() self:clear() end,
+        on_close = function() self:dismiss() end,
     }
     input.parent = sheet
     UIManager:show(sheet.wash, "ui", Screen:getSize())
