@@ -2123,6 +2123,7 @@ describe("ReaderToolbar module", function()
             G_reader_settings:delSetting("autoturn_enabled")
             G_reader_settings:delSetting("autoturn_timeout_seconds")
             G_reader_settings:delSetting("autoturn_distance")
+            G_reader_settings:delSetting("autoturn_reading_guide")
         end)
 
         after_each(function()
@@ -2130,7 +2131,7 @@ describe("ReaderToolbar module", function()
             disable_plugins()
             clock:revert()
             UIManager:_checkTasks()
-            for _, key in ipairs{ "autoturn_enabled", "autoturn_timeout_seconds", "autoturn_distance" } do
+            for _, key in ipairs{ "autoturn_enabled", "autoturn_timeout_seconds", "autoturn_distance", "autoturn_reading_guide" } do
                 G_reader_settings:delSetting(key)
             end
         end)
@@ -2217,6 +2218,344 @@ describe("ReaderToolbar module", function()
                 assert(ok, err)
             end)
         end
+
+        local function toggleGuide(settings)
+            local label = find(settings, function(w) return w.text == _("Reading guide") end)
+            assert.is_truthy(label)
+            tapWidget(find(settings, function(w) return w.onTapGuide end))
+            UIManager:forceRePaint()
+        end
+
+        it("should divide each EPUB page equally between real text lines and refresh only old/new strips", function()
+            G_reader_settings:saveSetting("autoturn_timeout_seconds", 15)
+            local ui = openReader(sample_epub)
+            ui:handleEvent(Event:new("GotoPage", 5))
+            UIManager:forceRePaint()
+            start(ui)
+            local pill = ui.view.view_modules.autoturn
+            tapWidget(pill)
+            UIManager:forceRePaint()
+            toggleGuide(topWidget())
+            assert.is_true(G_reader_settings:isTrue("autoturn_reading_guide"))
+            local guide = ui.view.view_modules.autoturn_guide
+            assert.is_true(#guide.lines > 2)
+            local first = guide.rect:copy()
+            assert.is_true(inked(first.x, first.y, first.x + first.w - 1, first.y))
+            advance(30) -- the settings preview is paused, including the page timer
+            assert.are.same(first, guide.rect)
+            assert.are.equal(5, ui:getCurrentPage())
+            tapWidget(findIcon(topWidget(), "eink/chev.up"))
+            UIManager:forceRePaint()
+            local duration = 15 / #guide.lines
+            advance(duration * 0.9)
+            assert.are.same(first, guide.rect)
+            local refreshes = refreshesOf(function() advance(duration * 0.2) end)
+            assert.are.same({
+                { mode = "fast", region = first },
+                { mode = "fast", region = guide.rect },
+            }, refreshes)
+            assert.is_true(guide.rect.y > first.y)
+            assert.is_false(inked(first.x, first.y, first.x + first.w - 1, first.y))
+            advance(15 - duration * 1.1 + 0.001)
+            assert.are.equal(6, ui:getCurrentPage())
+            assert.are.same(guide.lines[1].rect, guide.rect)
+            tapWidget(pill)
+            UIManager:forceRePaint()
+            toggleGuide(topWidget())
+            assert.is_nil(guide.rect)
+            tapWidget(findIcon(topWidget(), "eink/chev.up"))
+            advance(15)
+            assert.are.equal(7, ui:getCurrentPage())
+            assert.is_nil(guide.rect)
+        end)
+
+        it("should reset the guide for manual turns and reflow, pause on suspend and clear on stop/close", function()
+            G_reader_settings:saveSetting("autoturn_timeout_seconds", 15)
+            local ui = openReader(sample_epub)
+            start(ui)
+            tapWidget(ui.view.view_modules.autoturn)
+            UIManager:forceRePaint()
+            toggleGuide(topWidget())
+            tapWidget(findIcon(topWidget(), "eink/chev.up"))
+            UIManager:forceRePaint()
+            local guide = ui.view.view_modules.autoturn_guide
+            advance(7)
+            ui:handleEvent(Event:new("GotoPage", 5))
+            UIManager:forceRePaint()
+            assert.are.same(guide.lines[1].rect, guide.rect)
+            advance(7)
+            ui:handleEvent(Event:new("SetFontSize", 28))
+            UIManager:forceRePaint()
+            assert.are.same(guide.lines[1].rect, guide.rect)
+            ui:handleEvent(Event:new("Suspend"))
+            assert.is_nil(guide.rect)
+            local page = ui:getCurrentPage()
+            advance(30)
+            assert.are.equal(page, ui:getCurrentPage())
+            assert.is_nil(guide.rect)
+            ui:handleEvent(Event:new("Resume"))
+            assert.are.same(guide.lines[1].rect, guide.rect)
+            tapWidget(ui.view.view_modules.autoturn)
+            UIManager:forceRePaint()
+            tapWidget(button(topWidget(), "Stop autoturn"))
+            UIManager:forceRePaint()
+            assert.is_nil(guide.rect)
+            advance(30)
+            assert.are.equal(page, ui:getCurrentPage())
+            start(ui)
+            assert.is_truthy(guide.rect)
+            closeReader(ui)
+            assert.is_nil(guide.rect)
+            advance(30)
+            ui = openReader(sample_epub, true)
+            assert.is_true(ui.autoturn.guide_enabled)
+            assert.is_false(ui.autoturn:isActive())
+            assert.is_nil(ui.view.view_modules.autoturn_guide.rect)
+        end)
+
+        it("should reuse the saved underline baseline instead of measuring its ink as glyphs", function()
+            G_reader_settings:saveSetting("autoturn_reading_guide", true)
+            local ui = openReader(sample_epub)
+            ui:handleEvent(Event:new("SetLineSpace", 200))
+            ui:handleEvent(Event:new("GotoPage", 10))
+            UIManager:forceRePaint()
+            local boxes = ui.document:getTextFromPositions({ x = 0, y = 0 },
+                { x = Screen:getWidth(), y = Screen:getHeight() }, true).sboxes
+            local box = boxes[1]
+            ui.view.highlight.saved_drawer = "underscore"
+            ui.highlight:onHold(nil, { pos = Geom:new{ x = box.x + 2, y = box.y + box.h / 2 } })
+            ui.highlight:onHoldPan(nil, { pos = Geom:new{ x = box.x + box.w - 2, y = box.y + box.h / 2 } })
+            ui.highlight:onHoldRelease()
+            ui.highlight:saveHighlight()
+            ui.highlight:clear()
+            if ui.highlight.highlight_dialog then UIManager:close(ui.highlight.highlight_dialog) end
+            UIManager:forceRePaint()
+            local key = box.y .. ":" .. box.h
+            assert.is_truthy(ui.view.highlight.line_tops[key])
+            local underlineY = ui.view.underlineY
+            local measured_after_highlights = false
+            local measure = stub(ui.view, "underlineY", function(view, bb, rects)
+                if view.highlight.line_tops and view.highlight.line_tops[key]
+                    and rects[1].y .. ":" .. rects[1].h == key then
+                    measured_after_highlights = true
+                end
+                return underlineY(view, bb, rects)
+            end)
+            finally(function() measure:revert() end)
+            start(ui)
+            local guide = ui.view.view_modules.autoturn_guide
+            assert.is_false(measured_after_highlights)
+            assert.are.equal(ui.view.highlight.line_tops[key], guide.rect.y)
+            local saved_y = guide.rect.y
+            advance(60 / #guide.lines + 0.01)
+            UIManager:forceRePaint()
+            assert.are.equal(saved_y, ui.view.highlight.line_tops[key])
+            assert.is_true(inked(box.x, saved_y, box.x + box.w - 1, saved_y))
+        end)
+
+        it("should leave the guide alone on input and hide it below toolbars and panels", function()
+            G_reader_settings:saveSetting("autoturn_reading_guide", true)
+            local ui = openReader(sample_epub)
+            ui:handleEvent(Event:new("GotoPage", 5))
+            start(ui)
+            local guide = ui.view.view_modules.autoturn_guide
+            advance(60 / #guide.lines + 0.01)
+            local current = guide.rect
+            assert.are_not.equal(guide.lines[1].rect, current)
+            local refreshes = refreshesOf(function() UIManager.event_hook:execute("InputEvent") end)
+            assert.are.same({}, refreshes)
+            assert.are.equal(current, guide.rect)
+            tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
+            UIManager:forceRePaint()
+            assert.are.equal(ui.menu.bars, topWidget())
+            advance(60 / #guide.lines + 0.01)
+            assert.is_nil(guide.rect)
+            ui:handleEvent(Event:new("DocumentRerendered"))
+            UIManager:forceRePaint()
+            assert.is_nil(guide.rect)
+            tapWidget(findIcon(ui.menu.bars.bottom, "eink/progress"))
+            UIManager:forceRePaint()
+            refreshes = refreshesOf(function() UIManager.event_hook:execute("InputEvent") end)
+            assert.are.same({}, refreshes)
+            assert.is_nil(guide.rect)
+            ui:handleEvent(Event:new("DocumentRerendered"))
+            UIManager:forceRePaint()
+            assert.is_nil(guide.rect)
+        end)
+
+        it("should restart at the first line on DocumentRerendered without a PageUpdate or PosUpdate", function()
+            G_reader_settings:saveSetting("autoturn_reading_guide", true)
+            local ui = openReader(sample_epub)
+            ui:handleEvent(Event:new("GotoPage", 5))
+            start(ui)
+            local guide = ui.view.view_modules.autoturn_guide
+            advance(60 / #guide.lines + 0.01)
+            assert.are_not.equal(guide.lines[1].rect, guide.rect)
+            ui:handleEvent(Event:new("DocumentRerendered"))
+            UIManager:forceRePaint()
+            assert.are.equal(guide.lines[1].rect, guide.rect)
+            advance(60 / #guide.lines * 0.9)
+            assert.are.equal(guide.lines[1].rect, guide.rect)
+        end)
+
+        local function openGuideSample(body)
+            local path = require("datastorage"):getDataDir() .. "/reading-guide-spec.html"
+            require("util").writeToFile("<html><body>" .. body .. "</body></html>", path)
+            finally(function()
+                if ReaderUI.instance then closeReader(ReaderUI.instance) end
+                DocSettings:open(path):purge()
+                os.remove(path)
+            end)
+            return openReader(path)
+        end
+
+        it("should treat overlapping superscript and large-text segments as one reading line", function()
+            G_reader_settings:saveSetting("autoturn_reading_guide", true)
+            local ui = openGuideSample([[<p>Normal <sup>footnote</sup> and <span style="font-size:150%">large</span> text.</p>
+<p>Second reading line.</p>]])
+            local getText = ui.document.getTextFromPositions
+            -- This CRe version normalizes inline boxes; retain the document contract's unequal-height case too.
+            local segments = stub(ui.document, "getTextFromPositions", function(doc, ...)
+                local text = require("util").tableDeepCopy(getText(doc, ...))
+                if text and text.sboxes[1] then
+                    local box = text.sboxes[1]
+                    local raised = box:copy()
+                    box.w = math.floor(box.w / 2)
+                    raised.x, raised.w = box.x + box.w, raised.w - box.w
+                    raised.y, raised.h = box.y - 3, math.floor(box.h * 0.75)
+                    table.insert(text.sboxes, 2, raised)
+                end
+                return text
+            end)
+            finally(function() segments:revert() end)
+            start(ui)
+            local guide = ui.view.view_modules.autoturn_guide
+            assert.are.equal(2, #guide.lines)
+            assert.are.equal(2, #guide.lines[1].segments)
+            assert.are_not.equal(guide.lines[1].segments[1].y, guide.lines[1].segments[2].y)
+            assert.is_true(guide.lines[1].bottom - guide.lines[1].top > guide.lines[2].bottom - guide.lines[2].top)
+            advance(29)
+            assert.are.equal(guide.lines[1].rect, guide.rect)
+            advance(1)
+            assert.are.equal(guide.lines[2].rect, guide.rect)
+        end)
+
+        it("should skip clipped scroll lines but retain a line exactly at the bottom edge", function()
+            G_reader_settings:saveSetting("autoturn_reading_guide", true)
+            local ui = openReader(sample_epub)
+            ui:handleEvent(Event:new("GotoPage", 5))
+            UIManager:forceRePaint()
+            local sample = ui.document:getTextFromPositions({ x = 0, y = 0 },
+                { x = Screen:getWidth(), y = Screen:getHeight() }, true)
+            ui:handleEvent(Event:new("SetViewMode", "scroll"))
+            UIManager:forceRePaint()
+            local text = stub(ui.document, "getTextFromPositions", function()
+                local range = require("util").tableDeepCopy(sample)
+                local box = range.sboxes[1]
+                range.sboxes = {}
+                for _, y in ipairs{ -1, Screen:getHeight() - box.h, Screen:getHeight() - 1 } do
+                    local segment = box:copy()
+                    segment.y = y
+                    table.insert(range.sboxes, segment)
+                end
+                return range
+            end)
+            finally(function() text:revert() end)
+            ui:handleEvent(Event:new("ShowMenu"))
+            UIManager:forceRePaint()
+            tapWidget(findIcon(ui.menu.bars.bottom, "eink/progress"))
+            UIManager:forceRePaint()
+            tapWidget(button(ui.menu.panel, "Start autoturn"))
+            UIManager:forceRePaint()
+            local guide = ui.view.view_modules.autoturn_guide
+            assert.are.equal(1, #guide.lines)
+            assert.are.equal(Screen:getHeight(), guide.lines[1].bottom)
+            assert.is_truthy(guide.rect)
+            assert.is_true(guide.rect.y + guide.rect.h <= Screen:getHeight())
+        end)
+
+        it("should leave an image-only cover without guide ink or a guide task", function()
+            G_reader_settings:saveSetting("autoturn_reading_guide", true)
+            local image = require("ffi/util").realpath("resources/koreader.png")
+            local ui = openGuideSample('<p><img src="' .. image .. '"/></p>')
+            start(ui)
+            local guide = ui.view.view_modules.autoturn_guide
+            assert.are.equal(0, #guide.lines)
+            assert.is_nil(guide.rect)
+            for _, task in ipairs(UIManager._task_queue) do
+                assert.are_not.equal(ui.autoturn.guide_task, task.action)
+            end
+            advance(60)
+            assert.is_false(ui.autoturn:isActive())
+            assert.is_nil(guide.rect)
+        end)
+
+        it("should finish the left column before moving to the right column", function()
+            G_reader_settings:saveSetting("autoturn_reading_guide", true)
+            local ui = openReader(sample_epub)
+            ui:handleEvent(Event:new("SetVisiblePages", 2))
+            ui:handleEvent(Event:new("GotoPage", 10))
+            UIManager:forceRePaint()
+            assert.are.equal(2, ui.document:getVisiblePageCount())
+            start(ui)
+            local guide = ui.view.view_modules.autoturn_guide
+            local first_right
+            for i, line in ipairs(guide.lines) do
+                if line.column == 1 then first_right = first_right or i end
+                assert.is_true(line.rect.w < Screen:getWidth() / 2)
+                if first_right then assert.are.equal(1, line.column) end
+            end
+            assert.is_truthy(first_right)
+            assert.is_true(first_right > 1)
+            advance((first_right - 1) * 60 / #guide.lines + 0.001)
+            assert.are.equal(guide.lines[first_right].rect, guide.rect)
+        end)
+
+        it("should draw, move and erase the guide in night mode", function()
+            local night = G_reader_settings:readSetting("night_mode")
+            G_reader_settings:saveSetting("autoturn_reading_guide", true)
+            local ui = openReader(sample_epub)
+            finally(function()
+                if Screen.bb:getInverse() == 1 then ui:handleEvent(Event:new("ToggleNightMode")) end
+                G_reader_settings:saveSetting("night_mode", night)
+            end)
+            ui:handleEvent(Event:new("GotoPage", 5))
+            UIManager:forceRePaint()
+            start(ui)
+            ui:handleEvent(Event:new("ToggleNightMode"))
+            UIManager:forceRePaint()
+            assert.are.equal(ui, topWidget())
+            assert.is_true(ui.autoturn:isActive())
+            assert.are.equal(1, Screen.bb:getInverse())
+            local guide = ui.view.view_modules.autoturn_guide
+            assert.are.same({ true, true }, { ui.autoturn.guide_enabled, #guide.lines > 0 })
+            local first = guide.rect:copy()
+            assert.is_true(inked(first.x, first.y, first.x + first.w - 1, first.y))
+            advance(60 / #guide.lines + 0.01)
+            assert.is_false(inked(first.x, first.y, first.x + first.w - 1, first.y))
+            local current = guide.rect:copy()
+            assert.is_true(inked(current.x, current.y, current.x + current.w - 1, current.y))
+            tapWidget(ui.view.view_modules.autoturn)
+            UIManager:forceRePaint()
+            tapWidget(button(topWidget(), "Stop autoturn"))
+            UIManager:forceRePaint()
+            assert.is_nil(guide.rect)
+            assert.is_false(inked(current.x, current.y, current.x + current.w - 1, current.y))
+        end)
+
+        it("should omit the guide from PDF even when its preference was enabled in EPUB", function()
+            G_reader_settings:saveSetting("autoturn_reading_guide", true)
+            G_reader_settings:saveSetting("autoturn_timeout_seconds", 15)
+            local ui = openReader(sample_pdf)
+            start(ui)
+            assert.is_nil(ui.view.view_modules.autoturn_guide)
+            tapWidget(ui.view.view_modules.autoturn)
+            UIManager:forceRePaint()
+            assert.is_nil(find(topWidget(), function(w) return w.text == _("Reading guide") end))
+            tapWidget(findIcon(topWidget(), "eink/chev.up"))
+            advance(15)
+            assert.are.equal(2, ui:getCurrentPage())
+        end)
 
         it("should require explicit activation after opening, switching books and restarting, but resume after suspend", function()
             G_reader_settings:saveSetting("autoturn_enabled", true) -- legacy saved state from a previous process
@@ -2455,7 +2794,7 @@ describe("ReaderToolbar module", function()
             local settings = topWidget()
             local region = settings.panel:getRefreshRegion()
             assert.are.same({ { mode = "ui", region = region } }, refreshes)
-            assert.is_nil(find(settings, function(w) return w.text == _("Reading guide") end))
+            assert.is_truthy(find(settings, function(w) return w.text == _("Reading guide") end))
             refreshes = refreshesOf(function() tapWidget(button(settings, "1.5")) end)
             assert.are.same({ { mode = "ui", region = region } }, refreshes)
             refreshes = refreshesOf(function() tap(Screen:getWidth() - 10, region.y - 10) end)
@@ -2532,7 +2871,11 @@ describe("ReaderToolbar module", function()
                 local header = settings.panel.content[1]
                 local title = header[1]
                 assert.is_true(title[1]:getSize().w <= header.dimen.w)
-                assert.is_nil(header[3])
+                local guide = header[3][1]
+                assert.is_truthy(guide)
+                local title_right = (header.dimen.w + title[1]:getSize().w) / 2 + header.dimen.x
+                assert.is_true(title_right < guide.dimen.x)
+                assert.is_true(guide.touch_dimen.h >= Screen:scaleBySize(44))
                 local first = button(settings, "1.0")
                 local second = button(settings, "1.5")
                 assert.is_true(first.dimen.x + first.dimen.w <= second.dimen.x)
