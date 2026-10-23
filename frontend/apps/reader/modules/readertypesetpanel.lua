@@ -48,6 +48,7 @@ local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
 local Toast = require("ui/widget/toast")
 local UIManager = require("ui/uimanager")
+local util = require("util")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Widget = require("ui/widget/widget")
@@ -62,10 +63,9 @@ local FONT_SIZES = { 15, 16, 17, 18, 19, 20, 22, 24, 26, 28 }
 local LINE_SPACINGS = { 85, 95, 105, 115, 125, 135, 145, 155, 165 }
 local MARGINS = { 10, 14, 18, 23, 28, 36, 44, 56, 70 } -- dp, left and right; with the first round's 18 / 28 / 44
 local MAX_LINE_CHARS = 38 -- CJK characters per line
--- 思源宋体, not bundled. Only the first face of a .ttc collection is listed by crengine (as in ReaderFont).
+-- 思源宋体, when installed by the user or provided by the system.
 local SERIF_FACES = { "Source Han Serif SC", "Noto Serif CJK SC", "Noto Serif SC", "Source Han Serif CN", "Source Han Serif" }
 local CJK_SANS = "Noto Sans CJK SC" -- 思源黑体, bundled
-local LATIN_FACES = { serif = "Noto Serif", sans = "Noto Sans" }
 
 local LABEL_W = Screen:scaleBySize(64)
 
@@ -73,16 +73,10 @@ local function text(str, face, color, max_width)
     return TextWidget:new{ text = str, face = Font:getFace(face), fgcolor = color or Palette.ink, max_width = max_width }
 end
 
-local function hasFace(name)
-    for _, info in pairs(FontList.fontinfo) do
-        if info[1] and info[1].name == name then return true end
-    end
-    return false
-end
-
 local function serifFace()
+    local faces = require("document/credocument"):engineInit().getFontFaces()
     for _, face in ipairs(SERIF_FACES) do
-        if hasFace(face) then return face end
+        if util.arrayContains(faces, face) then return face end
     end
 end
 
@@ -158,30 +152,38 @@ function EntryPill:onTapSelect()
     return true
 end
 
--- Font tile: a sample in the face over its name; 2dp ink border when selected, 1dp rule gray otherwise.
+-- Font names preview their own face; the selected tile is ink with paper text.
 local FontCard = InputContainer:extend{
     width = nil,
-    sample = nil, -- widget
-    name = nil, -- string
+    name = nil,
+    face = nil,
+    face_index = nil,
     selected = false,
-    enabled = true,
     callback = nil,
 }
 
 function FontCard:init()
-    local h = Screen:scaleBySize(66)
-    local bw = self.selected and Screen:scaleBySize(2) or Screen:scaleBySize(1)
+    local h = Screen:scaleBySize(44)
+    local bw = Size.border.default
     self.dimen = Geom:new{ w = self.width, h = h }
+    local label = TextWidget:new{
+        text = self.name, face = self.face or Font:getFace("ui_label"),
+        fgcolor = self.selected and Palette.paper or Palette.ink,
+        max_width = self.width - 2 * (bw + Screen:scaleBySize(6)),
+    }
+    local size = label.face.orig_size / Font.ui_scale
+    while label:isTruncated() and size > 12 do
+        size = math.max(12, size - 1)
+        label:free()
+        label.face = Font:getFace(label.face.realname, size * Font.ui_scale, self.face_index)
+    end
     self[1] = FrameContainer:new{
-        bordersize = bw, padding = 0, radius = Screen:scaleBySize(10),
-        color = self.selected and Palette.ink or Palette.rule, background = Palette.paper,
+        bordersize = bw, padding = 0, radius = Screen:scaleBySize(9),
+        color = self.selected and Palette.ink or Palette.mark,
+        background = self.selected and Palette.ink or Palette.mark,
         CenterContainer:new{
             dimen = Geom:new{ w = self.width - 2 * bw, h = h - 2 * bw },
-            VerticalGroup:new{
-                self.sample,
-                VerticalSpan:new{ width = Screen:scaleBySize(2) },
-                text(self.name, "ui_micro", self.enabled and Palette.ink_2 or Palette.ink_3, self.width - 2 * bw),
-            },
+            label,
         },
     }
     self.ges_events = { TapSelect = { GestureRange:new{ ges = "tap", range = self.dimen } } }
@@ -524,6 +526,31 @@ end
 ------------------------------------------------------------------------
 -- Fonts
 
+local font_styles = {
+    regular = true, medium = true, bold = true, italic = true, oblique = true,
+    light = true, thin = true, black = true, heavy = true, semibold = true,
+    demibold = true, extralight = true, ultralight = true, extrabold = true,
+}
+local font_regions = { SC = "SC", TC = "TC", JP = "JP", J = "JP", KR = "KR", K = "KR", HK = "HK", HC = "HK" }
+
+local function fontFamily(face)
+    local name = face
+    while true do
+        local family, style = name:match("^(.-)[%s%-]+(%a+)$")
+        if not style or not font_styles[style:lower()] then break end
+        name = family
+    end
+    local family, suffix = name:match("^(.-) (%u+)$")
+    local region = font_regions[suffix]
+    if region then name = family end
+    if name == "Noto Sans CJK" or name == "Source Han Sans" then
+        name = "Source Han Sans"
+    elseif name == "Noto Serif CJK" or name == "Source Han Serif" then
+        name = "Source Han Serif"
+    end
+    return name, region
+end
+
 --- Whether the book is CJK: by its typography language, or by the UI language when that language is only
 -- a fallback (no language chosen by the user, none usable in the book: txt, "und", missing).
 function ReaderTypesetPanel:isCJK()
@@ -537,15 +564,6 @@ function ReaderTypesetPanel:isCJK()
     return tag:match("^zh") or tag:match("^ja") or tag:match("^ko")
 end
 
---- The face behind a font card ("serif" or "sans") for this book's language,
--- or nil for the CJK serif when it is not installed.
-function ReaderTypesetPanel:cardFace(kind)
-    if not self:isCJK() then
-        return LATIN_FACES[kind]
-    end
-    return kind == "sans" and CJK_SANS or serifFace()
-end
-
 function ReaderTypesetPanel:showSerifMissing()
     UIManager:show(InfoMessage:new{
         text = T(_("Source Han Serif is not installed. Put its font files in %1 and restart KOReader. Source Han Sans is used for now."),
@@ -553,56 +571,127 @@ function ReaderTypesetPanel:showSerifMissing()
     })
 end
 
-function ReaderTypesetPanel:setCardFont(kind)
-    local face = self:cardFace(kind)
-    if not face then
-        face = CJK_SANS
-        self:showSerifMissing()
-    end
-    self.ui.font:onSetFont(face)
-end
-
 function ReaderTypesetPanel:fontCards(width)
-    local gap = Screen:scaleBySize(10)
-    local card_w = math.floor((width - 2 * gap) / 3)
+    local gap = Screen:scaleBySize(6)
+    local columns = math.max(2, math.min(5, math.floor((width + gap) / Screen:scaleBySize(100))))
+    local card_w = math.floor((width - (columns - 1) * gap) / columns)
     local cre = require("document/credocument"):engineInit()
-    local function sample(face, color)
-        local file, index = cre.getFontFaceFilenameAndFaceIndex(face)
-        return TextWidget:new{
-            text = "永 Aa",
-            face = file and Font:getFace(file, 20, index) or Font:getFace("cfont", 20),
-            fgcolor = color,
-            max_width = card_w,
-        }
-    end
-    local row = HorizontalGroup:new{}
-    for __, card in ipairs{ { "serif", _("Source Han Serif") }, { "sans", _("Source Han Sans") } } do
-        local face = self:cardFace(card[1])
-        local name = card[2]
-        if not face then
-            name = T(_("%1 · not installed"), name)
+    local available = cre.getFontFaces()
+    local language = (_.current_lang or "en"):lower():gsub("-", "_")
+    local region = language:match("^ja") and "JP" or language:match("^ko") and "KR"
+        or (language == "zh_tw" or language:find("hant", 1, true)) and "TC"
+        or (language == "zh_hk" or language == "zh_mo") and "HK" or "SC"
+    local representatives, ranks = {}, {}
+    local families = {}
+    for _, face in ipairs(available) do
+        local family, variant = fontFamily(face)
+        families[face] = family
+        if not face:lower():find("mono", 1, true) then
+            local rank = variant == region and 1 or not variant and 2 or variant == "SC" and 3 or 4
+            if not ranks[family] or rank < ranks[family] then
+                representatives[family], ranks[family] = face, rank
+            end
         end
-        table.insert(row, FontCard:new{
-            width = card_w,
-            sample = sample(face or CJK_SANS, face and Palette.ink or Palette.ink_3),
-            name = name,
-            enabled = face ~= nil,
-            selected = face ~= nil and self.ui.font.font_face == face,
-            callback = function()
-                self:setCardFont(card[1])
-                self:refreshPanel()
-            end,
-        })
-        table.insert(row, HorizontalSpan:new{ width = gap })
     end
-    local icon_size = Screen:scaleBySize(20)
-    table.insert(row, FontCard:new{
-        width = width - 2 * (card_w + gap),
-        sample = IconWidget:new{ icon = "eink/plus", width = icon_size, height = icon_size, alpha = true },
-        name = _("More fonts"),
-        callback = function() self:showFontMenu() end,
-    })
-    return row
+    local display_names = {
+        ["Source Han Sans"] = _("Source Han Sans"),
+        ["Source Han Serif"] = _("Source Han Serif"),
+        FZLanTingHei = _("Fangzheng Lanting Hei"),
+        FZZhunYuan = _("Fangzheng Zhun Yuan"),
+        FZKai = _("Fangzheng Kai"),
+        FZHei = _("Fangzheng Hei"),
+        FZShuSong = _("Fangzheng Shu Song"),
+        FZSong = _("Fangzheng Song"),
+        FZFangSong = _("Fangzheng Fang Song"),
+        FZLiShu = _("Fangzheng Li Shu"),
+        FZWeiBei = _("Fangzheng Wei Bei"),
+    }
+    local system_face = FontList:getSystemFontFace()
+    local current = self.ui.font.font_face
+    local function fontDetails(face)
+        local file, index = cre.getFontFaceFilenameAndFaceIndex(face)
+        if not file then file, index = cre.getFontFaceFilenameAndFaceIndex(face, nil, true) end
+        local family = families[face] or fontFamily(face)
+        local name = display_names[family] or display_names[family:match("^(FZ%a+)")]
+            or (file and FontList:getLocalizedFontName(file, index, true)) or family
+        name = fontFamily(name)
+        if face == system_face then name = _("System font") end
+        return name, file, index
+    end
+    local faces, seen = {}, {}
+    local function add(face)
+        if not face or seen[face] or not util.arrayContains(available, face) then return end
+        -- The system-font shortcut retains its device source; named family cards follow the UI language.
+        if face ~= system_face and representatives[families[face]] ~= face then return end
+        local name = face:lower()
+        for _, pattern in ipairs{ "clock", "emoji", "symbol", "dancing", "coming soon", "cutive", "script", "dingbat" } do
+            if name:find(pattern, 1, true) then return end
+        end
+        seen[face] = true
+        table.insert(faces, face)
+    end
+    add(system_face)
+    local selected = G_reader_settings:readSetting("cre_fonts_explicitly_selected", {})
+    for _, face in ipairs(G_reader_settings:readSetting("cre_fonts_recently_selected", {})) do
+        if selected[face] then add(face) end
+    end
+    local groups = { {}, {}, {}, {} } -- Chinese, user, bundled, other system fonts
+    for _, face in ipairs(available) do
+        if not seen[face] then
+            local __, file, index = fontDetails(face)
+            local group = FontList:hasChinese(file, index) and 1
+                or FontList:isSystemFont(file) and 4
+                or (file and file:sub(1, #FontList.fontdir + 1) == FontList.fontdir .. "/") and 3 or 2
+            table.insert(groups[group], face)
+        end
+    end
+    for _, group in ipairs(groups) do
+        for _, face in ipairs(group) do add(face) end
+    end
+    local count = math.min(#faces + 1, columns * 3)
+    local current_index = util.arrayContains(faces, current)
+    if current_index and current_index >= count then faces[count - 1] = current end
+    local grid = VerticalGroup:new{ align = "left" }
+    local row
+    for i = 1, count do
+        if (i - 1) % columns == 0 then
+            if row then table.insert(grid, VerticalSpan:new{ width = gap }) end
+            row = HorizontalGroup:new{}
+            table.insert(grid, row)
+        else
+            table.insert(row, HorizontalSpan:new{ width = gap })
+        end
+        if i == count then
+            table.insert(row, FontCard:new{
+                width = card_w, name = _("View more") .. " ›",
+                callback = function() self:showFontMenu() end,
+            })
+        else
+            local face = faces[i]
+            local name, file, index = fontDetails(face)
+            table.insert(row, FontCard:new{
+                width = card_w, name = name,
+                face = file and Font:getFace(file, 14 * Font.ui_scale, index),
+                face_index = index,
+                selected = current == face,
+                callback = function()
+                    self.ui.font:onSetFont(face)
+                    self.ui.font:addToRecentlySelectedList(face)
+                    self:refreshPanel()
+                end,
+            })
+        end
+    end
+    local current_name = fontDetails(current)
+    return VerticalGroup:new{
+        align = "left",
+        TextWidget:new{
+            text = T(_("Current selection · %1"), current_name),
+            face = Font:getFace("ui_title"), bold = true, max_width = width,
+        },
+        VerticalSpan:new{ width = Screen:scaleBySize(12) },
+        grid,
+    }
 end
 
 ------------------------------------------------------------------------
@@ -616,6 +705,11 @@ local INDENT_TWEAK, NARROW_INDENT_TWEAK = "paragraph_indent_2em", "paragraph_ind
 local FOLLOWING_FLUSH_TWEAK = "paragraph_following_no_indent"
 local SPACING_TWEAK, HALF_SPACING_TWEAK = "paragraph_whitespace", "paragraph_whitespace_half"
 local NO_SPACING_TWEAK = "paragraph_no_whitespace"
+-- What each paragraph mode turns on and off, in this order: { { id, on }, ... }
+local MODE_TWEAKS = {
+    flush = { { INDENT_TWEAK, false }, { NARROW_INDENT_TWEAK, false }, { FLUSH_TWEAK, true } },
+    indent = { { FLUSH_TWEAK, false }, { FOLLOWING_FLUSH_TWEAK, false }, { NARROW_INDENT_TWEAK, false }, { INDENT_TWEAK, true } },
+}
 
 -- Whether the book's own style tweak (its CSS, last in the style sheet) sets `property`, over the tweaks of the panel.
 local function bookTweakSets(styletweak, property)
@@ -623,18 +717,76 @@ local function bookTweakSets(styletweak, property)
     return css and css:find(property, 1, true) ~= nil or false
 end
 
+-- The paragraph mode of style tweaks, `is_on(id)` telling which are on: "flush" or "indent", or nil when they
+-- leave the first lines to the book's styles or indent only some of them.
+local function tweaksMode(is_on)
+    if is_on(FLUSH_TWEAK) then
+        return "flush" -- also over an indent set elsewhere, later in the style sheet
+    end
+    if (is_on(INDENT_TWEAK) or is_on(NARROW_INDENT_TWEAK)) and not is_on(FOLLOWING_FLUSH_TWEAK) then
+        return "indent"
+    end
+end
+
+-- The paragraph mode of an open book's style tweaks, its own over the global defaults.
+local function bookParagraphMode(styletweak)
+    if not styletweak.enabled or bookTweakSets(styletweak, "text-indent") then return end
+    return tweaksMode(function(id) return styletweak:isTweakEnabled(id) end)
+end
+
 --- The paragraph mode the style tweaks set: "flush" or "indent", or nil when they leave the first lines to the book's
 -- styles or indent only some of them.
 function ReaderTypesetPanel:paragraphMode()
-    local styletweak = self.ui.styletweak
-    if not styletweak.enabled or bookTweakSets(styletweak, "text-indent") then return end
-    if styletweak:isTweakEnabled(FLUSH_TWEAK) then
-        return "flush" -- also over an indent set elsewhere, later in the style sheet
+    return bookParagraphMode(self.ui.styletweak)
+end
+
+--- The settings' 正文首行缩进 toggle (WeChat Read's 13-reading-preferences/02-settings.png): 首行缩进 as the global
+-- default of the paragraph style tweaks, which the paragraph panel sets for one book. On, it is the 首行缩进 card's
+-- tweak, made global over any other global first-line tweak; off, books without their own take their first lines
+-- from their own styles again. A book whose own tweaks (set from its paragraph panel) or style tweak set its first
+-- lines keeps them. With `ui` a reader, the open book follows once the settings page over it (`menu`, which runs
+-- that after it closes) closes, or says at once that it keeps its own.
+function ReaderTypesetPanel.genGlobalIndentMenuItem(ui)
+    local styletweak = ui and ui.styletweak
+    local function globalTweaks()
+        if styletweak then return styletweak.global_tweaks end
+        return G_reader_settings:readSetting("style_tweaks") or require("ui/data/css_tweaks").DEFAULT_GLOBAL_STYLE_TWEAKS
     end
-    if (styletweak:isTweakEnabled(INDENT_TWEAK) or styletweak:isTweakEnabled(NARROW_INDENT_TWEAK))
-            and not styletweak:isTweakEnabled(FOLLOWING_FLUSH_TWEAK) then
-        return "indent"
+    local function isOn()
+        local tweaks = globalTweaks()
+        return tweaksMode(function(id) return tweaks[id] end) == "indent"
     end
+    return {
+        text = _("Indent first lines of body text"),
+        help_text = _("A book whose first lines you set in its paragraph panel keeps that setting."),
+        checked_func = isOn,
+        callback = function(menu)
+            local on = not isOn()
+            -- a copy: the defaults of new installations stay as they are
+            local tweaks = require("util").tableDeepCopy(globalTweaks())
+            -- On, the indent card's tweaks; off (from indent), none of them. The global table only holds the tweaks
+            -- that are on (see ReaderStyleTweak:updateCssText()): the card's off ones are removed, never saved false.
+            for __, tweak in ipairs(MODE_TWEAKS.indent) do
+                if on and tweak[2] then
+                    tweaks[tweak[1]] = true
+                else
+                    tweaks[tweak[1]] = nil
+                end
+            end
+            G_reader_settings:saveSetting("style_tweaks", tweaks)
+            if not styletweak then return end
+            styletweak.global_tweaks = tweaks
+            local css = styletweak.css_text
+            styletweak:updateCssText()
+            if styletweak.css_text ~= css then
+                menu:runAfterClose("ApplyStyleSheet", function() ui:handleEvent(Event:new("ApplyStyleSheet")) end)
+            end
+            if (bookParagraphMode(styletweak) == "indent") ~= on then
+                UIManager:show(Toast:new{ text = styletweak.enabled and _("This book keeps its own first-line setting.")
+                    or _("Style tweaks are disabled for this book.") })
+            end
+        end,
+    }
 end
 
 --- Whether the style tweaks add space between paragraphs: a line, or half a line.
@@ -656,13 +808,7 @@ end
 
 --- Sets the paragraph mode, "flush" or "indent", turning off the tweaks that go against it.
 function ReaderTypesetPanel:setParagraphMode(mode)
-    if mode == "flush" then
-        self:setStyleTweaks{ { INDENT_TWEAK, false }, { NARROW_INDENT_TWEAK, false }, { FLUSH_TWEAK, true } }
-    else
-        self:setStyleTweaks{
-            { FLUSH_TWEAK, false }, { FOLLOWING_FLUSH_TWEAK, false }, { NARROW_INDENT_TWEAK, false }, { INDENT_TWEAK, true },
-        }
-    end
+    self:setStyleTweaks(MODE_TWEAKS[mode])
 end
 
 function ReaderTypesetPanel:setParagraphSpacing(on)
@@ -710,6 +856,9 @@ function ReaderTypesetPanel:showMenu(item_table)
     end
     local container = CenterContainer:new{ covers_header = true, ignore = "height", dimen = Screen:getSize() }
     local menu = TouchMenu:new{ width = Screen:getWidth(), tab_item_table = { tab }, show_parent = container }
+    if item_table.open_on_menu_item_id_func then
+        menu:updateItems(1, item_table.open_on_menu_item_id_func())
+    end
     menu.close_callback = function() self:closeMenu() end
     container[1] = menu
     self.menu_container = container
@@ -814,7 +963,7 @@ function ReaderTypesetPanel:mainContent()
             set = function(v) self:setMargin(v) end,
         },
         VerticalSpan:new{ width = Screen:scaleBySize(8) },
-        controlRow(_("Font"), self:fontCards(w - LABEL_W)),
+        self:fontCards(w),
     }
 end
 
