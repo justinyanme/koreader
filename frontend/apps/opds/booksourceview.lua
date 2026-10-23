@@ -7,8 +7,9 @@ below it, 简介 text, and the source list (管理书源). Going back uses the
 loaded pages; nothing is fetched again.
 
 Tapping a cover downloads its preferred format in a subprocess, with progress on
-the tile; tapping it again cancels. A finished download closes the page and
-opens the book. Holding a cover opens its sheet (other formats, re-download).
+the tile; tapping it again cancels. A finished download marks the tile, so
+several can run at once; tapping a marked cover opens the book. Holding a cover
+opens its sheet (other formats, re-download).
 
 Refreshes: opening and closing the page, pushing and popping pages, turning
 pages and sheets are "ui" on their own rect; download progress is "fast" on the
@@ -91,6 +92,7 @@ end
 local function tallTarget(tappable)
     tappable.ges_events.Tap = { GestureRange:new{ ges = "tap", range = function()
         local d = tappable.dimen
+        if not d then return end
         local grow = math.max(0, dp(44) - d.h)
         return Geom:new{ x = d.x, y = d.y - math.floor(grow / 2), w = d.w, h = d.h + grow }
     end } }
@@ -100,6 +102,14 @@ end
 local function isUnder(path, dir)
     path, dir = ffiUtil.realpath(path) or path, ffiUtil.realpath(dir) or dir
     return path == dir or path:sub(1, #dir + 1) == dir .. "/"
+end
+
+--- A download folder as the prototype names it: 主目录, 主目录/sub, or the full path outside the home folder.
+local function folderLabel(path)
+    local home = Shelf.homeDir()
+    if not isUnder(path, home) then return path end
+    local rel = (ffiUtil.realpath(path) or path):sub(#(ffiUtil.realpath(home) or home) + 2)
+    return rel == "" and _("Home folder") or _("Home folder") .. "/" .. rel
 end
 
 -- Bytes the child process wrote to `fd` so far, without blocking.
@@ -471,7 +481,7 @@ end
 
 -- Grid of books
 
---- The caption under a cover, and whether it is the "downloaded" mark.
+--- The caption under a cover's title, and whether the book is on this device.
 function BookSourceView:cellStatus(page, book)
     local dl = self.downloads[book.key]
     if dl then
@@ -483,10 +493,10 @@ function BookSourceView:cellStatus(page, book)
     local file = BookSource.localFile(page.source, book)
     if file then
         local progress = BookSource.progress(file)
-        if not progress or progress.status == "new" then
-            return _("Downloaded"), true
+        if progress and progress.status ~= "new" then
+            return ShelfView.statusText(progress), true
         end
-        return ShelfView.statusText(progress), true
+        return book.author or "", true
     end
     return book.author or ""
 end
@@ -534,11 +544,24 @@ function BookSourceView:buildCell(page, book, x, y)
         band.overlap_offset = { 0, h - BAND_H }
         cover = OverlapGroup:new{ dimen = Geom:new{ w = w, h = h }, cover, band }
     end
-    local status, mark = self:cellStatus(page, book)
-    local status_widget = text(status, "ui_micro", mark and Palette.ink or Palette.ink_2, w - (mark and dp(16) or 0), mark)
-    if mark then
-        status_widget = HorizontalGroup:new{ align = "center", icon("eink/check", dp(13)), HorizontalSpan:new{ width = dp(3) },
-            status_widget }
+    local status, downloaded = self:cellStatus(page, book)
+    local check_w = downloaded and dp(16) or 0
+    local title = TextBoxWidget:new{
+        text = book.title,
+        face = Font:getFace("ui_label"),
+        width = w - check_w,
+        height = dp(36),
+        height_adjust = true,
+        height_overflow_show_ellipsis = true,
+    }
+    if downloaded then
+        -- WeChat Read's mark for a book on this device: a gray check before the title
+        title = HorizontalGroup:new{
+            align = "top",
+            CenterContainer:new{ dimen = Geom:new{ w = dp(13), h = title.line_height_px }, icon("eink/check", dp(13), true) },
+            HorizontalSpan:new{ width = check_w - dp(13) },
+            title,
+        }
     end
     local cell_h = h + ShelfWidgets.TEXT_H
     local rect = Geom:new{ x = x, y = y, w = w, h = cell_h }
@@ -559,15 +582,8 @@ function BookSourceView:buildCell(page, book, x, y)
                 VerticalGroup:new{
                     align = "left",
                     VerticalSpan:new{ width = dp(8) },
-                    TextBoxWidget:new{
-                        text = book.title,
-                        face = Font:getFace("ui_label"),
-                        width = w,
-                        height = dp(36),
-                        height_adjust = true,
-                        height_overflow_show_ellipsis = true,
-                    },
-                    status_widget,
+                    title,
+                    text(status, "ui_micro", Palette.ink_2, w),
                 },
             },
         },
@@ -981,7 +997,8 @@ function BookSourceView:cellOf(book)
 end
 
 function BookSourceView:refreshTile(book, refresh_type)
-    if self.closed then return end
+    -- off the shown page: rebuilding without a repaint would leave the page's tappables without a place
+    if self.closed or not self:cellOf(book) then return end
     self:build()
     local cell = self:cellOf(book)
     if cell then
@@ -1065,8 +1082,8 @@ function BookSourceView:finishDownload(dl, finished)
         return
     end
     BookSource.recordDownload(self.opds, dl.source, dl.book, file)
-    if self.closed then return end
-    self:openFile(file)
+    -- not opened: that would close the page and cancel the other downloads; a tap on the marked tile opens it
+    self:refreshTile(dl.book, "ui")
 end
 
 -- Reaps a finished or killed child and closes its pipe.
@@ -1171,7 +1188,7 @@ function BookSourceView:showSourceSheet(source)
     self:openSheet(source.title or BookSource.host(source), {
         sheetRow(w, _("Edit source"), nil, self:action(function() self:showEditSheet(source) end)),
         sheetRow(w, _("Manage sources"), nil, self:action(function() self:push{ kind = "manage" } end)),
-        sheetRow(w, _("Download folder"), filemanagerutil.abbreviate(folder),
+        sheetRow(w, _("Download folder"), folderLabel(folder),
             self:action(function() self:chooseFolder(source) end)),
     })
 end
@@ -1187,7 +1204,7 @@ function BookSourceView:chooseFolder(source)
             source.download_dir = path
             BookSource.save(self.opds)
             UIManager:show(Notification:new{
-                text = isUnder(path, Shelf.homeDir()) and T(_("Books will be downloaded to %1"), filemanagerutil.abbreviate(path))
+                text = isUnder(path, Shelf.homeDir()) and T(_("Books will be downloaded to %1"), folderLabel(path))
                     or _("This folder is outside the home folder: books downloaded here won't show up on the shelf."),
             })
         end,

@@ -393,7 +393,7 @@
       "name": "Cover Tile with Download Band",
       "kind": "card",
       "refersTo": "cover",
-      "description": "A remote book in the 书源 grid: real cover (16 grays) or typographic placeholder, title, caption. While downloading, a paper band with an ink-on-rule bar sits at the cover foot; ticks repaint band and caption with fast.",
+      "description": "A remote book in the 书源 grid: real cover (16 grays) or typographic placeholder, title, caption. While downloading, a paper band with an ink-on-rule bar sits at the cover foot; ticks repaint band and caption with fast. Once on the device, a gray check sits before the title; a finished download never opens the book.",
       "html": "<div class=\"ds-tile\"><div class=\"ds-cv\"><div class=\"ds-prog\"><span><i style=\"width:42%\"></i></span></div></div><div class=\"ds-bt\">The Great Gatsby</div><div class=\"ds-bm\">下载中 42%</div></div>",
       "css": ".ds-tile{width:120px;background:#F1F1EC;padding:12px;font-family:'Noto Sans SC',sans-serif;color:#151515} .ds-cv{position:relative;width:120px;height:160px;border-radius:3px;background:#8B8B87;overflow:hidden} .ds-prog{position:absolute;left:0;right:0;bottom:0;height:24px;background:#F1F1EC;border-top:1px solid #151515;display:flex;align-items:center;padding:0 8px} .ds-prog span{flex:1;height:4px;background:#C4C4BF;border-radius:2px;overflow:hidden} .ds-prog i{display:block;height:100%;background:#151515} .ds-bt{margin-top:8px;font-size:13px;font-weight:500} .ds-bm{font-size:11.5px;color:#565653;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}"
     },

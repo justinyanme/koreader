@@ -154,12 +154,24 @@ function Tappable:init()
     end
 end
 
-function Tappable:onTap()
+-- An outer Tappable that matches hands its Tap/Hold down to its children first:
+-- one nested inside (a row's ⋯) answers only when the finger is in its own range (which may be grown).
+local function missed(self, ges, name)
+    if not (ges and ges.pos) then return false end
+    for _, range in ipairs(self.ges_events[name] or {}) do
+        if range:match(ges) then return false end
+    end
+    return true
+end
+
+function Tappable:onTap(_, ges)
+    if missed(self, ges, "Tap") then return end
     if self.callback then self.callback() end
     return true
 end
 
-function Tappable:onHold()
+function Tappable:onHold(_, ges)
+    if missed(self, ges, "Hold") or not self.hold_callback then return end
     self.hold_callback()
     return true
 end

@@ -1,7 +1,7 @@
 -- 书源: the OPDS plugin's redesigned page, driven through its real entries against a fake Calibre-Web server.
 describe("书源 (OPDS as a remote shelf)", function()
-    local BookSource, BookSourceView, BottomSheet, EinkSettings, Event, FileManager, InputDialog, LuaSettings
-    local ReaderUI, Replacements, UIManager, ffiUtil, lfs, T, _
+    local BookSource, BookSourceView, BottomSheet, EinkSettings, Event, FileManager, Geom, InputDialog, LuaSettings
+    local ReaderUI, Replacements, Screen, UIManager, ffiUtil, lfs, T, _
     local home, tmp, settings_file, log_file, saved_settings, saved_thumb_dir
     local server -- the fake server's state, read by the stubbed socket.http.request (also in forked children)
     local opened -- files the reader was asked to open
@@ -55,9 +55,10 @@ describe("书源 (OPDS as a remote shelf)", function()
     end
 
     local SEARCH_LINKS = '<link rel="search" href="/opds/osd" type="application/opensearchdescription+xml"/>'
+    -- as Calibre-Web's index.xml: no entry carries a rel or a kind
     local ROOT_NAVS = {
         navEntry("Alphabetical Books", "/opds/books"),
-        navEntry("Recently added Books", "/opds/new", "http://opds-spec.org/sort/new"),
+        navEntry("Recently added Books", "/opds/new"),
         navEntry("Authors", "/opds/author"),
     }
 
@@ -84,6 +85,17 @@ describe("书源 (OPDS as a remote shelf)", function()
                 return 200, atom, xmlFeed("Calibre-Web", "", {
                     navEntry("Elsewhere", "https://other.example/opds/x"),
                     navEntry("Plain", "http://nas.example/opds/plain"),
+                })
+            elseif mode == "sort_new" then
+                return 200, atom, xmlFeed("Calibre-Web", "", {
+                    navEntry("Alphabetical Books", "/opds/books", "http://opds-spec.org/sort/new"),
+                    navEntry("Recently added Books", "/opds/new"),
+                })
+            elseif mode == "marked_and_new" then
+                -- a book list the feed marks, and an entry known only by its address
+                return 200, atom, xmlFeed("Calibre-Web", "", {
+                    navEntry("Recently added Books", "/opds/new"),
+                    navEntry("Alphabetical Books", "/opds/books", nil, "acquisition"),
                 })
             elseif mode == "categories" then
                 return 200, atom, xmlFeed("Calibre-Web", "", { navEntry("Authors", "/opds/author") })
@@ -246,7 +258,54 @@ describe("书源 (OPDS as a remote shelf)", function()
         end
     end
 
+    -- the innermost Tappable around the first text or icon equal to `label`, once painted: for taps on screen
+    local function tappableAround(widget, label)
+        local function find(node, tappable)
+            if type(node) ~= "table" then return end
+            if node.callback then tappable = node end
+            if (node.text == label and node.face) or node.icon == label then return tappable end
+            for _, child in ipairs(node) do
+                local found = find(child, tappable)
+                if found then return found end
+            end
+        end
+        return assert(find(widget), "nothing to tap: " .. label)
+    end
+
+    -- a point a quarter into `target`'s width, halfway down
+    local function pointIn(target)
+        local d = target.dimen
+        return d.x + math.floor(d.w / 4), d.y + math.floor(d.h / 2)
+    end
+
+    -- a finger on the screen at x, y: a tap, or `ges`
+    local function touch(x, y, ges)
+        UIManager:sendEvent(Event:new("Gesture", { ges = ges or "tap", pos = Geom:new{ x = x, y = y, w = 0, h = 0 } }))
+    end
+
     -- the top widget, under any toast
+    -- whether the grid tile titled `title` carries the gray "downloaded" check
+    local function marked(view, title)
+        local function tile(node, found)
+            if type(node) ~= "table" then return end
+            if node.hold_callback then found = node end
+            if node.text == title and node.face then return found end
+            for _, child in ipairs(node) do
+                local t = tile(child, found)
+                if t then return t end
+            end
+        end
+        local function check(node)
+            if type(node) ~= "table" then return false end
+            if node.icon == "eink/check" then return true end
+            for _, child in ipairs(node) do
+                if check(child) then return true end
+            end
+            return false
+        end
+        return check(tile(view))
+    end
+
     local function topWidget()
         local Notification = require("ui/widget/notification")
         for i = #UIManager._window_stack, 1, -1 do
@@ -334,10 +393,12 @@ describe("书源 (OPDS as a remote shelf)", function()
         EinkSettings = require("apps/settings/einksettings")
         Event = require("ui/event")
         FileManager = require("apps/filemanager/filemanager")
+        Geom = require("ui/geometry")
         InputDialog = require("ui/widget/inputdialog")
         LuaSettings = require("luasettings")
         ReaderUI = require("apps/reader/readerui")
         Replacements = require("apps/replacements")
+        Screen = require("device").screen
         UIManager = require("ui/uimanager")
         ffiUtil = require("ffi/util")
         lfs = require("libs/libkoreader-lfs")
@@ -442,6 +503,51 @@ describe("书源 (OPDS as a remote shelf)", function()
             waitFor(function() return view:top().result.state == "ok" end, "the home feed")
             assert.are.equal("home", view:top().kind)
         end)
+
+        it("taps on screen: the row enters the source, its ⋯ only opens the actions", function()
+            writeSources{ nas(), { title = "Gutenberg", url = "https://gutenberg.example/opds" } }
+            local fm = openFM()
+            tap(fm.shelf_view, "eink/source")
+            local view = topWidget()
+            view:paintTo(Screen.bb, 0, 0)
+            touch(pointIn(tappableAround(view, "eink/more")))
+            assert.are.equal(BottomSheet, getmetatable(topWidget()).__index)
+            assert.is_true(has(topWidget(), _("Edit")))
+            topWidget():onClose()
+            flush()
+
+            view:paintTo(Screen.bb, 0, 0)
+            touch(pointIn(tappableAround(view, "NAS at home")))
+            assert.are.equal(view, topWidget())
+            waitFor(function() return view:top().result.state == "ok" end, "the home feed")
+            assert.are.equal("home", view:top().kind)
+        end)
+
+        it("leaves a long-press on a nested tappable without a hold action to the one around it", function()
+            local HorizontalGroup = require("ui/widget/horizontalgroup")
+            local Tappable = require("apps/shelf/shelfwidgets").Tappable
+            local Widget = require("ui/widget/widget")
+            local calls = {}
+            local outer = Tappable:new{
+                callback = function() table.insert(calls, "outer tap") end,
+                hold_callback = function() table.insert(calls, "outer hold") end,
+                HorizontalGroup:new{
+                    Widget:new{ dimen = Geom:new{ w = 100, h = 40 } },
+                    Tappable:new{
+                        callback = function() table.insert(calls, "inner tap") end,
+                        Widget:new{ dimen = Geom:new{ w = 40, h = 40 } },
+                    },
+                },
+            }
+            outer:paintTo(Screen.bb, 0, 0)
+            local function gesture(ges, x)
+                outer:handleEvent(Event:new("Gesture", { ges = ges, pos = Geom:new{ x = x, y = 20, w = 0, h = 0 } }))
+            end
+            gesture("hold", 120)
+            gesture("tap", 120)
+            gesture("tap", 20)
+            assert.are.same({ "outer hold", "inner tap", "outer tap" }, calls)
+        end)
     end)
 
     describe("home", function()
@@ -465,11 +571,21 @@ describe("书源 (OPDS as a remote shelf)", function()
             for _, r in ipairs(refreshes) do assert.are.equal("ui", r.type) end
         end)
 
-        it("falls back to the first book list, then to the categories", function()
-            server.mode = "no_new"
+        it("prefers the sort/new link, then the first book list, then an entry at …/new, then the categories", function()
+            server.mode = "sort_new"
             local view = openSources(openFM())
             assert.are.equal(ROOT .. "/books", view:top().result.url)
+            view:close(true)
+
+            server.mode = "no_new"
+            view = openSources(FileManager.instance)
+            assert.are.equal(ROOT .. "/books", view:top().result.url)
             assert.are.same({ "Book 1", "Book 2", "Book 3" }, bookTitles(view))
+            view:close(true)
+
+            server.mode = "marked_and_new"
+            view = openSources(FileManager.instance)
+            assert.are.equal(ROOT .. "/books", view:top().result.url)
             view:close(true)
 
             server.mode = "categories"
@@ -639,22 +755,35 @@ describe("书源 (OPDS as a remote shelf)", function()
             waitFor(function() return view:top().result.state == "ok" end, "results")
             assert.is_true(has(view, "Nothing found for “nothing”"))
         end)
+
+        it("clears the search from the grown edge of its ×, not opening the field around it", function()
+            local view = openSources(openFM())
+            view:search("Book 1")
+            waitFor(function() return view:top().result.state == "ok" end, "results")
+            view:paintTo(Screen.bb, 0, 0)
+            local clear = tappableAround(view, "eink/close").dimen
+            touch(clear.x + math.floor(clear.w / 2), clear.y - 1) -- above the drawn ×: in its 44dp target
+            assert.are.equal(view, topWidget())
+            assert.are.equal(ROOT .. "/new", view:top().result.url)
+        end)
     end)
 
     describe("downloading", function()
-        it("downloads the preferred format on tap, names it, records it and opens it", function()
+        it("downloads the preferred format on tap, names it, records it and marks the tile, opening nothing", function()
             local view = openSources(openFM())
             local refreshes, restore = spyRefreshes()
             tap(view, "Book 1")
+            tap(view, "Book 4") -- at the same time: the first to finish must not cut the other off
             assert.is_not_nil(view.downloads["urn:uuid:book-1"])
-            waitFor(function() return #opened == 1 end, "the book to open")
+            waitFor(function() return next(view.downloads) == nil end, "both downloads")
             restore()
             local file = home .. "/Author 1 - Book 1.epub"
-            assert.are.same({ file }, opened)
+            assert.are.same({}, opened)
+            assert.is_true(UIManager:isWidgetShown(view))
             local f = io.open(file, "rb")
             assert.are.equal("BOOK /opds/download/1/epub/", f:read("*a"):sub(1, 27))
             f:close()
-            assert.is_false(UIManager:isWidgetShown(view))
+            assert.are.equal("file", lfs.attributes(home .. "/Author 4 - Book 4.epub", "mode"))
             assert.are.equal(file, savedSources()[1].downloaded["urn:uuid:book-1"])
             assert.is_nil(G_reader_settings:readSetting("download_dir"))
             for _, r in ipairs(refreshes) do
@@ -664,30 +793,44 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.are.equal(ROOT .. "/download/1/epub/", downloads[#downloads].url)
             assert.are.equal("id.access", downloads[#downloads].headers["CF-Access-Client-Id"])
 
-            -- downloaded: the tile says so, and a tap opens the file without a request
-            view = openSources(FileManager.instance)
-            assert.is_true(has(view, _("Downloaded")))
+            -- downloaded: a gray check before the title, and a tap opens the file without a request
+            assert.is_true(marked(view, "Book 1"))
+            assert.is_false(marked(view, "Book 2"))
             os.remove(log_file)
-            opened = {}
             tap(view, "Book 1")
             assert.are.same({ file }, opened)
             assert.are.same({}, requestsTo(ROOT .. "/download/"))
+        end)
+
+        it("keeps the page answering taps while a download runs on a tile not shown", function()
+            local view = openSources(openFM())
+            view:turnPage(math.ceil(9 / view:top().per_page)) -- the page with Book 9, the slow one
+            tap(view, "Book 9")
+            tap(view, "eink/grid")
+            tap(topWidget(), "Authors")
+            waitFor(function() return view:top().result.state == "ok" end, "authors")
+            view:paintTo(Screen.bb, 0, 0)
+            local x, y = pointIn(tappableAround(view, "Author 5"))
+            -- its progress and its end land while the tile is off screen: nothing is painted for them
+            waitFor(function() return view.downloads["urn:uuid:book-9"] == nil end, "the download")
+            touch(x, y)
+            assert.are.equal("Author 5", view:top().title)
+            waitFor(function() return view:top().result.state == "ok" end, "a book list")
         end)
 
         it("keeps the server's file name when the source asks for it", function()
             writeSources{ nas{ raw_names = true } }
             local view = openSources(openFM())
             tap(view, "Book 2") -- PDF and MOBI: MOBI is preferred
-            waitFor(function() return #opened == 1 end, "the book to open")
-            assert.are.same({ home .. "/server_name.epub" }, opened)
+            waitFor(function() return view.downloads["urn:uuid:book-2"] == nil end, "the download")
+            assert.are.equal(home .. "/server_name.epub", savedSources()[1].downloaded["urn:uuid:book-2"])
             local downloads = requestsTo(ROOT .. "/download/2/")
             assert.are.equal(ROOT .. "/download/2/mobi/", downloads[#downloads].url)
         end)
 
         it("cancels a download on a second tap and removes the partial file", function()
             local view = openSources(openFM())
-            view:turnPage(2) -- Book 9 may be on page 2 on small screens
-            if not view:cellOf({ key = "urn:uuid:book-9" }) then view:turnPage(1) end
+            view:turnPage(math.ceil(9 / view:top().per_page)) -- the page with Book 9, the slow one
             local refreshes, restore = spyRefreshes()
             tap(view, "Book 9")
             local dl = view.downloads["urn:uuid:book-9"]
@@ -729,7 +872,7 @@ describe("书源 (OPDS as a remote shelf)", function()
         it("sends the credentials to the source's origin only", function()
             local view = openSources(openFM())
             view:download(view:top(), view:top().result.books[3], view:top().result.books[3].formats[1])
-            waitFor(function() return #opened == 1 end, "book 3")
+            waitFor(function() return next(view.downloads) == nil end, "book 3")
             local cdn = requestsTo("https://cdn.example/")
             assert.is_true(#cdn > 0)
             for _, r in ipairs(cdn) do
@@ -739,9 +882,8 @@ describe("书源 (OPDS as a remote shelf)", function()
                 assert.is_nil(r.headers["CF-Access-Client-Secret"])
             end
 
-            view = openSources(FileManager.instance)
             view:download(view:top(), view:top().result.books[4], view:top().result.books[4].formats[1])
-            waitFor(function() return #opened == 2 end, "book 4")
+            waitFor(function() return next(view.downloads) == nil end, "book 4")
             local same = requestsTo(ORIGIN .. "/files/book4.epub")
             assert.is_true(#same > 0)
             for _, r in ipairs(same) do
@@ -772,7 +914,7 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.is_true(has(sheet, _("Read")))
             assert.is_true(has(sheet, _("Download again, replacing this copy")))
             tap(sheet, _("Download again, replacing this copy"))
-            waitFor(function() return #opened == 1 end, "the new copy")
+            waitFor(function() return next(view.downloads) == nil end, "the new copy")
             local f = io.open(file, "rb")
             assert.are.equal("BOOK", f:read(4))
             f:close()
@@ -892,14 +1034,17 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.are.same({}, requestsTo(ROOT .. "/download/"))
         end)
 
-        it("closes a keyboard dialog it opened when a download finishes and the book opens", function()
+        it("leaves a keyboard dialog alone when a download finishes, and closes it with the page", function()
             local view = openSources(openFM())
             tap(view, "Book 1")
             tap(view, "eink/more")
             tap(topWidget(), _("Edit source"))
             view.edit_rows.username.callback()
-            assert.are.equal(InputDialog, getmetatable(topWidget()).__index)
-            waitFor(function() return #opened == 1 end, "the book to open")
+            local dialog = topWidget()
+            assert.are.equal(InputDialog, getmetatable(dialog).__index)
+            waitFor(function() return view.downloads["urn:uuid:book-1"] == nil end, "the download")
+            assert.are.equal(dialog, topWidget())
+            view:close(true)
             for _, entry in ipairs(UIManager._window_stack) do
                 local class = getmetatable(entry.widget).__index
                 assert.is_true(class ~= InputDialog and class ~= BottomSheet and class ~= BookSourceView)

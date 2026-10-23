@@ -275,13 +275,18 @@ function BookSource.load(source, feed_url, with_search)
     return page
 end
 
---- The feed shown as a source's home: its "newest" list, else its first book list.
--- nil when the root has neither: the root is then shown as a list of categories.
+--- The feed shown as a source's home: its "newest" list, else its first book list,
+-- else an entry whose address ends in …/new.
+-- nil when the root has none: the root is then shown as a list of categories.
 function BookSource.homeUrl(root)
     if root.sort_new then return root.sort_new end
     if #root.books > 0 then return root.url end
     for _, nav in ipairs(root.navs) do
         if nav.acquisition then return nav.url end
+    end
+    -- the last resort: Calibre-Web marks its "Recently added" entry with neither rel nor kind
+    for _, nav in ipairs(root.navs) do
+        if nav.url:match("/new/?$") then return nav.url end
     end
 end
 
