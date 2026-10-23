@@ -11,8 +11,8 @@ The page opens on the page that holds the current chapter, showing it even when 
 collapsed, and draws that chapter's page number ink-filled. Entries are measured once (without
 rendering) and only the shown page's rows are built.
 
-Until the search page and the notes page take over, the search field opens the full-text search
-input and 书签 the bookmarks of the old drawer (apps/reader/modules/readertocdrawer).
+The search field opens the search page (apps/reader/modules/readersearchpage) over this page. Until
+the notes page takes over, 书签 opens the bookmarks of the old drawer (apps/reader/modules/readertocdrawer).
 
 Opening and closing repaint the page; turning a page or collapsing a group repaints the content and
 the bar, and the title band too when ↓去底部 and ↑去顶部 swap (all "ui"). A jump closes the page
@@ -79,7 +79,7 @@ end
 
 local TocPage = FullscreenPage:extend{
     ui = nil,
-    on_close = nil, -- function, called once the page is closed (back, a jump, search or 书签)
+    on_close = nil, -- function, called once the page is closed (back, a jump or 书签, here or on the search page)
     on_bookmarks = nil, -- function, opens the bookmarks after 书签 closed the page
 }
 
@@ -327,7 +327,8 @@ function TocPage:buildContent(rect)
     return list, math.max(1, #self.pages)
 end
 
-function TocPage:buildBarParts()
+--- The 书签 pill beside the page capsule, which takes taps over the bar's height; also on the search page.
+function TocPage.bookmarksButton(callback)
     local h = EinkControls.PageCapsule.height -- the pill matches the capsule, as in the reference
     local bw = Size.border.default
     local label = HorizontalGroup:new{
@@ -341,14 +342,17 @@ function TocPage:buildBarParts()
         padding = 0, padding_left = dp(14), padding_right = dp(16),
         CenterContainer:new{ dimen = Geom:new{ w = label:getSize().w, h = h - 2 * bw }, label },
     }
-    -- taps over the bar's height
-    self.bookmarks_button = Tappable:new{
-        callback = function() self:openBookmarks() end,
+    return Tappable:new{
+        callback = callback,
         CenterContainer:new{
             dimen = Geom:new{ w = pill:getSize().w, h = EinkControls.BottomBar.height - Size.border.default },
             pill,
         },
     }
+end
+
+function TocPage:buildBarParts()
+    self.bookmarks_button = TocPage.bookmarksButton(function() self:openBookmarks() end)
     return nil, { self.bookmarks_button }
 end
 
@@ -404,9 +408,14 @@ function TocPage:jump(entry)
     end
 end
 
+--- The search page opens over this page, which 取消 there comes back to.
 function TocPage:search()
-    self:goBack()
-    self.ui:handleEvent(Event:new("ShowFulltextSearchInput"))
+    if self.closed then return end
+    if not self.ui:handleEvent(Event:new("ShowSearchPage", nil, self)) then
+        -- no search page (apps/reader/modules/readerfulltextsearch): the original search input
+        self:goBack()
+        self.ui:handleEvent(Event:new("ShowFulltextSearchInput"))
+    end
 end
 
 function TocPage:openBookmarks()

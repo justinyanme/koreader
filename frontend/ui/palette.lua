@@ -23,6 +23,7 @@ return {
     confirm_rule = Blitbuffer.COLOR_GRAY_B, -- dividers of a confirm layer: DESIGN.md's rule gray, darker than the wash
     wash = Blitbuffer.COLOR_GRAY_D, -- where ink lands on the page washed behind a confirm layer
     mark = Blitbuffer.COLOR_LIGHT_GRAY, -- marker highlight fill
+    hit = Blitbuffer.COLOR_GRAY_B, -- the search hit's fill, as measured in the reference (04-contents-and-search/06)
     -- typographic covers only
     cover_stock = Blitbuffer.COLOR_GRAY_D,
     cover_tint = Blitbuffer.COLOR_GRAY_B,
