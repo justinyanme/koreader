@@ -218,6 +218,7 @@ describe("ReaderTypesetPanel module", function()
         setup(function() ui = openReader(sample_epub) end)
         teardown(function() closeReader(ui) end)
 
+
         it("should open above the bottom bar, without the top bar, and close with it, refreshing only their rects", function()
             local panel
             local refreshes = refreshesOf(function()
@@ -366,15 +367,129 @@ describe("ReaderTypesetPanel module", function()
             ui.menu:hideToolbar()
         end)
 
-        it("should use the Latin faces for an English book", function()
+        it("should preview real font names, select in black and retain the font when reopened", function()
             local panel = openPanel(ui)
-            tapWidget(fontCard(panel, _("Source Han Sans")))
+            local sans = fontCard(panel, "Noto Sans")
+            assert.is_truthy(sans)
+            local name = find(sans, function(w) return w.text == "Noto Sans" end)
+            assert.is_truthy(name)
+            assert.is_truthy(name.face.realname:find("NotoSans", 1, true))
+            local xpointer = ui.document:getXPointer()
+            tapWidget(sans)
+            runTasks()
             UIManager:forceRePaint()
+            assert.are.equal("Noto Sans", ui.document:getFontFace())
+            assert.are.equal(ui.document:getCurrentPage(), ui.document:getPageFromXPointer(xpointer))
             assert.are.equal("Noto Sans", ui.font.font_face)
-            tapWidget(fontCard(panel, _("Source Han Serif")))
+            assert.is_truthy(hasText(ui.config.panel, "Current selection · Noto Sans"))
+            sans = fontCard(ui.config.panel, "Noto Sans")
+            assert.are.equal(INK, gray(sans.dimen.x + math.floor(sans.dimen.w / 2), sans.dimen.y + 3))
+            assert.are.equal(255, find(sans, function(w) return w.text == "Noto Sans" end).fgcolor:getColor8().a)
+            assert.are.equal(ui.menu.bars, topWidget())
+            ui.menu:hideToolbar()
+            closeReader(ui)
+            ui = openReader(sample_epub, nil, true)
+            assert.are.equal("Noto Sans", ui.font.font_face)
+            openPanel(ui)
+            assert.is_truthy(fontCard(ui.config.panel, "Noto Sans").selected)
+            ui.menu:hideToolbar()
+        end)
+
+        it("should keep the grid usable at the largest interface font size", function()
+            local Font = require("ui/font")
+            Font:setUIScale(1.35)
+            local panel = openPanel(ui)
+            local sans = fontCard(panel, "Noto Sans")
+            local name = find(sans, function(w) return w.text == "Noto Sans" end)
+            local label_width = name:getSize().w
+            local panel_top = panel:getRefreshRegion().y
+            tapWidget(sans)
             UIManager:forceRePaint()
-            assert.are.equal("Noto Serif", ui.font.font_face)
-            assert.are.equal(ui.menu.bars, topWidget()) -- no prompt
+            Font:setUIScale(1)
+            assert.is_true(label_width < sans.dimen.w)
+            assert.is_true(panel_top >= 0)
+            assert.are.equal("Noto Sans", ui.font.font_face)
+            assert.is_true(fontCard(ui.config.panel, "Noto Sans").selected)
+            ui.menu:hideToolbar()
+        end)
+
+        it("should return from the font list without changing the chosen font", function()
+            openPanel(ui)
+            local selected = ui.font.font_face
+            tapWidget(fontCard(ui.config.panel, _("View more") .. " ›"))
+            UIManager:forceRePaint()
+            assert.is_nil(ui.config.panel)
+            assert.is_truthy(ui.config.menu_container)
+            local current_item = find(topWidget(), function(w)
+                return w.item and w.item.menu_item_id == selected and w.dimen
+            end)
+            assert.is_truthy(current_item)
+            assert.is_true(current_item.item.checked_func())
+            back()
+            assert.is_nil(ui.config.menu_container)
+            assert.are.equal(selected, ui.font.font_face)
+            openPanel(ui)
+            assert.is_truthy(fontCard(ui.config.panel, selected).selected)
+            ui.menu:hideToolbar()
+        end)
+
+        it("should select a font by name from More and show it selected when reopening", function()
+            local panel = openPanel(ui)
+            local xpointer = ui.rolling:getBookLocation()
+            tapWidget(fontCard(panel, _("View more") .. " ›"))
+            UIManager:forceRePaint()
+            local menu = topWidget()[1]
+            for __ = 2, menu.page do
+                tapWidget(menu.page_info_left_chev)
+                UIManager:forceRePaint()
+            end
+            local item
+            for __ = 1, menu.page_num do
+                item = find(menu, function(w) return w.item and w.item.menu_item_id == "FreeSerif" and w.dimen end)
+                if item then break end
+                tapWidget(menu.page_info_right_chev)
+                UIManager:forceRePaint()
+            end
+            assert.is_truthy(item)
+            tapWidget(item)
+            runTasks()
+            UIManager:forceRePaint()
+            back()
+            assert.are.equal("FreeSerif", ui.document:getFontFace())
+            assert.are.equal(xpointer, ui.rolling:getBookLocation())
+            assert.are.equal(ui.document:getCurrentPage(), ui.document:getPageFromXPointer(xpointer))
+            openPanel(ui)
+            assert.is_true(fontCard(ui.config.panel, "FreeSerif").selected)
+            ui.menu:hideToolbar()
+        end)
+
+        it("should apply profile and gesture SetFont events through the registered engine fonts", function()
+            local xpointer = ui.rolling:getBookLocation()
+            ui:handleEvent(Event:new("SetFont", "Noto Serif"))
+            runTasks()
+            assert.are.equal(xpointer, ui.rolling:getBookLocation())
+            assert.are.equal("Noto Serif", ui.document:getFontFace())
+            assert.are.equal(ui.document:getCurrentPage(), ui.document:getPageFromXPointer(xpointer))
+            ui:handleEvent(Event:new("SetFont", "Missing profile font"))
+            assert.are.equal("Noto Serif", ui.document:getFontFace())
+        end)
+
+        it("should recover a removed font to the default reading font in a Latin EPUB", function()
+            closeReader(ui)
+            ui = openReader(sample_epub, { font_face = "Removed user font" })
+            openPanel(ui)
+            assert.are.equal(ui.document.default_font, ui.font.font_face)
+            assert.are.equal(ui.document.default_font, ui.document:getFontFace())
+            assert.is_true(fontCard(ui.config.panel, ui.document.default_font).selected)
+            ui.menu:hideToolbar()
+        end)
+
+        it("should recover a removed font to the system font for Chinese text", function()
+            closeReader(ui)
+            ui = openReader(sample_epub, { font_face = "Removed user font", text_lang = "zh-CN" })
+            openPanel(ui)
+            assert.are.equal("Noto Sans CJK SC", ui.document:getFontFace())
+            assert.is_true(fontCard(ui.config.panel, _("System font")).selected)
             ui.menu:hideToolbar()
         end)
 
@@ -418,7 +533,7 @@ describe("ReaderTypesetPanel module", function()
 
         it("should open the existing menus from its links", function()
             for _, case in ipairs{
-                { "main", _("More fonts") },
+                { "main", _("View more") .. " ›" },
                 { "more", _("Hyphenation") },
                 { "more", _("Paragraph indent") },
                 { "more", _("Paragraph spacing") },
@@ -1207,6 +1322,151 @@ describe("ReaderTypesetPanel module", function()
         end)
     end)
 
+    describe("with regional font families", function()
+        local ui, cre, available, paths, catalog, filenames, lang, recent, selected, setting_lang, metadata_path, metadata_info
+        local function add(face, real_face)
+            paths[face] = { cre.getFontFaceFilenameAndFaceIndex(real_face or "Noto Sans CJK SC") }
+            table.insert(available, face)
+        end
+        local function cards()
+            local result, seen = {}, {}
+            find(ui.config.panel, function(w)
+                if w.name and w.callback and not seen[w] then
+                    table.insert(result, w)
+                    seen[w] = true
+                end
+                return false
+            end)
+            return result
+        end
+        before_each(function()
+            cre = require("document/credocument"):engineInit()
+            available, paths = cre.getFontFaces(), {}
+            lang = _.current_lang
+            setting_lang = G_reader_settings:readSetting("language")
+            recent = G_reader_settings:readSetting("cre_fonts_recently_selected")
+            selected = G_reader_settings:readSetting("cre_fonts_explicitly_selected")
+        end)
+        after_each(function()
+            if ui then closeReader(ui); ui = nil end
+            if catalog then catalog:revert(); catalog = nil end
+            if filenames then filenames:revert(); filenames = nil end
+            _.changeLang(lang)
+            G_reader_settings:saveSetting("language", setting_lang)
+            if metadata_path then
+                require("fontlist").fontinfo[metadata_path] = metadata_info
+                metadata_path, metadata_info = nil, nil
+            end
+            G_reader_settings:saveSetting("cre_fonts_recently_selected", recent)
+            G_reader_settings:saveSetting("cre_fonts_explicitly_selected", selected)
+        end)
+        local function openCatalog()
+            local get_filename = cre.getFontFaceFilenameAndFaceIndex
+            catalog = stub(cre, "getFontFaces", function() return require("util").tableDeepCopy(available) end)
+            filenames = stub(cre, "getFontFaceFilenameAndFaceIndex", function(face, ...)
+                if paths[face] then return unpack(paths[face]) end
+                return get_filename(face, ...)
+            end)
+            local choices = {}
+            for face in pairs(paths) do choices[face] = true end
+            G_reader_settings:saveSetting("cre_fonts_recently_selected", available)
+            G_reader_settings:saveSetting("cre_fonts_explicitly_selected", choices)
+            ui = openReader(sample_epub)
+            openPanel(ui)
+        end
+
+        it("should choose one regional face per UI language and leave Mono and other regions in More", function()
+            local variants = {
+                { "zh_CN", "SC", "Noto Sans" }, { "zh_TW", "TC", "Noto Serif" },
+                { "ja", "JP", "FreeSans" }, { "ko", "KR", "FreeSerif" }, { "zh_HK", "HK", "Droid Sans Mono" },
+            }
+            for __, v in ipairs(variants) do
+                add("Noto Serif CJK " .. v[2], v[3])
+                add("Noto Sans CJK " .. v[2], v[3])
+            end
+            add("Source Han Serif SC")
+            add("Noto Serif Mono CJK SC")
+            openCatalog()
+            for __, v in ipairs(variants) do
+                _.current_lang = v[1]
+                ui.config:refreshPanel()
+                UIManager:forceRePaint()
+                local count, sans_count = 0, 0
+                for ___, card in ipairs(cards()) do
+                    assert.is_nil(card.name:find("Mono", 1, true))
+                    if card.name == _("System font") then
+                        assert.are.equal(paths["Noto Sans CJK SC"][1], card.face.realname)
+                    end
+                    if card.name == _("Source Han Sans") then
+                        sans_count = sans_count + 1
+                        assert.are.equal(paths["Noto Sans CJK " .. v[2]][1], card.face.realname)
+                    end
+                    if card.name == _("Source Han Serif") then
+                        count = count + 1
+                        assert.are.equal(paths["Noto Serif CJK " .. v[2]][1], card.face.realname)
+                    end
+                end
+                assert.are.equal(1, count)
+                assert.are.equal(v[2] == "SC" and 0 or 1, sans_count)
+            end
+            tapWidget(fontCard(ui.config.panel, _("View more") .. " ›"))
+            for __, face in ipairs{ "Noto Serif CJK SC", "Noto Serif CJK TC", "Noto Serif Mono CJK SC", "Source Han Serif SC" } do
+                local present = false
+                for ___, item in ipairs(ui.font.face_table) do
+                    if item.menu_item_id == face then present = true end
+                end
+                assert.is_true(present)
+            end
+        end)
+
+        it("should retain a user font's localized typographic family without its style suffix", function()
+            _.changeLang("zh_CN")
+            G_reader_settings:saveSetting("language", "zh_CN")
+            add("Reader Family Regular", "FreeSerif")
+            metadata_path = paths["Reader Family Regular"][1]
+            local FontList = require("fontlist")
+            metadata_info = FontList.fontinfo[metadata_path]
+            FontList.fontinfo[metadata_path] = require("util").tableDeepCopy(metadata_info)
+            local info = FontList.fontinfo[metadata_path][paths["Reader Family Regular"][2] + 1]
+            info.names["zh-cn"] = { [1] = "旧字族名", [4] = "完整字体名", [16] = "示例字族 Medium" }
+            openCatalog()
+            local card = fontCard(ui.config.panel, "示例字族")
+            assert.is_truthy(card)
+            assert.are.equal(metadata_path, card.face.realname)
+        end)
+
+        it("should localize Chinese family names, remove styles and shrink before ellipsis", function()
+            _.changeLang("zh_CN")
+            local names = {
+                { "FZLanTingHei-M-GB18030", "方正兰亭黑" }, { "FZZhunYuan_GB18030", "方正准圆" },
+                { "FZKai-Z03", "方正楷体" }, { "FZShuSong-Z01", "方正书宋" },
+                { "Noto Serif CJK SC", "思源宋体" }, { "Source Han Sans SC", "思源黑体" },
+                { "Readable Family Medium Italic", "Readable Family" },
+                { "An Extremely Long Reading Family Regular", "An Extremely Long Reading Family" },
+            }
+            for __, pair in ipairs(names) do add(pair[1]) end
+            table.insert(available, 1, "Source Han Sans SC")
+            openCatalog()
+            for __, pair in ipairs(names) do
+                local card = fontCard(ui.config.panel, pair[2])
+                assert.is_truthy(card)
+                local text = find(card, function(w) return w.text == pair[2] end)
+                assert.are.equal(paths[pair[1]][1], text.face.realname)
+                if pair[2] == "Readable Family" then
+                    assert.is_true(text.face.orig_size < 14)
+                    assert.is_false(text:isTruncated())
+                elseif pair[2] == "An Extremely Long Reading Family" then
+                    assert.are.equal(12, text.face.orig_size)
+                    assert.is_true(text:isTruncated())
+                else
+                    assert.is_false(text:isTruncated())
+                end
+            end
+            -- The actual bundled CJK face is still rendered as the system-font card on non-Android.
+            assert.is_truthy(fontCard(ui.config.panel, _("System font")))
+        end)
+    end)
+
     describe("with a book without a language", function()
         local ui, lang
         setup(function()
@@ -1221,9 +1481,8 @@ describe("ReaderTypesetPanel module", function()
             G_reader_settings:delSetting("typeset_serif_missing_shown")
         end)
 
-        it("should follow the UI language for the font cards", function()
+        it("should follow the UI language for the default reading font", function()
             assert.is_truthy(ui.config:isCJK())
-            assert.are.equal("Noto Sans CJK SC", ui.config:cardFace("sans"))
             assert.are.equal("Noto Sans CJK SC", ui.font.font_face)
         end)
     end)
@@ -1248,20 +1507,21 @@ describe("ReaderTypesetPanel module", function()
             assert.is_true(G_reader_settings:isTrue("typeset_serif_missing_shown"))
         end)
 
-        it("should prompt and keep Source Han Sans when the serif card is tapped", function()
+        it("should offer a working system font fallback without an uninstalled card", function()
             local panel = openPanel(ui)
-            local serif = fontCard(panel, require("ffi/util").template(_("%1 · not installed"), _("Source Han Serif")))
-            assert.is_truthy(serif)
-            tapWidget(serif)
+            assert.is_nil(fontCard(panel, "Source Han Serif · not installed"))
+            local system = fontCard(panel, _("System font"))
+            assert.is_truthy(system)
+            tapWidget(fontCard(panel, "Noto Sans"))
             UIManager:forceRePaint()
-            local prompt = topWidget()
-            assert.are_not.equal(panel, prompt)
-            assert.is_truthy(prompt.text and prompt.text:find("Source Han Serif", 1, true))
+            tapWidget(fontCard(ui.config.panel, _("System font")))
+            UIManager:forceRePaint()
             assert.are.equal("Noto Sans CJK SC", ui.font.font_face)
-            UIManager:close(prompt)
+            assert.is_true(fontCard(ui.config.panel, _("System font")).selected)
+            assert.are.equal(ui.menu.bars, topWidget())
             ui.menu:hideToolbar(true)
-            UIManager:forceRePaint()
         end)
+
     end)
 
     describe("with a PDF", function()

@@ -101,6 +101,49 @@ local function getExternalFontDir()
     end
 end
 
+function FontList:isSystemFont(file)
+    return file and (file:match("^/system/fonts/") or file:match("^/product/fonts/")
+        or file:match("^/system_ext/fonts/")) ~= nil
+end
+
+function FontList:hasChinese(file, index)
+    if not file then return false end
+    local info = self.fontinfo[file] and self.fontinfo[file][index + 1]
+    if info and info.has_chinese ~= nil then return info.has_chinese end
+    local ok, ftsize = pcall(FT.newFaceSize, file, 16, index)
+    if not ok then
+        logger.warn("Unable to check Chinese font coverage:", file, index, ftsize)
+        return false
+    end
+    local has_chinese = ftsize:hasGlyph(0x4E2D) -- 中
+    ftsize:done()
+    if info then info.has_chinese = has_chinese end
+    return has_chinese
+end
+
+function FontList:getSystemFontFace()
+    local cre = require("document/credocument"):engineInit()
+    local chosen, priority
+    for _, face in ipairs(cre.getFontFaces()) do
+        local file, index = cre.getFontFaceFilenameAndFaceIndex(face)
+        if self:isSystemFont(file) and self:hasChinese(file, index) then
+            local name = face:lower():gsub("[%s%-]", "")
+            local rank = 3
+            if name:find("sanscjksc", 1, true) or name:find("sanssc", 1, true)
+                or name:find("droidsansfallback", 1, true) then
+                rank = 1
+            elseif name:find("cjksc", 1, true) then
+                rank = 2
+            end
+            if not priority or rank < priority then
+                chosen, priority = face, rank
+                if rank == 1 then break end
+            end
+        end
+    end
+    return chosen or "Noto Sans CJK SC"
+end
+
 -- Query FreeType/HarfBuzz about font metadata
 local function collectFaceInfo(path)
     local res = {}
@@ -120,6 +163,7 @@ local function collectFaceInfo(path)
             local hbface = HB.hb_ft_face_create_referenced(ftsize.face)
             fres.names = hbface:getNames()
             fres.scripts, fres.langs = hbface:getCoverage()
+            fres.has_chinese = ftsize:hasGlyph(0x4E2D) -- 中
             fres.path = path
             fres.index = i
             table.insert(res, fres)
@@ -251,14 +295,17 @@ function FontList:dumpFontList()
 end
 
 -- Try to determine the localized font name
-function FontList:getLocalizedFontName(file, index)
+function FontList:getLocalizedFontName(file, index, family_only)
     local lang = G_reader_settings:readSetting("language")
     if not lang then return end
     lang = lang:lower():gsub("_","-")
     local altname = self.fontinfo[file]
     altname = altname and altname[index+1]
     altname = altname and altname.names and (altname.names[lang] or altname.names[lang:match("%w+")])
-    altname = altname and (altname[tonumber(HB.HB_OT_NAME_ID_FULL_NAME)] or altname[tonumber(HB.HB_OT_NAME_ID_FONT_FAMILY)])
+    -- Older HarfBuzz bindings omit the typographic family constant (OpenType name ID 16).
+    altname = altname and (family_only
+        and (altname[16] or altname[tonumber(HB.HB_OT_NAME_ID_FONT_FAMILY)])
+        or altname[tonumber(HB.HB_OT_NAME_ID_FULL_NAME)] or altname[tonumber(HB.HB_OT_NAME_ID_FONT_FAMILY)])
     if not altname then return end -- ensure nil
     return altname
 end

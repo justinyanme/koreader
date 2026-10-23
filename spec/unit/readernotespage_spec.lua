@@ -36,6 +36,10 @@ describe("ReaderNotesPage module", function()
         DocSettings:open(sample_pdf):purge()
     end)
 
+    -- These fixtures save selections from the popover with the explicit legacy Ask action.
+    before_each(function() G_reader_settings:saveSetting("default_highlight_action", "ask") end)
+    after_each(function() G_reader_settings:delSetting("default_highlight_action") end)
+
     local function openReader(file, keep_settings)
         if not keep_settings then DocSettings:open(file):purge() end
         local ui = ReaderUI:new{
@@ -172,7 +176,9 @@ describe("ReaderNotesPage module", function()
     local function bookmarkPage(ui)
         showToolbar(ui)
         tapWidget(ui.menu.bookmark_button)
-        ui.menu:hideToolbar()
+        local toast = topWidget()
+        assert.is_true(toast.toast)
+        UIManager:close(toast)
         UIManager:forceRePaint()
     end
 
@@ -355,6 +361,32 @@ describe("ReaderNotesPage module", function()
             refreshes = refreshesOf(function() back(page) end)
             assert.are.same({ { mode = "ui", region = page.dimen } }, refreshes)
             assert.are.equal(ui, topWidget())
+            assert.is_nil(ui.menu.drawer)
+        end)
+
+        it("should open this same notes page by tapping the progress count, including all three kinds", function()
+            highlight(ui, Geom:new{ x = 260, y = 70 }, Geom:new{ x = 260, y = 100 })
+            ui.rolling:onGotoPage(30)
+            UIManager:forceRePaint()
+            bookmarkPage(ui)
+            writeThought(ui, Geom:new{ x = 260, y = 200 }, Geom:new{ x = 260, y = 230 }, "Progress count thought")
+            local position = ui:getCurrentPage()
+            local bars = showToolbar(ui)
+            tapWidget(iconCell(bars.bottom, "eink/progress"))
+            local panel = ui.menu.panel
+            assert.is_true(hasText(panel, "3"))
+            local column = find(panel, function(w)
+                return w.ges_events and hasText(w, C_("Notes page", "Notes"))
+                    and w ~= panel
+            end)
+            tapWidget(column)
+            local page = ui.menu.drawer
+            assert.are.equal(3, page.count)
+            assert.is_true(hasText(page.overview, countLine(ui, 3)))
+            assert.is_nil(ui.menu.panel)
+            assert.is_nil(ui.menu.bars)
+            UIManager:sendEvent(Event:new("KeyPress", require("device/key"):new("Back", {})))
+            assert.are.equal(position, ui:getCurrentPage())
             assert.is_nil(ui.menu.drawer)
         end)
 
