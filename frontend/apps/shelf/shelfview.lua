@@ -326,7 +326,8 @@ function ShelfView:textAction(icon, label, callback)
     }
     return ShelfWidgets.Tappable:new{
         callback = callback,
-        CenterContainer:new{ dimen = Geom:new{ w = content:getSize().w, h = TITLE_TAP_H }, content },
+        CenterContainer:new{ dimen = Geom:new{ w = content:getSize().w, h = math.max(TITLE_TAP_H, content:getSize().h) },
+            content },
     }
 end
 
