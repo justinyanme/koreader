@@ -750,6 +750,16 @@ local option_help_text = {
     custom_text     = ReaderFooter.set_custom_text,
 }
 
+-- Side margins of the text when the progress bar is off: the e-ink redesign's default footer (and only it, with
+-- `text_book_margins`) uses the book's, which "same as book margins" keeps in step, so that the items at both
+-- ends line up with the text.
+function ReaderFooter:getTextMargin()
+    if self.settings.text_book_margins and self.settings.progress_margin then
+        return Screen:scaleBySize(self.settings.progress_margin_width)
+    end
+    return self.horizontal_margin
+end
+
 function ReaderFooter:updateFooterContainer()
     local margin_span = HorizontalSpan:new{ width = self.horizontal_margin }
     self.vertical_frame = VerticalGroup:new{}
@@ -2153,7 +2163,7 @@ function ReaderFooter:insertDynamicFillers(info, filler1_idx, filler2_idx)
 
     local filler_space = " "
     self.filler_space_width = self.filler_space_width or self:getTextWidth(filler_space)
-    local margin = self.settings.disable_progress_bar and self.horizontal_margin
+    local margin = self.settings.disable_progress_bar and self:getTextMargin()
         or Screen:scaleBySize(self.settings.progress_margin_width)
     local max_width = math.floor(self._saved_screen_width - 2 * margin)
     local text_width = self:getTextWidth(table.concat(info))
@@ -2314,7 +2324,7 @@ function ReaderFooter:_updateFooterText(force_repaint, full_repaint)
             self.footer_text.height = 0
         else
             -- No progress bar, we're only constrained to fit inside self.footer_container
-            self.footer_text:setMaxWidth(math.floor(self._saved_screen_width - 2 * self.horizontal_margin))
+            self.footer_text:setMaxWidth(math.floor(self._saved_screen_width - 2 * self:getTextMargin()))
             self.text_width = self.footer_text:getSize().w
             self.footer_text.height = self.footer_text:getSize().h
         end

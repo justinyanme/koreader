@@ -180,12 +180,15 @@ describe("ReaderTypesetPanel module", function()
             tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
             UIManager:forceRePaint()
             local bars = ui.menu.bars
-            local function entry(text)
-                return find(bars.bottom, function(w) return w.callback and hasText(w, text) end)
+            -- the entries are icons without labels
+            local function entry(icon)
+                return find(bars.bottom, function(w)
+                    return w.callback and find(w, function(c) return c.icon == icon or c.icon == icon .. ".bold" end) ~= nil
+                end)
             end
             local page = ui:getCurrentPage()
             -- the top bar hides over the typeset panel: it and the band of the panel and the bottom bar refresh
-            local refreshes = refreshesOf(function() tapWidget(entry(_("Font"))) end)
+            local refreshes = refreshesOf(function() tapWidget(entry("eink/font")) end)
             local panel = ui.config.panel
             assert.is_truthy(panel)
             assert.are.equal(bars, ui.menu.bars)
@@ -200,7 +203,7 @@ describe("ReaderTypesetPanel module", function()
             }, refreshes)
 
             -- the progress panel brings the top bar back
-            refreshes = refreshesOf(function() tapWidget(entry(_("Progress"))) end)
+            refreshes = refreshesOf(function() tapWidget(entry("eink/progress")) end)
             assert.is_nil(ui.config.panel)
             assert.are.equal("progress", ui.menu.panel_name)
             assert.are.equal(bars, topWidget())
@@ -211,12 +214,12 @@ describe("ReaderTypesetPanel module", function()
                 { mode = "ui", region = font_band:combine(progress_band) },
             }, refreshes)
 
-            tapWidget(entry(_("Font")))
+            tapWidget(entry("eink/font"))
             UIManager:forceRePaint()
             assert.are.equal(ui.config.panel, ui.menu.panel)
             font_band = ui.config.panel:getRefreshRegion():combine(bars.bottom_rect)
             -- the open entry closes its panel; the bars stay, the top bar with them
-            refreshes = refreshesOf(function() tapWidget(entry(_("Font"))) end)
+            refreshes = refreshesOf(function() tapWidget(entry("eink/font")) end)
             assert.is_nil(ui.config.panel)
             assert.is_nil(ui.menu.panel)
             assert.are.equal(bars, topWidget())
@@ -313,7 +316,7 @@ describe("ReaderTypesetPanel module", function()
             assert.is_false(bars.show_top)
             assert.is_truthy(backArrow(bars))
             assert.are.equal(0, backArrow(bars).dimen.x) -- at the bottom left, as on full-screen pages
-            assert.is_nil(find(bars.bottom, function(w) return w.callback and hasText(w, _("Progress")) end))
+            assert.is_nil(find(bars.bottom, function(w) return w.icon == "eink/progress" end))
             assert.are.same({
                 { mode = "ui", region = main_band:combine(more:getRefreshRegion():combine(bars.bottom_rect)) },
             }, refreshes)
@@ -408,6 +411,42 @@ describe("ReaderTypesetPanel module", function()
             assert.is_false(inkInTopMargin())
             ui:handleEvent(Event:new("SetPageTopMargin", 44))
             runTasks()
+        end)
+
+        it("should draw the chapter header as WeChat Read: a circled ‹ and the title in ink, centered in the top margin", function()
+            local header = ui.view.view_modules.chapter_header
+            ui:handleEvent(Event:new("SetPageTopMargin", 44))
+            runTasks()
+            UIManager:forceRePaint()
+            local margins = ui.document:getPageMargins()
+            local w = Screen:getWidth()
+            local bb = Screen.bb
+            local x0, x1, y0, y1, darkest = w, -1, margins.top, -1, 0xFF
+            for y = 0, margins.top - 1 do
+                for x = 0, w - 1 do
+                    local v = bb:getPixel(x, y):getColor8().a
+                    if v ~= 0xFF then
+                        x0, x1, y0, y1 = math.min(x0, x), math.max(x1, x), math.min(y0, y), math.max(y1, y)
+                        darkest = math.min(darkest, v)
+                    end
+                end
+            end
+            -- ink, not gray, from the text's left edge
+            assert.are.equal(0, darkest)
+            assert.is_true(x0 >= margins.left and x0 <= margins.left + 1, x0 .. " vs " .. margins.left)
+            assert.is_true(x1 < w - margins.right)
+            -- centered in the top margin, give or take the glyphs' own extents
+            assert.is_true(math.abs((y0 + y1) / 2 - margins.top / 2) <= Screen:scaleBySize(3), y0 .. "-" .. y1)
+            -- the circled ‹ comes first: a column of ink one icon wide, then a gap before the title
+            local icon = Screen:scaleBySize(header.ICON)
+            local function columnInked(x)
+                for y = y0, y1 do
+                    if bb:getPixel(x, y):getColor8().a ~= 0xFF then return true end
+                end
+                return false
+            end
+            assert.is_true(columnInked(x0 + math.floor(icon / 2)))
+            assert.is_false(columnInked(x0 + icon + 1))
         end)
 
         it("should step the font size from an off-scale size to the next size below or above", function()
