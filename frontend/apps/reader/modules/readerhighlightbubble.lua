@@ -96,7 +96,8 @@ end
 -- are what can be grabbed (ReaderHighlightBubble:handleAt()).
 local SelectionMarks = Widget:extend{
     highlight = nil, -- ReaderHighlightBubble
-    handles = nil, -- screen rects of the painted handles, by end ("start", "end")
+    handles = nil, -- screen rects of the painted handles, by end ("start", "end"), with the side they hang to
+    paints_over_footer = true, -- so that ReaderFooter paints it again when it repaints itself alone
 }
 
 -- Whether a line of a selection is on the screen, all of it, or some of it (across pages, the page scrolls
@@ -108,11 +109,12 @@ local function onScreen(r, partly)
     return r.y >= 0 and r.y + r.h <= Screen:getHeight()
 end
 
--- A disc with its top corner toward the text squared: that corner points at the end of the selection.
-local function paintHandle(bb, x, y, d, side)
+-- A disc with its top corner toward the text squared (it hangs to the other side): that corner points at the
+-- end of the selection.
+local function paintHandle(bb, x, y, d, hang)
     local half = math.floor(d / 2)
     bb:paintRoundedRect(x, y, d, d, Palette.ink, half)
-    bb:paintRect(side == "start" and x + d - half or x, y, half, half, Palette.ink)
+    bb:paintRect(hang == "left" and x + d - half or x, y, half, half, Palette.ink)
 end
 
 function SelectionMarks:paintTo(bb, x, y)
@@ -121,15 +123,16 @@ function SelectionMarks:paintTo(bb, x, y)
     if not (highlight.hold_pos and highlight.selected_text) then return end
     local rects = highlight:selectionRects()
     if #rects == 0 then return end
-    local tops = highlight:underlineTops(bb, rects)
+    local tops, handles = highlight:selectionMarks(bb, rects)
+    if not tops then return end
     for i, r in ipairs(rects) do
         if onScreen(r, true) then
             bb:paintRect(x + r.x, y + tops[i], r.w, Size.border.default, Palette.ink)
         end
     end
-    self.handles = highlight:handleRects(rects, tops)
-    for side, h in pairs(self.handles) do
-        paintHandle(bb, x + h.x, y + h.y, h.w, side)
+    self.handles = handles
+    for _, h in pairs(handles) do
+        paintHandle(bb, x + h.x, y + h.y, h.w, h.hang)
     end
 end
 
@@ -379,31 +382,87 @@ function ReaderHighlightBubble:underlineTops(bb, rects)
     end
     local highlighted = self.view.highlight.line_tops or {}
     for key, segments in pairs(lines) do
-        line_tops[key] = highlighted[key] or self.view:underlineY(bb, segments)
+        local r = segments[1]
+        -- lines out of the screen (across pages) cannot be read: the bottom of their box
+        line_tops[key] = highlighted[key] or (onScreen(r, true) and self.view:underlineY(bb, segments)) or r.y + r.h - 1
     end
     for i, r in ipairs(rects) do tops[i] = line_tops[r.y .. ":" .. r.h] end
     return tops
 end
 
---- The handles of the selection (screen rects, by end), given the tops of its underline: about 25dp ink
--- drops hanging under its ends, flat tops level with the glyphs' bottom (4dp above the underline), as in
--- WeChat Read. Kept on the screen; an end whose line is out of the screen (across pages) has none.
+-- U+0590–U+08FF (Hebrew to Arabic Extended-A) and their presentation forms, U+FB1D–U+FDFF and U+FE70–U+FEFF
+local function hasRightToLeftText(text)
+    return text:find("\xD6[\x90-\xBF]") or text:find("[\xD7-\xDF]") or text:find("\xE0[\xA0-\xA3]")
+        or text:find("\xEF\xAC[\x9D-\xBF]") or text:find("\xEF[\xAD-\xB7]") or text:find("\xEF\xB9[\xB0-\xBF]")
+        or text:find("\xEF[\xBA\xBB]")
+end
+
+--- The two ends of the selection in the order of the text, "start" and "end": the index of the line rect each
+-- is on, the x of its edge there and the side its handle hangs to, away from the text. On a right-to-left
+-- line a selection starts at the right: its first and last characters tell. On fixed-layout pages, lines are
+-- taken as left to right, and right-to-left text has no ends.
+function ReaderHighlightBubble:selectionEnds(rects)
+    local first, last = rects[1], rects[#rects]
+    local starts_right, ends_left = false, false
+    if self.ui.rolling then
+        local doc, selected = self.ui.document, self.selected_text
+        local function charBox(xp0, xp1)
+            local boxes = xp0 and xp1 and doc:getScreenBoxesFromPositions(xp0, xp1, true)
+            return boxes and boxes[1]
+        end
+        local function mid(r) return r.x + r.w / 2 end
+        local a = charBox(selected.pos0, doc:getNextVisibleChar(selected.pos0))
+        local b = charBox(doc:getPrevVisibleChar(selected.pos1), selected.pos1)
+        starts_right = a and mid(a) > mid(first) or false
+        ends_left = b and mid(b) < mid(last) or false
+    elseif hasRightToLeftText(self.selected_text.text or "") then
+        return {}
+    end
+    return {
+        start = { index = 1, x = starts_right and first.x + first.w or first.x, hang = starts_right and "right" or "left" },
+        ["end"] = { index = #rects, x = ends_left and last.x or last.x + last.w, hang = ends_left and "left" or "right" },
+    }
+end
+
+--- The handles of the selection (screen rects, by end, with the side they hang to), given the tops of its
+-- underline: about 25dp ink drops hanging under its ends, flat tops level with the glyphs' bottom (4dp above
+-- the underline), as in WeChat Read. Kept on the screen; an end whose line is out of the screen (across pages)
+-- has none.
 function ReaderHighlightBubble:handleRects(rects, tops)
     local d, rise = Screen:scaleBySize(25), Screen:scaleBySize(4)
     local sw, sh = Screen:getWidth(), Screen:getHeight()
     local handles = {}
-    for side, i in pairs{ start = 1, ["end"] = #rects } do
-        local r = rects[i]
-        if onScreen(r) then
+    for side, e in pairs(self:selectionEnds(rects)) do
+        if onScreen(rects[e.index]) then
             handles[side] = Geom:new{
-                x = math.max(0, math.min(sw - d, side == "start" and r.x - d or r.x + r.w)),
-                y = math.max(0, math.min(sh - d, tops[i] - rise)),
+                x = math.max(0, math.min(sw - d, e.hang == "left" and e.x - d or e.x)),
+                y = math.max(0, math.min(sh - d, tops[e.index] - rise)),
                 w = d,
                 h = d,
+                hang = e.hang,
             }
         end
     end
     return handles
+end
+
+--- The underline tops and handles of the selection on the page as painted (bb), kept while its lines stay
+-- where they are: repainted over the footer alone, the page already has the underline, which is not glyphs.
+-- Nothing (yet) when a changed selection is repainted over a page that still has the old one's marks.
+function ReaderHighlightBubble:selectionMarks(bb, rects)
+    local key = {}
+    for i, r in ipairs(rects) do key[i] = r.x .. "," .. r.y .. "," .. r.w .. "," .. r.h end
+    key = table.concat(key, ";")
+    local marks = self.painted_marks
+    local page_paints = self.view.highlight.page_paints
+    if not (marks and marks.selection == self.selected_text and marks.key == key) then
+        if marks and marks.page_paints == page_paints then return end -- the page repaint is on its way
+        local tops = self:underlineTops(bb, rects)
+        marks = { selection = self.selected_text, key = key, tops = tops, handles = self:handleRects(rects, tops) }
+        self.painted_marks = marks
+    end
+    marks.page_paints = page_paints
+    return marks.tops, marks.handles
 end
 
 --- What the handles can cover before they are painted (the glyphs set their height): from the top of their
@@ -545,13 +604,15 @@ end
 -- meanwhile.
 function ReaderHighlightBubble:startHandleDrag(side, pos)
     local rects = self:selectionRects()
-    local first, last = rects[1], rects[#rects]
-    -- points in the first and the last character
-    local start_point = Geom:new{ x = first.x + 1, y = first.y + math.floor(first.h / 2), w = 0, h = 0 }
-    local end_point = Geom:new{ x = last.x + last.w - 2, y = last.y + math.floor(last.h / 2), w = 0, h = 0 }
-    local fixed, moving = start_point, end_point
+    local ends = self:selectionEnds(rects)
+    -- points in the first and the last character, next to the edge of the selection
+    local function point(e)
+        local r = rects[e.index]
+        return Geom:new{ x = e.x + (e.hang == "left" and 1 or -2), y = r.y + math.floor(r.h / 2), w = 0, h = 0 }
+    end
+    local fixed, moving = point(ends.start), point(ends["end"])
     if side == "start" then
-        fixed, moving = end_point, start_point
+        fixed, moving = moving, fixed
     end
     self.hold_pos = self.view:screenToPageTransform(fixed)
     if self.ui.rolling then
@@ -741,6 +802,7 @@ function ReaderHighlightBubble:onShowHighlightMenu(index)
     if not self.selected_text then return end
     local rects = self:selectionRects()
     if #rects == 0 then -- e.g. multi-page selection in select mode
+        self:closeBubble() -- one hidden while a handle was dragged would take every tap
         return ReaderHighlight.onShowHighlightMenu(self, index)
     end
     local text = util.cleanupSelectedText(self.selected_text.text)

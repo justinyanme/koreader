@@ -888,6 +888,26 @@ describe("ReaderHighlightBubble module", function()
                 ui.highlight:onClose()
             end)
 
+            it("should not leave the hidden popover behind when the dragged selection has no line on the screen", function()
+                longPress(SAMPSON)
+                local popover = ui.highlight.highlight_dialog
+                local from = center(assertHandle(ui.highlight:selectionRects()[1], "end", true))
+                gesture("pan", { x = from.x + 40, y = from.y + 10 }, { start_pos = from })
+                assert.is_true(popover.hidden)
+                -- as when nothing of it is left on the screen: upstream's menu instead
+                local rects = ui.highlight.selectionRects
+                ui.highlight.selectionRects = function() return {} end
+                local ok, err = pcall(function()
+                    gesture("pan_release", { x = from.x + 40, y = from.y + 10 })
+                    for _, window in ipairs(UIManager._window_stack) do
+                        assert.are_not.equal(popover, window.widget)
+                    end
+                end)
+                ui.highlight.selectionRects = rects
+                assert(ok, err)
+                ui.highlight:onClose()
+            end)
+
             it("should keep a popover below a selection at the page top clear of its handles", function()
                 longPress({ x = 300, y = 30 }) -- on the first line
                 local bubble = ui.highlight.highlight_dialog
@@ -974,6 +994,197 @@ describe("ReaderHighlightBubble module", function()
                 assert.are.equal("page", ui.view.view_mode)
                 assert.are.equal(page, ui.view.state.page)
                 assertNoNotes(ui)
+            end)
+
+            -- During fn: the bottom of the lowest line ReaderView:underlineY() is asked about, and whether it read
+            -- a pixel off the screen (the screen buffer has no bounds checks: that reads other memory, or crashes).
+            -- Such a read is counted, then made on the screen.
+            local function underlineReads(fn)
+                local lowest, off_screen = math.huge, false
+                local underlineY = ui.view.underlineY
+                ui.view.underlineY = function(view, bb, rects)
+                    lowest = math.min(lowest, rects[1].y + rects[1].h - 1)
+                    local checked = setmetatable({
+                        getPixel = function(_, px, py)
+                            local w, h = bb:getWidth(), bb:getHeight()
+                            if px < 0 or px >= w or py < 0 or py >= h then
+                                off_screen = true
+                                px, py = math.max(0, math.min(w - 1, px)), math.max(0, math.min(h - 1, py))
+                            end
+                            return bb:getPixel(px, py)
+                        end,
+                    }, { __index = function(_, k)
+                        local method = bb[k]
+                        return function(_, ...) return method(bb, ...) end
+                    end })
+                    return underlineY(view, checked, rects)
+                end
+                local ok, err = pcall(fn)
+                ui.view.underlineY = nil -- back to ReaderView's
+                assert(ok, err)
+                return lowest, off_screen
+            end
+
+            it("should draw a long-press drag from the first line on across pages, its lines off the screen left out", function()
+                local page = ui.view.state.page
+                local w, h = Screen:getWidth(), Screen:getHeight()
+                local lowest, off_screen = underlineReads(function()
+                    gesture("hold", { x = 300, y = 30 })
+                    UIManager:forceRePaint()
+                    gesture("hold_pan", { x = 300, y = 400 })
+                    gesture("hold_pan", { x = w - 5, y = h - 5 }) -- into the corner: the page scrolls up
+                    UIManager:forceRePaint()
+                end)
+                assert.are.equal("scroll", ui.view.view_mode)
+                local selected = ui.highlight.selected_text
+                local lines = ui.document:getScreenBoxesFromPositions(selected.pos0, selected.pos1, true)
+                assert.is_true(lines[1].y + lines[1].h < 0) -- its first lines went above the screen
+                assert.is_true(lowest >= 0) -- and were not measured
+                assert.is_false(off_screen)
+                local visible = 0
+                for _, line in ipairs(lines) do
+                    if line.y >= 0 and line.y + line.h <= h then
+                        assertUnderline(line)
+                        visible = visible + 1
+                    end
+                end
+                assert.is_true(visible >= 3)
+                assertHandle(lines[#lines], "end")
+                gesture("hold_release", { x = w - 5, y = h - 5 })
+                UIManager:forceRePaint()
+                assert.are.equal(ui.highlight.highlight_dialog, topWidget())
+                tap(5, 5)
+                UIManager:forceRePaint()
+                assert.are.equal("page", ui.view.view_mode)
+                assert.are.equal(page, ui.view.state.page)
+                assertNoNotes(ui)
+            end)
+
+            it("should draw a line highlight going above the screen in scroll mode, the rest of it as always", function()
+                G_reader_settings:saveSetting("highlight_color", "gray") -- as on a black and white screen
+                ui.view.highlight.saved_color = "gray"
+                ui:handleEvent(Event:new("SetViewMode", "scroll"))
+                UIManager:forceRePaint()
+                longPress(SAMPSON, { x = 300, y = 290 })
+                tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
+                ui.highlight:closeBubble()
+                UIManager:forceRePaint()
+                local item = ui.annotation.annotations[1]
+                local boxes = ui.document:getScreenBoxesFromPositions(item.pos0, item.pos1, true)
+                -- scrolled until its first lines are above the screen, repainted, scrolled on a little
+                local lowest, off_screen = underlineReads(function()
+                    ui.rolling:_gotoPos(ui.document:getCurrentPos() + boxes[2].y + boxes[2].h + 2)
+                    UIManager:forceRePaint()
+                    ui.rolling:_gotoPos(ui.document:getCurrentPos() + 7)
+                    UIManager:forceRePaint()
+                end)
+                assert.is_true(lowest < 0) -- asked about lines above the screen
+                assert.is_false(off_screen) -- without reading there
+                boxes = ui.document:getScreenBoxesFromPositions(item.pos0, item.pos1, true)
+                assert.is_true(boxes[2].y + boxes[2].h <= 0)
+                local visible = 0
+                for _, box in ipairs(boxes) do
+                    if box.y >= 0 and box.y + box.h <= Screen:getHeight() then
+                        local row = underlineRow(box)
+                        for x = box.x, box.x + box.w - 1 do
+                            assert.is_true(gray(x, row) < 0x80, "line at " .. x)
+                        end
+                        visible = visible + 1
+                    end
+                end
+                assert.is_true(visible >= 2)
+                G_reader_settings:delSetting("highlight_color")
+            end)
+
+            it("should keep the handles over the footer when it repaints itself, and draw the underline once", function()
+                ui:handleEvent(Event:new("SetPageBottomMargin", 0)) -- the last line right above the footer
+                UIManager:forceRePaint()
+                local page = ui.document:getTextFromPositions({ x = 0, y = 0 },
+                    { x = Screen:getWidth(), y = Screen:getHeight() }, true)
+                ui.document:clearSelection()
+                UIManager:forceRePaint()
+                local last = page.sboxes[#page.sboxes]
+                local word = { x = last.x + 10, y = last.y + math.floor(last.h / 2) }
+                local start = ui.document:getWordFromPosition(word, true).sbox
+                -- the footer's own paper in the column of the start handle's middle
+                local x = start.x - math.floor(Screen:scaleBySize(25) / 2) - 1
+                local footer_top = Screen:getHeight() - ui.view.footer:getHeight()
+                local paper = {}
+                for y = footer_top, Screen:getHeight() - 1 do
+                    if gray(x, y) >= 0xF0 then table.insert(paper, y) end
+                end
+                local function handleOverFooter()
+                    local covered = 0
+                    for _, y in ipairs(paper) do
+                        if gray(x, y) < 0x80 then covered = covered + 1 end
+                    end
+                    return covered
+                end
+                gesture("hold", word)
+                UIManager:forceRePaint()
+                local r = ui.highlight:selectionRects()[1]
+                local marked = handleOverFooter()
+                assert.is_true(marked > 0)
+                local line = underlineRow(r)
+                -- the clock ticks: the footer repaints itself alone, over the handles
+                ui.view.footer:onUpdateFooter(true)
+                assert.are.equal(marked, handleOverFooter())
+                assert.are.equal(line, underlineRow(r))
+                gesture("hold_release", word)
+                ui.highlight:onClose()
+            end)
+        end)
+
+        describe("with right-to-left text", function()
+            local ffiUtil, lfs
+            setup(function()
+                ffiUtil = require("ffi/util")
+                lfs = require("libs/libkoreader-lfs")
+            end)
+
+            it("should hang the handles at its start and end, at the right and at the left, and drag its end", function()
+                local dir = require("datastorage"):getDataDir() .. "/rtl_selection"
+                lfs.mkdir(dir)
+                local path = dir .. "/book.html"
+                local f = assert(io.open(path, "w"))
+                f:write('<html><body><p dir="rtl" lang="he">'
+                    .. string.rep("שלום עולם זהו טקסט בעברית לבדיקה של בחירה מימין לשמאל ", 8) .. "</p></body></html>")
+                f:close()
+                local ui = openReader(path, true)
+                UIManager:forceRePaint()
+                local ok, err = pcall(function()
+                    -- from the right of the first line, its start, down to the third
+                    longPress({ x = 500, y = 30 }, { x = 300, y = 90 })
+                    local before = ui.highlight.selected_text
+                    local rects = ui.highlight:selectionRects()
+                    local first, last = rects[1], rects[#rects]
+                    assert.is_true(last.y > first.y)
+                    -- the start handle hangs to the right of the first line, its square corner at its top left
+                    local d = Screen:scaleBySize(25)
+                    local u = underlineRow(first)
+                    local start = Geom:new{ x = first.x + first.w, y = u - Screen:scaleBySize(4), w = d, h = d }
+                    assert.is_true(gray(start.x, start.y + 1) < 0x80)
+                    assert.is_true(gray(start.x + d - 1, start.y + 1) >= 0x80)
+                    assert.is_true(gray(start.x + math.floor(d / 2), start.y + math.floor(d / 2)) < 0x80)
+                    -- the end one to the left of the last line's left, where the selection stops
+                    u = underlineRow(last)
+                    local stop = Geom:new{ x = last.x - d, y = u - Screen:scaleBySize(4), w = d, h = d }
+                    assert.is_true(gray(stop.x + d - 1, stop.y + 1) < 0x80)
+                    assert.is_true(gray(stop.x + math.floor(d / 2), stop.y + math.floor(d / 2)) < 0x80)
+                    -- dragged a line further, the end moves on and the start stays where it was
+                    local from = center(stop)
+                    drag(from, { x = from.x - 60, y = from.y + 30 })
+                    local selected = ui.highlight.selected_text
+                    assert.are.equal(before.pos0, selected.pos0)
+                    assert.are.equal(1, ui.document:compareXPointers(before.pos1, selected.pos1))
+                    assert.are.equal(1, selected.text:find(before.text, 1, true))
+                    assert.are.equal(ui.highlight.highlight_dialog, topWidget())
+                    assertNoNotes(ui)
+                end)
+                closeReader(ui)
+                DocSettings:open(path):purge()
+                ffiUtil.purgeDir(dir)
+                assert(ok, err)
             end)
         end)
 

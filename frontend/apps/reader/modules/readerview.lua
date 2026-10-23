@@ -239,6 +239,8 @@ function ReaderView:paintTo(bb, x, y)
     -- draw saved highlight (will return true if any of them are in color)
     local colorful
     self.highlight.line_tops = nil -- fork: see ReaderView:drawLineHighlights()
+    -- fork: what view modules draw over the page can tell a page painted anew from one repainted over
+    self.highlight.page_paints = (self.highlight.page_paints or 0) + 1
     if self.highlight_visible then
         colorful = self:drawSavedHighlight(bb, x, y)
     end
@@ -735,7 +737,7 @@ function ReaderView:underlineY(bb, rects)
     local box = rects[1]
     local bottom = box.y + box.h - 1
     local bb_w, bb_h = bb:getWidth(), bb:getHeight()
-    if bottom >= bb_h then return bottom end
+    if bottom < 0 or bottom >= bb_h then return bottom end -- out of the screen (scroll mode): nothing to read
     local cols, seen = {}, {} -- of all the segments, which may overlap
     for _, r in ipairs(rects) do
         for col = math.max(r.x, 0), math.min(r.x + r.w, bb_w) - 1, 2 do
