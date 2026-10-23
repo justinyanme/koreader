@@ -1,7 +1,9 @@
-describe("Shelf home, 我的 tab", function()
-    local BookList, DataStorage, DocSettings, Event, FileManager, Geom, Me, ReadHistory, ReaderUI, Replacements, SQ3, UIManager
-    local ffiUtil, lfs, T, _
+describe("Shelf home, 我 tab", function()
+    local BookList, DataStorage, Device, DocSettings, Event, FileManager, Geom, LuaSettings, Me, Palette, ReadHistory
+    local ReaderUI, Replacements, SQ3, Screen, UIManager, Version
+    local ffiUtil, lfs, T, _, C_, N_
     local home, saved_settings, saved_hist, saved_dbs
+    local SETTINGS = { "home_dir", "lastdir", "shelf_removed", "me_nickname" } -- changed here, restored after
     local today -- this week's day of today, Monday = 1
 
     -- minutes read N days before today; the week runs from Monday
@@ -69,11 +71,99 @@ describe("Shelf home, 我的 tab", function()
         return refreshes, function() UIManager.setDirty = orig_setDirty end
     end
 
-    local function openMe()
+    local tap -- defined below
+
+    -- 我 opened with a tap on its tab; with `statistics`, as the statistics plugin
+    local function openMe(statistics)
         FileManager:showFiles(home)
+        UIManager:forceRePaint()
         local fm = FileManager.instance
-        fm:switchTab("me")
+        fm.statistics = statistics
+        local tab
+        local function findTab(w)
+            if type(w) ~= "table" or tab then return end
+            if w.callback and w.dimen and w.dimen.x then
+                for _, child in ipairs(w) do
+                    if type(child) == "table" and (child.icon == "eink/user" or (child[1] and child[1].icon == "eink/user")) then
+                        tab = w
+                        return
+                    end
+                end
+            end
+            for _, child in ipairs(w) do findTab(child) end
+        end
+        findTab(fm.layout_group[2])
+        tap(tab.dimen)
+        assert.are.equal("me", fm.current_tab)
         return fm, fm.me_view
+    end
+
+    -- the statistics plugin, as far as 我 uses it: its reading progress page, on controlled data
+    local function fakeStatistics()
+        local ReaderProgress = dofile("plugins/statistics.koplugin/readerprogress.lua")
+        return {
+            ReaderProgress = ReaderProgress,
+            onShowReaderProgress = function()
+                local week = {}
+                for i = 1, 7 do
+                    table.insert(week, { 12, 600, os.date("%Y-%m-%d", os.time() - (i - 1) * 86400) })
+                end
+                UIManager:show(ReaderProgress:new{
+                    dates = week, current_duration = 600, current_pages = 12, today_duration = 600, today_pages = 12,
+                })
+            end,
+        }
+    end
+
+    local function topWidget()
+        return UIManager._window_stack[#UIManager._window_stack].widget
+    end
+
+    -- Input is sent the way it arrives, and the screen is repainted after it.
+    function tap(rect)
+        UIManager:sendEvent(Event:new("Gesture", { ges = "tap",
+            pos = Geom:new{ x = rect.x + math.floor(rect.w / 2), y = rect.y + math.floor(rect.h / 2), w = 0, h = 0 } }))
+        UIManager:forceRePaint()
+    end
+
+    -- the first widget under `widget` that `pred` accepts
+    local function find(widget, pred)
+        if type(widget) ~= "table" then return end
+        if pred(widget) then return widget end
+        for _, child in ipairs(widget) do
+            local found = find(child, pred)
+            if found then return found end
+        end
+    end
+
+    local function textWidget(widget, str)
+        return find(widget, function(w) return w.text == str and w.face ~= nil end)
+    end
+
+    -- the Tappable (a home row, the name, the time) holding the text `str`
+    local function tappable(widget, str)
+        return find(widget, function(w) return w.callback ~= nil and w.dimen ~= nil and textWidget(w, str) ~= nil end)
+    end
+
+    -- the home rows shown, top to bottom: { title, subtitle, row }
+    local function shownRows(view)
+        local rows = {}
+        find(view[1], function(w)
+            if getmetatable(w) and getmetatable(w).__index == require("apps/shelf/shelfwidgets").Tappable
+                    and w ~= view.name_tap and w ~= view.time_tap then
+                local strs = {}
+                find(w, function(c) if c.text and c.face then table.insert(strs, c.text) end return false end)
+                table.insert(rows, { strs[1], strs[2], w })
+            end
+            return false
+        end)
+        return rows
+    end
+
+    local function writeKOSync(settings)
+        local kosync = LuaSettings:open(Me.kosync_settings)
+        kosync:saveSetting("settings", settings)
+        kosync:flush()
     end
 
     -- the text of every TextWidget/TextBoxWidget under `widget`
@@ -112,32 +202,42 @@ describe("Shelf home, 我的 tab", function()
         require("document/canvascontext"):init(require("device"))
         BookList = require("ui/widget/booklist")
         DataStorage = require("datastorage")
+        Device = require("device")
         DocSettings = require("docsettings")
         Event = require("ui/event")
         FileManager = require("apps/filemanager/filemanager")
         Geom = require("ui/geometry")
+        LuaSettings = require("luasettings")
         Me = require("apps/shelf/me")
+        Palette = require("ui/palette")
         ReadHistory = require("readhistory")
         ReaderUI = require("apps/reader/readerui")
         Replacements = require("apps/replacements")
         SQ3 = require("lua-ljsqlite3/init")
+        Screen = Device.screen
         UIManager = require("ui/uimanager")
+        Version = require("version")
         ffiUtil = require("ffi/util")
         lfs = require("libs/libkoreader-lfs")
         T = ffiUtil.template
         _ = require("gettext")
+        C_ = _.pgettext
+        N_ = _.ngettext
         require("apps/shelf/shelffilemanager") -- registers the replacement
 
         saved_settings = {}
-        for _, key in ipairs{ "home_dir", "lastdir", "shelf_removed" } do
+        for _, key in ipairs(SETTINGS) do
             saved_settings[key] = G_reader_settings:readSetting(key)
         end
+        G_reader_settings:delSetting("me_nickname")
         saved_hist = ReadHistory.hist
         ReadHistory.hist = {}
-        saved_dbs = { Me.stats_db, Me.vocab_db }
+        saved_dbs = { Me.stats_db, Me.vocab_db, Me.kosync_settings }
         local data_dir = ffiUtil.realpath(DataStorage:getDataDir())
         Me.stats_db = data_dir .. "/me_spec_statistics.sqlite3"
         Me.vocab_db = data_dir .. "/me_spec_vocabulary.sqlite3"
+        Me.kosync_settings = data_dir .. "/me_spec_kosync.lua"
+        os.remove(Me.kosync_settings)
         seedStats(Me.stats_db)
         seedVocab(Me.vocab_db)
 
@@ -148,7 +248,7 @@ describe("Shelf home, 我的 tab", function()
         local year = os.date("%Y")
         addBook("juliet.epub", "juliet.epub", "Romeo and Juliet", {
             highlight("Two households, both alike in dignity", "Prologue"),
-            { page = "/body/p[3]", text = "a bookmark, not a note", datetime = "2026-10-02 10:00:00" },
+            { page = "/body/p[3]", text = "a bookmark, not a note", chapter = "Act 1", datetime = "2026-10-02 10:00:00" },
             highlight("In fair Verona, where we lay our scene", "Prologue"),
         }, { status = "complete", modified = year .. "-03-01" }, 2000)
         addBook("leaves.epub", "leaves.epub", "Leaves of Grass", {
@@ -169,88 +269,279 @@ describe("Shelf home, 我的 tab", function()
     teardown(function()
         if FileManager.instance then FileManager.instance:onClose() end
         ReadHistory.hist = saved_hist
-        Me.stats_db, Me.vocab_db = saved_dbs[1], saved_dbs[2]
-        for key, value in pairs(saved_settings) do
-            G_reader_settings:saveSetting(key, value)
+        os.remove(Me.kosync_settings)
+        Me.stats_db, Me.vocab_db, Me.kosync_settings = saved_dbs[1], saved_dbs[2], saved_dbs[3]
+        for _, key in ipairs(SETTINGS) do
+            if saved_settings[key] == nil then
+                G_reader_settings:delSetting(key)
+            else
+                G_reader_settings:saveSetting(key, saved_settings[key])
+            end
         end
+        G_reader_settings:flush()
         Replacements.filemanager = nil
         ffiUtil.purgeDir(home)
     end)
 
-    it("shows this week's reading time, a bar per day so far, and the streak line", function()
-        local fm, view = openMe()
+    it("shows the name, the reading time and the streak over six rows, without a weekly chart", function()
+        local fm, view = openMe(fakeStatistics())
         assert.are.equal(view, fm.content[1])
         assert.are.equal("me", fm.current_tab)
 
-        local expected, total = {}, 0
-        for i = 1, today do
-            expected[i] = reading[today - i] or 0
-            total = total + expected[i]
+        -- every day recorded, and this week's from Monday; days in a row up to today
+        local total, week = 0, 0
+        for offset, minutes in pairs(reading) do
+            total = total + minutes
+            if offset < today then week = week + minutes end
         end
-        assert.are.same(expected, view.home.week.minutes)
-        local shown = texts(view)
-        assert.is_true(contains(shown, T(_("%1 h %2 min"), math.floor(total / 60), total % 60)))
-        -- Romeo and Juliet and the legacy book; not Leaves of Grass (2001) nor the one reviewed this year
-        assert.is_true(contains(shown, T(_("%1-day reading streak · %2 finished this year"), 3, 2)))
+        assert.are.same({ name = Device.model, total_minutes = total, week_minutes = week, streak = 3,
+            note_count = 4, word_count = 2 }, view.home)
+        -- 累计阅读 X 小时 Y 分钟 with figure-sized numbers, then 本周阅读 … | 连续 N 天
+        local shown = table.concat(texts(view))
+        assert.is_truthy(shown:find(T(_("Total reading %1 h %2 min"), math.floor(total / 60), total % 60), 1, true))
+        assert.is_truthy(shown:find(T(_("This week %1 h %2 min | %3-day streak"),
+            math.floor(week / 60), week % 60, 3), 1, true))
+        local name = textWidget(view, Device.model)
+        local hours = textWidget(view, tostring(math.floor(total / 60)))
+        local minutes = textWidget(view, tostring(total % 60))
+        assert.are.equal(28, name.face.orig_size)
+        assert.is_truthy(name.face.realname:find("Serif"))
+        assert.are.equal(24, hours.face.orig_size)
+        assert.are.equal(24, minutes.face.orig_size)
+        -- the name's tap above the time's
+        local name_tap, time_tap = view.name_tap.dimen, view.time_tap.dimen
+        assert.are.equal(name_tap.y + name_tap.h, time_tap.y)
+        assert.is_nil(view.chart)
+        assert.is_nil(textWidget(view, _("Reading this week")))
 
-        -- bars are proportional to minutes; days to come have none
-        local chart = view.chart
-        local max = math.max(table.unpack(expected))
-        for i = 1, 7 do
-            if i > today then
-                assert.is_nil(chart.bar_heights[i])
-            elseif expected[i] == 0 then
-                assert.are.equal(0, chart.bar_heights[i])
-            else
-                assert.is_true(math.abs(chart.bar_heights[i] - expected[i] / max * chart.bar_max) <= 1)
-            end
+        -- the rows, in the ruling's order, each with its real subtitle
+        local rows = shownRows(view)
+        local expected = {
+            { C_("Me page", "Notes in all books"), T(N_("1 note", "%1 notes", 4), 4) },
+            { C_("Me page", "Vocabulary"), T(_("%1 words"), 2) },
+            { _("Files"), home },
+            { _("Sync and transfer"), "KOSync · Calibre · OPDS" },
+            { _("Settings"), _("Reading · Screen · Network · Device") },
+            { C_("Me page", "Version update"), T(_("Current version %1"), Version:getShortVersion()) },
+        }
+        assert.are.equal(#expected, #rows)
+        local content = fm.content_dimen
+        for i, row in ipairs(rows) do
+            assert.are.same(expected[i], { row[1], row[2] })
+            -- 94dp rows under the time, as in the reference, each led by a ringed icon, all above the tab bar
+            assert.are.equal(Screen:scaleBySize(94), row[3].dimen.h)
+            assert.is_true(row[3].dimen.y >= view.time_tap.dimen.y + view.time_tap.dimen.h)
+            assert.is_true(row[3].dimen.y + row[3].dimen.h <= content.y + content.h)
+            assert.is_truthy(find(row[3], function(w) return w.glyph ~= nil end))
+            -- a chevron where the row leads somewhere
+            assert.are.equal(row[3].callback ~= nil, find(row[3], function(w) return w.icon == "eink/me.chev" end) ~= nil)
         end
-        assert.are.equal(_("Today"), chart.labels[today].text)
+        for i = 1, 5 do
+            assert.is_truthy(rows[i][3].callback)
+        end
+        assert.is_true(rows[1][3].dimen.y <= Screen:scaleBySize(140))
         fm:onClose()
     end)
 
-    it("lists every book's notes grouped by book, without bookmarks, and opens a note's book", function()
+    it("opens the reading progress from the reading time, and says when the statistics plugin is off", function()
+        local statistics = fakeStatistics()
+        local fm, view = openMe(statistics)
+        tap(view.time_tap.dimen)
+        local progress = topWidget()
+        assert.are.equal(statistics.ReaderProgress, getmetatable(progress).__index)
+        progress:onClose()
+        UIManager:forceRePaint()
+        assert.are.equal(fm, topWidget())
+        fm:onClose()
+
+        -- without the plugin: no time to show, nothing to tap, and no number made up
+        fm, view = openMe()
+        assert.is_nil(view.time_tap)
+        assert.is_truthy(textWidget(view, _("Reading statistics are off")))
+        assert.is_nil(tappable(view, _("Reading statistics are off")))
+        assert.is_nil(textWidget(view, tostring(view.home.total_minutes % 60)))
+        fm:onClose()
+    end)
+
+    it("names the reader by the nickname, else the KOSync user name, else the device model, and edits it", function()
         local fm, view = openMe()
-        assert.is_true(contains(texts(view), T(_("%1 highlights and notes"), 3)))
-        view:open("notes")
+        assert.are.equal(Device.model, view.home.name)
+        fm:onClose()
+        -- logged out of KOSync, the user name is kept and still names the reader
+        writeKOSync{ username = "kosync-reader" }
+        fm, view = openMe()
+        assert.are.equal("kosync-reader", view.home.name)
+        assert.is_truthy(textWidget(view, "kosync-reader"))
+
+        local function nameDialog()
+            tap(view.name_tap.dimen)
+            local dialog = topWidget()
+            assert.are.equal(require("ui/widget/inputdialog"), getmetatable(dialog).__index)
+            return dialog
+        end
+        local function button(dialog, label)
+            return find(dialog, function(w) return w.text == label and w.callback ~= nil and w.dimen ~= nil end)
+        end
+
+        -- the field holds the nickname only: the name shown is its hint
+        local dialog = nameDialog()
+        assert.are.equal("", dialog:getInputText())
+        assert.are.equal("kosync-reader", dialog.input_hint)
+        dialog:setInputText("  小明  ")
+        local refreshes, restore = spyRefreshes()
+        tap(button(dialog, _("Save")).dimen)
+        restore()
+        assert.are.equal(fm, topWidget())
+        assert.are.equal("小明", view.home.name)
+        assert.is_truthy(textWidget(view, "小明"))
+        -- the page repaints with "ui" (the button's own flash aside), nothing flashes
+        local covered = false
+        for _, r in ipairs(refreshes) do
+            -- the dialog closing asks for "ui" over itself through a function
+            local mode, region = r.type, r.region
+            if type(mode) == "function" then mode, region = mode() end
+            assert.is_true(mode == "ui" or mode == "fast", mode)
+            if mode == "ui" and region and region:contains(view.name_tap.dimen) then covered = true end
+        end
+        assert.is_true(covered)
+        -- written at once: a restart reads it
+        assert.are.equal("小明", LuaSettings:open(G_reader_settings.file):readSetting("me_nickname"))
+
+        -- cancel keeps it; the hint still says what an empty name shows
+        dialog = nameDialog()
+        assert.are.equal("小明", dialog:getInputText())
+        assert.are.equal("kosync-reader", dialog.input_hint)
+        dialog:setInputText("someone else")
+        tap(button(dialog, _("Cancel")).dimen)
+        assert.are.equal(fm, topWidget())
+        assert.are.equal("小明", G_reader_settings:readSetting("me_nickname"))
+        assert.is_truthy(textWidget(view, "小明"))
+        fm:onClose()
+
+        -- kept on the next visit; saved empty, the KOSync user name, then the device model come back
+        fm, view = openMe()
+        assert.is_truthy(textWidget(view, "小明"))
+        dialog = nameDialog()
+        dialog:setInputText(" ")
+        tap(button(dialog, _("Save")).dimen)
+        assert.is_nil(G_reader_settings:readSetting("me_nickname"))
+        assert.is_nil(LuaSettings:open(G_reader_settings.file):readSetting("me_nickname"))
+        assert.is_truthy(textWidget(view, "kosync-reader"))
+        fm:onClose()
+        os.remove(Me.kosync_settings)
+        fm, view = openMe()
+        assert.is_truthy(textWidget(view, Device.model))
+        fm:onClose()
+    end)
+
+    it("checks for a new version from 版本更新 where KOReader updates the device, and dims it elsewhere", function()
+        local OTAManager = require("ui/otamanager")
+        local orig_has, orig_fetch = Device.hasOTAUpdates, OTAManager.fetchAndProcessUpdate
+        local checks = 0
+        OTAManager.fetchAndProcessUpdate = function() checks = checks + 1 end
+        local ok, err = pcall(function()
+            Device.hasOTAUpdates = function() return true end
+            local fm, view = openMe()
+            local row = shownRows(view)[6]
+            assert.are.equal(C_("Me page", "Version update"), row[1])
+            tap(row[3].dimen)
+            assert.are.equal(1, checks)
+            fm:onClose()
+
+            Device.hasOTAUpdates = function() return false end
+            fm, view = openMe()
+            row = shownRows(view)[6]
+            assert.is_nil(row[3].callback)
+            assert.are.equal(T(_("Current version %1"), Version:getShortVersion()), row[2])
+            assert.are.equal(Palette.ink_3, textWidget(row[3], row[1]).fgcolor)
+            assert.is_nil(find(row[3], function(w) return w.icon == "eink/me.chev" end))
+            tap(row[3].dimen)
+            assert.are.equal(1, checks)
+            fm:onClose()
+        end)
+        Device.hasOTAUpdates, OTAManager.fetchAndProcessUpdate = orig_has, orig_fetch
+        assert(ok, err)
+    end)
+
+    it("keeps every row on screen in landscape, at a tappable height", function()
+        local fm = openMe(fakeStatistics())
+        local rotation = Screen:getRotationMode()
+        fm:onSetRotationMode(rotation == 0 and 1 or 0)
+        fm = FileManager.instance
+        UIManager:forceRePaint()
+        local ok, err = pcall(function()
+            assert.is_true(Screen:getWidth() > Screen:getHeight())
+            assert.are.equal("me", fm.current_tab)
+            local rows = shownRows(fm.me_view)
+            assert.are.equal(6, #rows)
+            local content = fm.content_dimen
+            for _, row in ipairs(rows) do
+                assert.is_true(row[3].dimen.h >= Screen:scaleBySize(44))
+                assert.is_true(row[3].dimen.y + row[3].dimen.h <= content.y + content.h)
+            end
+        end)
+        FileManager.instance:onSetRotationMode(rotation)
+        FileManager.instance:onClose()
+        assert(ok, err)
+    end)
+
+    it("lists every book's notes grouped by book, bookmarks included, and opens a note's book", function()
+        local fm, view = openMe()
+        assert.is_true(contains(texts(view), T(N_("1 note", "%1 notes", 4), 4)))
+        tap(tappable(view, C_("Me page", "Notes in all books")).dimen)
         assert.are.equal("notes", view.subpage)
+        assert.is_truthy(textWidget(view, C_("Me page", "Notes in all books")))
         local shown = texts(view)
-        -- last read book first
-        local first = T(_("%1 · %2 notes"), "Romeo and Juliet", 2)
+        -- last read book first; the bookmark counts as a note, as on the book's notes page
+        local first = T(_("%1 · %2 notes"), "Romeo and Juliet", 3)
         local second = T(_("%1 · %2 notes"), "Leaves of Grass", 1)
         assert.is_true(contains(shown, first))
         assert.is_true(contains(shown, second))
         local function index(value) for i, v in ipairs(shown) do if v == value then return i end end end
         assert.is_true(index(first) < index(second))
-        assert.is_false(contains(shown, "a bookmark, not a note"))
         assert.is_nil(index("No notes here"))
-        -- the contents drawer's note rows, one per highlight
+        -- a row per note: the bookmark in book order, with a bookmark in place of the highlight style, reading
+        -- its chapter (its own text is not the book's)
         local rows = {}
         local function collect(w)
             if type(w) ~= "table" then return end
-            if type(w.note) == "table" then table.insert(rows, w.note) end
+            if type(w.note) == "table" then table.insert(rows, w) end
             for __, child in ipairs(w) do collect(child) end
         end
         collect(view)
-        assert.are.equal(3, #rows)
+        assert.are.equal(4, #rows)
         assert.are.equal(2, #view.books)
-        assert.are.equal(2, #view.books[1].notes)
+        assert.are.equal(3, #view.books[1].notes)
         assert.are.equal(1, #view.books[2].notes)
+        local bookmark = rows[2]
+        assert.is_nil(bookmark.note.drawer)
+        assert.is_truthy(find(bookmark, function(w) return w.icon == "eink/bookmark" end))
+        assert.is_truthy(textWidget(bookmark, "Act 1"))
+        assert.is_false(contains(shown, "a bookmark, not a note"))
+        assert.is_nil(find(rows[1], function(w) return w.icon == "eink/bookmark" end))
 
-        -- a note opens its book, pushes the position it opened on, then jumps to the note
-        local opened
+        -- a tap on a note opens its book, pushes the position it opened on, then jumps to the note: a highlight
+        -- to its text, a bookmark to its page
         local orig = ReaderUI.showReader
-        ReaderUI.showReader = function(_, file, _, _, _, after_open) opened = { file = file, after_open = after_open } end
+        local function tapNote(row)
+            local opened
+            ReaderUI.showReader = function(_, file, _, _, _, after_open) opened = { file = file, after_open = after_open } end
+            tap(row.dimen)
+            ReaderUI.showReader = orig
+            local calls = {}
+            opened.after_open{
+                link = { addCurrentLocationToStack = function() table.insert(calls, "stack") end },
+                bookmark = { gotoBookmark = function(_, page, pos0) table.insert(calls, { page, pos0 }) end },
+            }
+            return opened.file, calls
+        end
+        local file, calls = tapNote(rows[4])
         local note = view.books[2].notes[1]
-        view:openNote(view.books[2], note)
-        ReaderUI.showReader = orig
-        assert.are.equal(home .. "/leaves.epub", opened.file)
-        local calls = {}
-        opened.after_open{
-            link = { addCurrentLocationToStack = function() table.insert(calls, "stack") end },
-            bookmark = { gotoBookmark = function(_, page, pos0) table.insert(calls, { page, pos0 }) end },
-        }
+        assert.are.equal(home .. "/leaves.epub", file)
         assert.are.same({ "stack", { note.page, note.pos0 } }, calls)
+        file, calls = tapNote(bookmark)
+        assert.are.equal(home .. "/juliet.epub", file)
+        assert.are.same({ "stack", { "/body/p[3]" } }, calls)
 
         -- notes are dropped with the subpage
         view:close()
@@ -261,7 +552,8 @@ describe("Shelf home, 我的 tab", function()
     it("lists the vocabulary, newest first", function()
         local fm, view = openMe()
         assert.is_true(contains(texts(view), T(_("%1 words"), 2)))
-        view:open("vocab")
+        tap(tappable(view, C_("Me page", "Vocabulary")).dimen)
+        assert.are.equal("vocab", view.subpage)
         local shown = texts(view)
         assert.are.equal("囫囵吞枣", view.words[1].word)
         assert.are.equal("sojourner", view.words[2].word)
@@ -334,14 +626,6 @@ describe("Shelf home, 我的 tab", function()
 
     it("opens the reorganized settings from the settings row", function()
         local fm, view = openMe()
-        local function find(widget, pred)
-            if type(widget) ~= "table" then return end
-            if pred(widget) then return widget end
-            for _, child in ipairs(widget) do
-                local found = find(child, pred)
-                if found then return found end
-            end
-        end
         local row = find(view, function(w)
             return w.callback and find(w, function(c) return c.text == _("Settings") end) ~= nil
         end)
@@ -390,19 +674,22 @@ describe("Shelf home, 我的 tab", function()
         local monday = os.time{ year = 2026, month = 10, day = 19, hour = 0, min = 0, sec = 0 }
         conn:exec(string.format("INSERT INTO page_stat_data VALUES (1, 1, %d, 600, 100);", sunday))
         conn:exec(string.format("INSERT INTO page_stat_data VALUES (1, 2, %d, 1200, 100);", monday))
+        -- 30s more, on the Monday after: minutes are rounded, as the statistics plugin's pages do
+        conn:exec(string.format("INSERT INTO page_stat_data VALUES (1, 3, %d, 30, 100);", monday + 3600))
         conn:close()
 
         Me.now = function() return sunday + 30 end
-        local fm, view = openMe()
-        assert.are.same({ 0, 0, 0, 0, 0, 0, 10 }, view.home.week.minutes)
-        assert.are.equal(10, view.home.week.total_minutes)
+        local fm, view = openMe(fakeStatistics())
+        assert.are.equal(10, view.home.week_minutes)
+        assert.are.equal(31, view.home.total_minutes) -- all that is recorded: 30 min 30 s
         fm:onClose()
 
         Me.now = function() return monday + 30 end
-        fm, view = openMe()
-        assert.are.same({ 20 }, view.home.week.minutes)
-        assert.are.equal(20, view.home.week.total_minutes)
+        fm, view = openMe(fakeStatistics())
+        assert.are.equal(21, view.home.week_minutes)
+        assert.are.equal(31, view.home.total_minutes)
         assert.are.equal(2, view.home.streak)
+        assert.is_truthy(table.concat(texts(view)):find(T(_("Total reading %1 h %2 min"), 0, 31), 1, true))
         fm:onClose()
 
         Me.now = os.time
@@ -421,10 +708,10 @@ describe("Shelf home, 我的 tab", function()
         conn:exec("CREATE TABLE words (word TEXT);") -- no vocabulary table
         conn:close()
 
-        local fm, view = openMe()
-        for i = 1, view.home.week.today do
-            assert.are.equal(0, view.home.week.minutes[i])
-        end
+        local fm, view = openMe(fakeStatistics())
+        assert.are.equal(0, view.home.total_minutes)
+        assert.are.equal(0, view.home.week_minutes)
+        assert.is_truthy(table.concat(texts(view)):find(T(_("Total reading %1 h %2 min"), 0, 0), 1, true))
         assert.are.equal(0, view.home.streak)
         assert.are.equal(0, view.home.word_count)
         view:open("vocab")
@@ -449,19 +736,28 @@ describe("Shelf home, 我的 tab", function()
         })
         doc_settings:saveSetting("bookmarks", {
             { datetime = "2020-01-01 10:00:00", page = "/body/p[1].0", text = "my thought", highlighted = true },
+            { datetime = "2020-01-02 10:00:00", page = "/body/p[5].0", text = "Page 3 @ 2020-01-02 10:00:00" },
+            { datetime = "2020-01-03 10:00:00", page = "/body/p[6].0", text = "remember this page" },
         })
         doc_settings:flush()
         BookList.resetBookInfoCache(path)
         ReadHistory:addItem(path, 3000, true)
 
         local fm, view = openMe()
-        assert.are.equal(4, view.home.note_count)
-        view:open("notes")
+        assert.are.equal(7, view.home.note_count)
+        tap(tappable(view, C_("Me page", "Notes in all books")).dimen)
         local legacy = view.books[1]
         assert.are.equal("Legacy", legacy.title)
-        assert.are.equal(1, #legacy.notes)
+        assert.are.equal(3, #legacy.notes)
         assert.are.equal("kept, with a note", legacy.notes[1].text)
         assert.are.equal("my thought", legacy.notes[1].note)
+        -- the page bookmarks of the old format follow the highlights, with the note written on one, not the text
+        -- KOReader filled in
+        assert.are.equal("/body/p[5].0", legacy.notes[2].page)
+        assert.is_nil(legacy.notes[2].drawer)
+        assert.is_nil(legacy.notes[2].note)
+        assert.are.equal("remember this page", legacy.notes[3].note)
+        assert.is_truthy(textWidget(view, "remember this page"))
         fm:onClose()
 
         table.remove(ReadHistory.hist, ReadHistory:getIndexByFile(ffiUtil.realpath(path)))
@@ -469,7 +765,8 @@ describe("Shelf home, 我的 tab", function()
 
     it("shows sync and transfer entries, plugins that are off as disabled", function()
         local fm, view = openMe()
-        view:open("sync")
+        tap(tappable(view, _("Sync and transfer")).dimen)
+        assert.are.equal("sync", view.subpage)
         local shown = texts(view)
         for _, entry in ipairs{ _("Progress sync"), _("Calibre wireless connection"), _("Book sources (OPDS)"), _("Cloud storage") } do
             assert.is_true(contains(shown, entry))

@@ -18,6 +18,7 @@ local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local IconWidget = require("ui/widget/iconwidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
@@ -177,8 +178,8 @@ local function date(item)
 end
 
 --[[--
-Measured rows of note lists (the 我 tab's all-notes page): a group header, a highlight with its note and date,
-and an empty state. Build them with TocDrawer.groupHeader, TocDrawer.buildNoteRow and TocDrawer.emptyState,
+Measured rows of note lists (the 我 tab's all-notes page): a group header, a note (a highlight with its thought, or
+a bookmark) with its date, and an empty state. Build them with TocDrawer.groupHeader, TocDrawer.buildNoteRow and TocDrawer.emptyState,
 `w` wide. `metrics` (TocDrawer.noteMetrics()) holds the sizes every row shares: measure it once per list.
 ]]
 function TocDrawer.noteMetrics()
@@ -198,11 +199,19 @@ function TocDrawer.emptyItem(title, hint)
     return { kind = "empty", h = 0, title = title, hint = hint }
 end
 
---- Measured row of an annotation with a drawer (a highlight), `w` wide.
+-- What a bookmark's row reads: the note written on it, else its chapter, else 书签.
+local function bookmarkText(item)
+    if item.note and item.note ~= "" then return item.note end
+    if item.chapter and item.chapter ~= "" then return item.chapter end
+    -- @translators A bookmark among the notes of all books, when it has neither a note nor a chapter.
+    return _("Bookmark")
+end
+
+--- Measured row of a note, `w` wide: a highlight (with a drawer, and maybe a thought), or a bookmark.
 function TocDrawer.noteItem(w, item, metrics)
-    local excerpt = snippet(item.text, 400)
+    local excerpt = snippet(item.drawer and item.text or bookmarkText(item), 400)
     local lines = lineCount(excerpt, "ui_excerpt", w - dp(24), 3)
-    local note = item.note and item.note ~= "" and snippet(item.note, 200)
+    local note = item.drawer and item.note and item.note ~= "" and snippet(item.note, 200)
     local note_lines = note and lineCount(note, "ui_label_large", w - metrics.thought_w, 2) or 0
     return {
         kind = "note", item = item, excerpt = excerpt, lines = lines, note = note, note_lines = note_lines,
@@ -237,7 +246,7 @@ function TocDrawer.groupHeader(w, it)
     }
 end
 
---- A note row (style swatch, excerpt, note, date) from TocDrawer.noteItem; `callback` on tap.
+--- A note row (style swatch or bookmark, excerpt, thought, date) from TocDrawer.noteItem; `callback` on tap.
 function TocDrawer.buildNoteRow(w, it, callback)
     local swatch_w = dp(24)
     local content = VerticalGroup:new{
@@ -246,7 +255,8 @@ function TocDrawer.buildNoteRow(w, it, callback)
             align = "top",
             LeftContainer:new{
                 dimen = Geom:new{ w = swatch_w, h = lineHeight("ui_excerpt", 0.6) },
-                Swatch:new{ drawer = it.item.drawer },
+                it.item.drawer and Swatch:new{ drawer = it.item.drawer }
+                    or IconWidget:new{ icon = "eink/bookmark", width = dp(16), height = dp(16), alpha = true },
             },
             textBox(it.excerpt, "ui_excerpt", w - swatch_w, it.lines, { line_height = 0.6 }),
         },

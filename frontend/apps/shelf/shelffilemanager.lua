@@ -87,7 +87,7 @@ function ShelfFileManager:setupLayout()
     end
     self.shelf_view = ShelfView:new{ ui = self, width = self.content_dimen.w, height = self.content_dimen.h,
         selected = selected }
-    -- a rebuild (rotation) keeps the 我的 subpage and its list page
+    -- a rebuild (rotation) keeps the 我 subpage and its list page
     local me_state = self.me_view and self.me_view:getState()
     if self.me_view then self.me_view:free() end
     self.me_view = MeView:new{ ui = self, width = self.content_dimen.w, height = self.content_dimen.h }
@@ -314,7 +314,7 @@ end
 ShelfFileManager.onRefreshContent = ShelfFileManager.onRefresh
 ShelfFileManager.onBookMetadataChanged = ShelfFileManager.onRefresh
 
---- The reorganized settings (apps/settings/einksettings), on an optional group or row id; 我的 → 设置 opens it.
+--- The reorganized settings (apps/settings/einksettings), on an optional group or row id; 我 → 设置 opens it.
 function ShelfFileManager:onShowEinkSettings(target)
     require("apps/settings/einksettings").show(self, self.menu, target)
     return true
