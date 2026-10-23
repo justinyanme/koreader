@@ -19,7 +19,7 @@ WeChat Read. Another entry switches the panel
 in place, the open panel's own entry closes it, and a tap on the page closes the
 panel and the bars without turning the page. Back leaves one layer at a time:
 a nested panel opened from a panel (only a back arrow below, no top bar), the
-panel, then the bars. What a panel opens elsewhere (book information, menus,
+panel, then the bars. What a panel opens elsewhere (book details, menus,
 settings) closes the panel and the bars first.
 
 Showing, switching or hiding the toolbar and its panel only refreshes their

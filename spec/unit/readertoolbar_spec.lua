@@ -384,13 +384,13 @@ describe("ReaderToolbar module", function()
             return ui.menu.panel
         end
 
-        -- 亮度 is the first entry of 更多, whose place its panel takes.
+        -- 亮度与色温 is the first row of 更多, whose place its panel takes.
         local function openBrightness()
             tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
             UIManager:forceRePaint()
             tapWidget(moreButton(ui.menu.bars))
             UIManager:forceRePaint()
-            tapWidget(find(ui.menu.panel, function(w) return w.label == _("Brightness") and w.callback end))
+            tapWidget(find(ui.menu.panel, function(w) return w.text == _("Brightness and warmth") and w.callback end))
             UIManager:forceRePaint()
             return ui.menu.panel
         end
@@ -466,9 +466,9 @@ describe("ReaderToolbar module", function()
             assert.are.same({ { mode = "ui", region = progress_band:combine(more_band) } }, refreshes)
             assert.is_nil(find(bars.bottom, function(w) return type(w.icon) == "string" and w.icon:find("%.bold$") end))
 
-            -- its 亮度 opens the brightness panel in its place, with both bars
+            -- its 亮度与色温 opens the brightness panel in its place, with both bars
             refreshes = refreshesOf(function()
-                tapWidget(find(more, function(w) return w.label == _("Brightness") and w.callback end))
+                tapWidget(find(more, function(w) return w.text == _("Brightness and warmth") and w.callback end))
             end)
             local brightness = ui.menu.panel
             assert.are.equal("brightness", ui.menu.panel_name)
@@ -616,8 +616,8 @@ describe("ReaderToolbar module", function()
             assert.is_truthy(panel)
             tapWidget(moreButton(ui.menu.bars))
             UIManager:forceRePaint()
-            local tile = find(ui.menu.panel, function(w) return w.label == _("Book information") and w.callback end)
-            tapWidget(tile)
+            local row = find(ui.menu.panel, function(w) return w.text == _("Book details") and w.callback end)
+            tapWidget(row)
             UIManager:forceRePaint()
             assert.is_nil(ui.menu.panel)
             assert.is_nil(ui.menu.bars)
