@@ -497,7 +497,7 @@ function ReaderProgressPanel:buildContent()
         self.pill:free()
     end
     self.pill = origin and ReturnPill:new{ callback = function() self:returnToOrigin() end }
-    return VerticalGroup:new{
+    local content = VerticalGroup:new{
         align = "left",
         HorizontalGroup:new{
             self.position,
@@ -513,6 +513,23 @@ function ReaderProgressPanel:buildContent()
         VerticalSpan:new{ width = Screen:scaleBySize(20) },
         self.track,
     }
+    if ui.autoturn then
+        table.insert(content, VerticalSpan:new{ width = Screen:scaleBySize(20) })
+        table.insert(content, require("apps/reader/modules/readerautoturn").Button:new{
+            text = ui.autoturn:isActive() and _("Autoturn settings") or _("Start autoturn"),
+            width = w, height = Screen:scaleBySize(35), bordersize = Size.border.default,
+            face = Font:getFace("ui_label"),
+            callback = function()
+                self.toolbar:hideToolbar()
+                if ui.autoturn:isActive() then
+                    ui.autoturn:showSettings()
+                else
+                    ui.autoturn:start()
+                end
+            end,
+        })
+    end
+    return content
 end
 
 function ReaderProgressPanel:build()
