@@ -46,6 +46,7 @@ local ShelfWidgets = require("apps/shelf/shelfwidgets")
 local Size = require("ui/size")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
+local Toast = require("ui/widget/toast")
 local TopContainer = require("ui/widget/container/topcontainer")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -72,7 +73,7 @@ local SEARCH_H = dp(12) + dp(44)
 local CHIPS_H = dp(12) + dp(30)
 local CAPTION_H = dp(30)
 local GRID_TOP = dp(12)
-local PAGER_H = dp(44)
+local PAGER_H = EinkControls.BottomBar.height
 local ROW_H = dp(56)
 local BAND_H = dp(24)
 local THUMB_WAIT = 3 -- seconds before the grid shows the covers that arrived
@@ -171,6 +172,8 @@ function BookSourceView:init()
     }
     if Device:hasKeys() then
         self.key_events.Back = { { Device.input.group.Back } }
+        self.key_events.NextPage = { { Device.input.group.PgFwd } }
+        self.key_events.PrevPage = { { Device.input.group.PgBack } }
     end
 end
 
@@ -225,7 +228,7 @@ function BookSourceView:close(no_refresh)
         UIManager:close(self, "ui", self.dimen)
     end
     if canceled then
-        UIManager:show(Notification:new{ text = _("Download canceled") })
+        UIManager:show(Toast:new{ text = _("Download canceled"), close_refresh_type = "ui" })
     end
 end
 
@@ -246,16 +249,25 @@ function BookSourceView:onBack()
     return true
 end
 
-function BookSourceView:onSwipe(_, ges)
+function BookSourceView:onNextPage()
     local page = self:top()
-    if page and page.per_page then
-        if ges.direction == "west" then
-            self:turnPage(page.page_no + 1)
-        elseif ges.direction == "east" and page.page_no > 1 then
-            self:turnPage(page.page_no - 1)
-        end
-    end
+    if page then self:turnPage(page.page_no + 1) end
     return true
+end
+
+function BookSourceView:onPrevPage()
+    local page = self:top()
+    if page then self:turnPage(page.page_no - 1) end
+    return true
+end
+
+function BookSourceView:onSwipe(_, ges)
+    if ges.direction == "west" or ges.direction == "north" then
+        return self:onNextPage()
+    elseif ges.direction == "east" or ges.direction == "south" then
+        return self:onPrevPage()
+    end
+    return false
 end
 
 -- Loading
@@ -345,7 +357,7 @@ function BookSourceView:build()
         body = self:buildState(page)
     end
     table.insert(group, TopContainer:new{ dimen = Geom:new{ w = self.dimen.w, h = body_h }, body })
-    table.insert(group, pager or VerticalSpan:new{ width = PAGER_H })
+    table.insert(group, pager or self:buildPager(page, 1))
     if self[1] then self[1]:free() end
     self[1] = FrameContainer:new{ bordersize = 0, padding = 0, background = Palette.paper, group }
 end
@@ -367,7 +379,7 @@ function BookSourceView:buildNavBar(page)
     local titles = { manage = _("Manage sources"), text = C_("OPDS book", "Description") }
     return VerticalGroup:new{
         HorizontalGroup:new{
-            button("eink/back", function() self:pop() end),
+            HorizontalSpan:new{ width = NAV_H },
             CenterContainer:new{ dimen = Geom:new{ w = self.dimen.w - 2 * NAV_H, h = h },
                 text(titles[page.kind] or page.title or "", "ui_title", Palette.ink, self.dimen.w - 2 * NAV_H, true) },
             right,
@@ -496,7 +508,7 @@ function BookSourceView:cellStatus(page, book)
     if file then
         local progress = BookSource.progress(file)
         if progress and progress.status ~= "new" then
-            return ShelfView.statusText(progress), true
+            return ShelfView.statusText(progress), true, progress.status == "complete"
         end
         return book.author or "", true
     end
@@ -546,7 +558,12 @@ function BookSourceView:buildCell(page, book, x, y)
         band.overlap_offset = { 0, h - BAND_H }
         cover = OverlapGroup:new{ dimen = Geom:new{ w = w, h = h }, cover, band }
     end
-    local status, downloaded = self:cellStatus(page, book)
+    local status, downloaded, finished = self:cellStatus(page, book)
+    if finished then
+        local badge = ShelfWidgets.finishedBadge()
+        badge.overlap_align = "right"
+        cover = OverlapGroup:new{ dimen = Geom:new{ w = w, h = h }, cover, badge }
+    end
     local check_w = downloaded and dp(16) or 0
     local title = TextBoxWidget:new{
         text = book.title,
@@ -560,7 +577,7 @@ function BookSourceView:buildCell(page, book, x, y)
         -- WeChat Read's mark for a book on this device: a gray check before the title
         title = HorizontalGroup:new{
             align = "top",
-            CenterContainer:new{ dimen = Geom:new{ w = dp(13), h = title.line_height_px }, icon("eink/check", dp(13), true) },
+            CenterContainer:new{ dimen = Geom:new{ w = dp(13), h = title.line_height_px }, icon("eink/ring.check", dp(13), true) },
             HorizontalSpan:new{ width = check_w - dp(13) },
             title,
         }
@@ -631,14 +648,16 @@ end
 
 function BookSourceView:buildPager(page, pages)
     page.pages = pages
-    return EinkControls.Pager:new{
+    -- An unfetched batch is one available next page; while fetching, both halves are disabled.
+    self.bar = EinkControls.BottomBar:new{
         width = self.dimen.w,
-        page = page.page_no,
-        pages = pages,
-        more = page.result and page.result.next ~= nil,
-        loading = page.loading_more,
+        page = page.loading_more and 1 or page.page_no,
+        pages = page.loading_more and 1 or pages + (page.result and page.result.next and 1 or 0),
+        actions = page.loading_more and { text(_("Loading more…"), "ui_caption", Palette.ink_2) } or nil,
         on_change = function(p) self:turnPage(p) end,
+        on_back = function() self:pop() end,
     }
+    return self.bar
 end
 
 -- Items the page lists: books on a grid, rows on a list.
@@ -1032,6 +1051,7 @@ function BookSourceView:download(page, book, format)
         done = 0, buffer = "" }
     self.downloads[book.key] = dl
     self:refreshTile(book, "ui")
+    UIManager:show(Toast:new{ text = _("Download started. Tap the cover to cancel."), close_refresh_type = "ui" })
     dl.poll = function() self:pollDownload(dl) end
     UIManager:scheduleIn(1, dl.poll)
 end
@@ -1086,6 +1106,7 @@ function BookSourceView:finishDownload(dl, finished)
     BookSource.recordDownload(self.opds, dl.source, dl.book, file)
     -- not opened: that would close the page and cancel the other downloads; a tap on the marked tile opens it
     self:refreshTile(dl.book, "ui")
+    UIManager:show(Toast:new{ text = _("Downloaded"), close_refresh_type = "ui" })
 end
 
 -- Reaps a finished or killed child and closes its pipe.
@@ -1111,7 +1132,7 @@ function BookSourceView:cancelDownload(key, quiet)
     os.remove(dl.part)
     if not quiet then
         self:refreshTile(dl.book, "ui")
-        UIManager:show(Notification:new{ text = _("Download canceled") })
+        UIManager:show(Toast:new{ text = _("Download canceled"), close_refresh_type = "ui" })
     end
 end
 
