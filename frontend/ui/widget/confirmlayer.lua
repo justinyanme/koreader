@@ -4,9 +4,6 @@ Read asks before deleting or removing: the page behind turns pale (the wash), an
 a paper band at the bottom, under a 2dp ink rule, holds a centered bold question,
 then each action and Cancel as whole rows split by gray lines.
 
-Offered as a choice, the current action is marked as DESIGN.md marks a current
-choice: an ink row with paper text.
-
 Every touch stops here: a tap on the pale page cancels, as does the Back key.
 Showing and closing are "ui" over the whole screen, which the paling changes.
 The page is paled while painting, so repaint the layer only with what is under it
@@ -45,7 +42,6 @@ local ActionRow = InputContainer:extend{
     height = nil,
     label = nil, -- widget
     callback = nil,
-    selected = false, -- the current choice: painted ink, its label paper
 }
 
 function ActionRow:init()
@@ -54,35 +50,28 @@ function ActionRow:init()
     self.ges_events = { TapSelect = { GestureRange:new{ ges = "tap", range = self.dimen } } }
 end
 
-function ActionRow:paintTo(bb, x, y)
-    if self.selected then
-        bb:paintRect(x, y, self.width, self.height, Palette.ink)
-    end
-    InputContainer.paintTo(self, bb, x, y)
-end
-
 function ActionRow:onTapSelect()
     self.callback()
     return true
 end
 
 --- A row label: bold, and with two Chinese characters spaced apart (删 除, 取 消), as WeChat Read sets them.
-local function rowLabel(text, color)
+local function rowLabel(text)
     local face = Font:getFace("ui_body")
     local chars = util.splitToChars(text)
     if #chars == 2 and util.isCJKChar(chars[1]) and util.isCJKChar(chars[2]) then
         return HorizontalGroup:new{
-            TextWidget:new{ text = chars[1], face = face, bold = true, fgcolor = color },
+            TextWidget:new{ text = chars[1], face = face, bold = true, fgcolor = Palette.ink },
             HorizontalSpan:new{ width = math.floor(face.size / 4) },
-            TextWidget:new{ text = chars[2], face = face, bold = true, fgcolor = color },
+            TextWidget:new{ text = chars[2], face = face, bold = true, fgcolor = Palette.ink },
         }
     end
-    return TextWidget:new{ text = text, face = face, bold = true, fgcolor = color, max_width = Screen:getWidth() }
+    return TextWidget:new{ text = text, face = face, bold = true, fgcolor = Palette.ink, max_width = Screen:getWidth() }
 end
 
 local ConfirmLayer = InputContainer:extend{
     text = nil, -- the question
-    actions = nil, -- array of { text =, callback =, selected = }, shown above Cancel
+    actions = nil, -- array of { text =, callback = }, shown above Cancel
     on_close = nil, -- function, called once the layer is closed, whichever way
     stop_events_propagation = true, -- holds, swipes and the rest never reach the page
 }
@@ -112,7 +101,7 @@ function ConfirmLayer:init()
     }
     local rows = {}
     for _, action in ipairs(self.actions) do
-        table.insert(rows, { text = action.text, selected = action.selected, callback = function()
+        table.insert(rows, { text = action.text, callback = function()
             self:onClose()
             action.callback()
         end })
@@ -123,9 +112,8 @@ function ConfirmLayer:init()
         table.insert(band, ActionRow:new{
             width = sw,
             height = Screen:scaleBySize(58),
-            label = rowLabel(row.text, row.selected and Palette.paper or Palette.ink),
+            label = rowLabel(row.text),
             callback = row.callback,
-            selected = row.selected,
         })
     end
     table.insert(band, VerticalSpan:new{ width = Screen:scaleBySize(20) })

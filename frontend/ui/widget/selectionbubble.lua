@@ -3,8 +3,7 @@ Selection popover of the e-ink redesign (see DESIGN.md, Selection popover), as
 in WeChat Read: a paper card with a 1dp ink outline and 13dp corners, and an
 outlined 16 × 8dp arrow pointing at the selection. In a row with icons, cells
 show an icon over a short label and are 62dp wide at least; other rows are
-labels in 44dp cells. A cell can also run a secondary action on a long-press.
-Rows are split by rule-gray lines.
+labels in 44dp cells. Rows are split by rule-gray lines.
 It sits above the selection when there is room, below it otherwise, and 16dp
 from the screen edges.
 
@@ -14,7 +13,7 @@ The owner refreshes; getRefreshRegion() is the popover and its arrow.
 @usage
     local bubble = SelectionBubble:new{
         rows = { {
-            { icon = "eink/highlight-off", text = _("Delete"), callback = ..., hold_callback = ... },
+            { icon = "eink/highlight", text = _("Highlight"), callback = ... },
             { icon = "eink/copy", text = _("Copy"), callback = ... },
         } },
         anchor_rects = selection_screen_rects,
@@ -45,16 +44,12 @@ local BubbleCell = InputContainer:extend{
     height = nil,
     content = nil, -- widget
     callback = nil,
-    hold_callback = nil, -- a secondary action on a long-press
 }
 
 function BubbleCell:init()
     self.dimen = Geom:new{ w = self.width, h = self.height }
     self[1] = CenterContainer:new{ dimen = self.dimen:copy(), self.content }
     self.ges_events = { TapSelect = { GestureRange:new{ ges = "tap", range = self.dimen } } }
-    if self.hold_callback then
-        self.ges_events.HoldSelect = { GestureRange:new{ ges = "hold", range = self.dimen } }
-    end
 end
 
 function BubbleCell:onTapSelect()
@@ -64,13 +59,8 @@ function BubbleCell:onTapSelect()
     return true
 end
 
-function BubbleCell:onHoldSelect()
-    self.hold_callback()
-    return true
-end
-
 local SelectionBubble = InputContainer:extend{
-    rows = nil, -- array of rows; a row is an array of { icon =, text =, callback =, hold_callback = }
+    rows = nil, -- array of rows; a row is an array of { icon =, text =, callback = }
     anchor_rects = nil, -- screen rects of the selection
     tap_close_callback = nil, -- called when a tap outside the popover closes it
 }
@@ -106,7 +96,6 @@ function SelectionBubble:init()
                 height = heights[r],
                 content = contents[r][c],
                 callback = cell.callback,
-                hold_callback = cell.hold_callback,
             })
         end
         table.insert(vgroup, hgroup)

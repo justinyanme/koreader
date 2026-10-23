@@ -596,6 +596,7 @@ function ReaderView:drawPageSavedHighlight(bb, x, y)
 end
 
 function ReaderView:drawXPointerSavedHighlight(bb, x, y)
+    self.highlight.underline_ys = {} -- fork: see ReaderView:underlineY()
     local do_cache = self.view_mode == "page"
     local colorful
     local page = self.document:getCurrentPage()
@@ -689,6 +690,36 @@ function ReaderView.paintWave(bb, x, mid_y, w, color)
     end
 end
 
+--- Fork: the y of a line highlight in the line box rect of reflowable text, 3dp under the lowest ink of that
+-- line on the page as painted, rather than at the bottom of the line's leading (DESIGN.md, Highlights).
+-- crengine gives no baseline nor glyph extents, only whole line boxes. Ink is looked for in the lower half
+-- of the box, across the page; without any, the line stays at the bottom of the box. One y per line for
+-- a paint (highlight.underline_ys), found before any line is drawn on it, so that highlights sharing a
+-- line share it.
+function ReaderView:underlineY(bb, rect)
+    local bottom = rect.y + rect.h - 1
+    local cache = self.highlight.underline_ys
+    local key = rect.y .. ":" .. rect.h
+    if cache and cache[key] then return cache[key] end
+    local line_y = bottom
+    local x1 = bb:getWidth() - 1
+    for row = math.min(bottom, bb:getHeight() - 1), math.max(rect.y + math.floor(rect.h / 2), 0), -1 do
+        local inked = false
+        for col = 0, x1, 2 do
+            if bb:getPixel(col, row):getColor8().a < 0x80 then
+                inked = true
+                break
+            end
+        end
+        if inked then
+            line_y = math.min(bottom, row + 1 + Screen:scaleBySize(3))
+            break
+        end
+    end
+    if cache then cache[key] = line_y end
+    return line_y
+end
+
 function ReaderView:drawHighlightRect(bb, _x, _y, rect, drawer, color, draw_note_mark)
     local x, y, w, h = rect.x, rect.y, rect.w, rect.h
     if drawer == "lighten" or drawer == "invert" then
@@ -723,10 +754,11 @@ function ReaderView:drawHighlightRect(bb, _x, _y, rect, drawer, color, draw_note
         if is_gray then
             color = Blitbuffer.COLOR_GRAY_4
         end
+        local line_y = self.ui.rolling and self:underlineY(bb, rect) or y + h - 1 -- fork: under the glyphs
         if Blitbuffer.isColor8(color) then
-            bb:paintRect(x, y + h - 1, w, Size.line.thick, color)
+            bb:paintRect(x, line_y, w, Size.line.thick, color)
         else
-            bb:paintRectRGB32(x, y + h - 1, w, Size.line.thick, Screen.night_mode and color:invert() or color)
+            bb:paintRectRGB32(x, line_y, w, Size.line.thick, Screen.night_mode and color:invert() or color)
         end
     elseif drawer == "strikeout" then
         if is_gray then
