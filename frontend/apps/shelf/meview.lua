@@ -148,7 +148,7 @@ end
 
 function Ring:paintTo(bb, x, y)
     self.dimen.x, self.dimen.y = x, y
-    bb:paintBorder(x, y, RING, RING, Size.border.default, Palette.confirm_rule, math.floor(RING / 2),
+    bb:paintBorder(x, y, RING, RING, Size.border.default, Palette.rule, math.floor(RING / 2),
         G_reader_settings:nilOrTrue("anti_alias_ui"))
     local offset = math.floor((RING - RING_ICON) / 2)
     self.glyph:paintTo(bb, x + offset, y + offset)
@@ -350,7 +350,7 @@ function MeView:homeRow(row, h)
                     row.callback and IconWidget:new{ icon = "eink/me.chev", width = CHEV_W, height = CHEV_H, alpha = true }
                         or HorizontalSpan:new{ width = 0 } },
             },
-            rule(self.home_w, Palette.confirm_rule),
+            rule(self.home_w, Palette.rule),
         },
     }
 end
@@ -403,7 +403,7 @@ function MeView:buildHome()
     local row_h = math.max(probe:getSize().h + dp(12), math.min(HOME_ROW_H,
         math.floor((self.height - header:getSize().h - Size.border.default) / #rows)))
     probe:free()
-    local list = VerticalGroup:new{ align = "left", rule(self.home_w, Palette.confirm_rule) }
+    local list = VerticalGroup:new{ align = "left", rule(self.home_w, Palette.rule) }
     for __, row in ipairs(rows) do
         table.insert(list, self:homeRow(row, row_h))
     end

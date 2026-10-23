@@ -595,7 +595,7 @@ function EinkSettings:buildRow(spec)
     elseif spec.kind == "check" then
         local size = dp(20)
         if spec.checked then
-            add(IconWidget:new{ icon = "eink/check", width = size, height = size, alpha = true, dim = not spec.enabled or nil })
+            add(EinkControls.Glyph:new{ icon = "eink/check", width = size, height = size, alpha = true, enabled = spec.enabled })
         end
     elseif spec.kind == "chevron" then
         add(IconWidget:new{ icon = "eink/chev", width = dp(18), height = dp(18), alpha = true, dim = true })

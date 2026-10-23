@@ -130,7 +130,7 @@ function ConfirmLayer.buildBand(question, rows)
     end
     for i, row in ipairs(rows) do
         if question or i > 1 then -- without a question, the ink rule tops the first row
-            table.insert(band, LineWidget:new{ background = Palette.confirm_rule, dimen = Geom:new{ w = sw, h = Size.border.default } })
+            table.insert(band, LineWidget:new{ background = Palette.rule, dimen = Geom:new{ w = sw, h = Size.border.default } })
         end
         table.insert(band, ActionRow:new{
             width = sw,

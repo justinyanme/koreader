@@ -162,6 +162,25 @@ describe("ReaderTypesetPanel module", function()
         return gray(x, track.minus_rect.y + math.floor(track.minus_rect.h / 2)) -- its outer edge
     end
     local INK, RULE = require("ui/palette").ink:getColor8().a, require("ui/palette").rule:getColor8().a
+    -- the darkest painted gray level in `rect`
+    local function darkestIn(rect)
+        local v = 0xFF
+        for y = rect.y, rect.y + rect.h - 1 do
+            for x = rect.x, rect.x + rect.w - 1 do
+                v = math.min(v, gray(x, y))
+            end
+        end
+        return v
+    end
+    -- The color a button's − or + glyph is painted in: INK, RULE, or else the darkest gray found. At the test
+    -- screen's density the thin stroke never reaches full ink (its darkest pixel is about 0x33), so the glyph counts
+    -- as ink below 0x44, and as rule gray within one gray step above rule gray, where lightening leaves that pixel.
+    local function buttonGlyph(track, direction)
+        local v = darkestIn(track.icons[direction].dimen)
+        if v < 0x44 then return INK end
+        if v >= RULE and v < RULE + 0x11 then return RULE end
+        return v
+    end
 
     -- The − and + buttons at the ends of a track, and its stops.
     local function tapMinus(track) tapTrack(track, Screen:scaleBySize(10)) end
@@ -915,17 +934,17 @@ describe("ReaderTypesetPanel module", function()
 
         it("should stop at the ends of a track, with the button there disabled", function()
             openPanel(ui)
-            -- at the last stop, + is outlined in rule gray with a dimmed glyph, and does nothing
+            -- at the last stop, + is outlined in rule gray with a rule-gray glyph, and does nothing
             tapStop(trackOf(ui, 4), 9)
             assert.are.same({ 70, 70 }, ui.document.configurable.h_page_margins)
             assert.are.same({ INK, RULE }, { buttonOutline(trackOf(ui, 4), -1), buttonOutline(trackOf(ui, 4), 1) })
-            assert.is_true(trackOf(ui, 4).icons[1].dim)
+            assert.are.same({ INK, RULE }, { buttonGlyph(trackOf(ui, 4), -1), buttonGlyph(trackOf(ui, 4), 1) })
             tapPlus(trackOf(ui, 4))
             assert.are.same({ 70, 70 }, ui.document.configurable.h_page_margins)
             tapStop(trackOf(ui, 3), 1)
             assert.are.equal(85, ui.document.configurable.line_spacing)
             assert.are.same({ RULE, INK }, { buttonOutline(trackOf(ui, 3), -1), buttonOutline(trackOf(ui, 3), 1) })
-            assert.is_true(trackOf(ui, 3).icons[-1].dim)
+            assert.are.same({ RULE, INK }, { buttonGlyph(trackOf(ui, 3), -1), buttonGlyph(trackOf(ui, 3), 1) })
             tapStop(trackOf(ui, 1), 10)
             assert.are.equal(28, ui.document.configurable.font_size)
             assert.are.equal("28", knobText(trackOf(ui, 1)))
@@ -937,7 +956,7 @@ describe("ReaderTypesetPanel module", function()
             tapMinus(trackOf(ui, 1))
             assert.are.equal(15, ui.document.configurable.font_size)
             assert.are.same({ RULE, INK }, { buttonOutline(trackOf(ui, 1), -1), buttonOutline(trackOf(ui, 1), 1) })
-            assert.is_nil(trackOf(ui, 1).icons[1].dim)
+            assert.are.equal(INK, buttonGlyph(trackOf(ui, 1), 1))
         end)
 
         it("should read back values past a track's ends there, with their own number, and go back onto it", function()
