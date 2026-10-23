@@ -516,12 +516,12 @@ function ReaderProgressPanel:buildContent()
     if ui.autoturn then
         table.insert(content, VerticalSpan:new{ width = Screen:scaleBySize(20) })
         table.insert(content, require("apps/reader/modules/readerautoturn").Button:new{
-            text = ui.autoturn:_enabled() and _("Autoturn settings") or _("Start autoturn"),
+            text = ui.autoturn:isActive() and _("Autoturn settings") or _("Start autoturn"),
             width = w, height = Screen:scaleBySize(35), bordersize = Size.border.default,
             face = Font:getFace("ui_label"),
             callback = function()
                 self.toolbar:hideToolbar()
-                if ui.autoturn:_enabled() then
+                if ui.autoturn:isActive() then
                     ui.autoturn:showSettings()
                 else
                     ui.autoturn:start()

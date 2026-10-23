@@ -66,26 +66,28 @@ function Pill:init()
 end
 
 function Pill:paintTo(bb, x, y)
-    if not self.autoturn:_enabled() or self.autoturn.suspended then return end
+    if not self.autoturn:isActive() or self.autoturn.suspended then return end
     self[1]:paintTo(bb, x + self.dimen.x, y + self.dimen.y)
 end
 
 ------------------------------------------------------------------------
 
-local speeds = { 1, 1.5, 2, 3, 4 }
-local seconds = { 60, 40, 30, 20, 15 } -- DECISIONS F03: fixed seconds per page, not scrolling distance
+-- DECISIONS F03: fixed seconds per page, not scrolling distance.
+local speeds = {
+    { rate = 1, seconds = 60 }, { rate = 1.5, seconds = 40 }, { rate = 2, seconds = 30 },
+    { rate = 3, seconds = 20 }, { rate = 4, seconds = 15 },
+}
 local SpeedScale = InputContainer:extend{ autoturn = nil, width = nil, on_change = nil }
 
 function SpeedScale:init()
     self.dimen = Geom:new{ w = self.width, h = Screen:scaleBySize(50) }
-    self.inset = Screen:scaleBySize(120)
     -- Leave room for the end captions on narrow screens too.
-    self.inset = math.min(self.inset, math.floor(self.width / 5))
+    self.inset = math.min(Screen:scaleBySize(120), math.floor(self.width / 5))
     self.ges_events = { TapSpeed = { GestureRange:new{ ges = "tap", range = self.dimen } } }
     local diameter = math.floor(Screen:scaleBySize(34) * Font:getUIScale())
     for i, speed in ipairs(speeds) do
         self[i] = QuickButton:new{
-            text = string.format("%.1f", speed), face = Font:getFace("ui_body", 16),
+            text = string.format("%.1f", speed.rate), face = Font:getFace("ui_body", 16),
             width = diameter, height = diameter, bordersize = 0,
             callback = function() self:select(i) end,
         }
@@ -95,7 +97,7 @@ function SpeedScale:init()
 end
 
 function SpeedScale:speedX(i)
-    return self.inset + (speeds[i] - 1) / 3 * (self.width - 2 * self.inset)
+    return self.inset + (speeds[i].rate - 1) / 3 * (self.width - 2 * self.inset)
 end
 
 function SpeedScale:paintTo(bb, x, y)
@@ -116,7 +118,7 @@ function SpeedScale:paintTo(bb, x, y)
         local size = label:getSize()
         local cx = i <= 5 and self:speedX(i) or i == 6 and size.w / 2 or self.width - size.w / 2
         label:paintTo(bb, x + math.floor(cx - size.w / 2), mid - math.floor(size.h / 2))
-        if i <= 5 and self.autoturn.autoturn_sec == seconds[i] and self.autoturn.autoturn_distance == 1 then
+        if i <= 5 and self.autoturn.autoturn_sec == speeds[i].seconds and self.autoturn.autoturn_distance == 1 then
             bb:paintBorder(x + math.floor(cx) - radius, mid - radius, 2 * radius, 2 * radius,
                 Size.border.button, Palette.ink, radius, true)
         end
@@ -134,7 +136,7 @@ function SpeedScale:onTapSpeed(_, ges)
 end
 
 function SpeedScale:select(i)
-    self.autoturn:setInterval(seconds[i], 1, true)
+    self.autoturn:setInterval(speeds[i].seconds, 1, true)
     self.on_change()
 end
 
@@ -159,21 +161,7 @@ function Settings:init()
         },
         fold,
     }
-    local header_h = row_h
-    if self.autoturn.ui.rolling then
-        local guide = HorizontalGroup:new{
-            TextWidget:new{ text = _("Reading guide"), face = Font:getFace("ui_label"), fgcolor = Palette.ink_3 },
-            HorizontalSpan:new{ width = Screen:scaleBySize(8) },
-            -- shortcut: guide rendering belongs to #69; keep this switch disabled until that behavior exists.
-            EinkControls.Toggle:new{ enabled = false, width = Screen:scaleBySize(34), height = Screen:scaleBySize(17) },
-        }
-        local guide_size = guide:getSize()
-        local below = 2 * (guide_size.w + Screen:scaleBySize(8)) + title:getSize().w > w
-        guide.overlap_offset = { w - guide_size.w, below and row_h or math.floor((row_h - guide_size.h) / 2) }
-        if below then header_h = row_h + guide_size.h end
-        table.insert(header_content, guide)
-    end
-    header_content.dimen = Geom:new{ w = w, h = header_h }
+    header_content.dimen = Geom:new{ w = w, h = row_h }
     local header = OverlapGroup:new(header_content)
     local panel = Panel:new{
         content = VerticalGroup:new{
@@ -185,7 +173,7 @@ function Settings:init()
             VerticalSpan:new{ width = Screen:scaleBySize(13) },
             QuickButton:new{
                 text = _("Stop autoturn"), width = w, height = Screen:scaleBySize(35), bordersize = Size.border.default,
-                face = Font:getFace("ui_label"), callback = function() self:close(); autoturn:stop() end,
+                face = Font:getFace("ui_label"), callback = function() autoturn:stop(); self:close() end,
             },
         },
         bottom_y = Screen:getHeight(), show_parent = self,
@@ -220,6 +208,7 @@ Settings.onClose = Settings.close
 function Settings:onCloseWidget()
     self.autoturn.settings = nil
     self:free()
+    self.autoturn:_start(true)
 end
 
 return { Button = QuickButton, Pill = Pill, Settings = Settings }
