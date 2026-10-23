@@ -3,10 +3,13 @@
 size, weight, line spacing and margins of reflowable books, then the font, in
 one panel between the page and the reader toolbar's bottom bar, opened from the
 toolbar's "Font" ("ShowConfigMenu"). The bottom bar keeps showing; the top bar
-hides, as in WeChat Read. The pill at the right of its title row opens the
-layout options page (render mode, embedded fonts and styles, and links into the
-existing hyphenation and style tweak menus), nested in the toolbar: the bottom
-bar then holds only a back arrow, back to the panel.
+hides, as in WeChat Read. The pill at the right of its title row names the
+paragraph mode and opens the paragraph panel: a 首行顶格 and a 首行缩进 card
+and the 段间距 toggle, which set KOReader's paragraph style tweaks for this
+book, then a row to the layout options page (render mode, embedded fonts and
+styles, and links into the existing hyphenation and style tweak menus). Both
+are nested in the toolbar: the bottom bar then holds only a back arrow, back to
+the page they were opened from.
 
 Replaces ReaderConfig (apps/replacements reader_config slot) for reflowable
 books on touch devices. Fixed-layout books and devices without touch keep the
@@ -15,7 +18,7 @@ original bottom bar, which stays reachable for every book through the
 
 Showing and closing the panel refresh ("ui") only its rect and the toolbar's
 bars it shows or hides, with the page under what they no longer cover; updating
-it refreshes only its rect. A type
+it refreshes only its rect, and the 段间距 toggle only itself. A type
 change re-lays the page out, which the reader refreshes as it does for a page
 turn ("partial", promoted to "full" by the user's full refresh setting).
 ]]
@@ -46,6 +49,7 @@ local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local Widget = require("ui/widget/widget")
 local Screen = Device.screen
 local T = require("ffi/util").template
 local _ = require("gettext")
@@ -187,10 +191,116 @@ function FontCard:onTapSelect()
     return true
 end
 
+-- Line icon of a paragraph card: four 1.5dp lines 5dp apart, as two paragraphs; with `indent`, the first line of each
+-- is indented.
+local ParagraphIcon = Widget:extend{
+    indent = false,
+    color = nil,
+}
+
+function ParagraphIcon:getSize()
+    return Geom:new{ w = Screen:scaleBySize(18), h = 3 * Screen:scaleBySize(5) + Size.border.button }
+end
+
+function ParagraphIcon:paintTo(bb, x, y)
+    local w = self:getSize().w
+    for i = 0, 3 do
+        local indent = self.indent and i % 2 == 0 and Screen:scaleBySize(4) or 0
+        bb:paintRect(x + indent, y + i * Screen:scaleBySize(5), w - indent, Size.border.button, self.color)
+    end
+end
+
+-- The 段间距 row at the foot of the 首行缩进 card: a label and a small toggle. The whole 44dp row switches it.
+local SpacingRow = InputContainer:extend{
+    width = nil,
+    checked = false,
+    inverted = false, -- on the ink of a selected card
+    callback = nil, -- function(checked)
+}
+
+function SpacingRow:init()
+    self.toggle = EinkControls.Toggle:new{
+        width = Screen:scaleBySize(34), height = Screen:scaleBySize(17),
+        checked = self.checked, on_card = true, inverted = self.inverted, callback = self.callback,
+    }
+    self.dimen = Geom:new{ w = self.width, h = Screen:scaleBySize(44) }
+    self[1] = LeftContainer:new{
+        dimen = self.dimen:copy(),
+        HorizontalGroup:new{
+            align = "center",
+            text(_("Paragraph spacing"), "ui_label", self.inverted and Palette.paper or Palette.ink),
+            HorizontalSpan:new{ width = Screen:scaleBySize(9) },
+            self.toggle,
+        },
+    }
+    -- Not TapSelect, the toggle's: a container's gesture event goes to its children first.
+    self.ges_events = { TapSpacing = { GestureRange:new{ ges = "tap", range = self.dimen } } }
+end
+
+function SpacingRow:onTapSpacing()
+    return self.toggle:onTapSelect()
+end
+
+-- Paragraph card (DESIGN.md, Cards): a line icon over a bold label, and a footer at its foot, built by `footer(width)`.
+-- Selected is ink with paper content, the other tint. A tap outside the footer calls `callback`.
+local ParagraphCard = InputContainer:extend{
+    width = nil,
+    height = Screen:scaleBySize(139),
+    label = nil, -- string
+    indent = false, -- of the icon
+    selected = false,
+    footer = nil, -- function(width): widget
+    callback = nil,
+}
+
+function ParagraphCard:init()
+    local fg = self.selected and Palette.paper or Palette.ink
+    local pad = Screen:scaleBySize(17)
+    local head = VerticalGroup:new{
+        align = "left",
+        VerticalSpan:new{ width = Screen:scaleBySize(21) },
+        HorizontalGroup:new{
+            HorizontalSpan:new{ width = Screen:scaleBySize(3) },
+            ParagraphIcon:new{ indent = self.indent, color = fg },
+        },
+        VerticalSpan:new{ width = Screen:scaleBySize(12) },
+        TextWidget:new{
+            text = self.label, face = Font:getFace("ui_label_large"), bold = true, fgcolor = fg,
+            max_width = self.width - 2 * pad,
+        },
+    }
+    local footer = self.footer and self.footer(self.width - pad)
+    local column = VerticalGroup:new{
+        align = "left",
+        HorizontalSpan:new{ width = self.width - pad }, -- the card's full width
+        head,
+        VerticalSpan:new{ width = self.height - head:getSize().h - (footer and footer:getSize().h or 0) },
+    }
+    if footer then
+        table.insert(column, footer)
+    end
+    self.dimen = Geom:new{ w = self.width, h = self.height }
+    self[1] = FrameContainer:new{
+        bordersize = 0, padding = 0, padding_left = pad, radius = Screen:scaleBySize(12),
+        background = self.selected and Palette.ink or Palette.tint,
+        column,
+    }
+    -- not TapSelect, which the footer's toggle would take (see SpacingRow)
+    self.ges_events = { TapCard = { GestureRange:new{ ges = "tap", range = self.dimen } } }
+end
+
+function ParagraphCard:onTapCard()
+    self.callback()
+    return true
+end
+
 local ReaderTypesetPanel = ReaderConfig:extend{
     panel = nil, -- ui/widget/panel while shown by the toolbar
-    page = nil, -- "main" or "more"
+    page = nil, -- "main", "paragraph" or "more"
 }
+
+-- The page each nested page goes back to.
+local PARENT_PAGES = { paragraph = "main", more = "paragraph" }
 
 --- Registers the panel in its replacement slot.
 function ReaderTypesetPanel.register()
@@ -282,12 +392,14 @@ function ReaderTypesetPanel:closeWithToolbar(no_refresh)
     end
 end
 
---- Shows a page of the panel in the toolbar: "main", or "more" (the layout options, nested with a way back).
+--- Shows a page of the panel in the toolbar: "main", or nested with a way back, "paragraph" (the paragraph panel,
+-- opened from the main page) or "more" (the layout options, opened from the paragraph panel).
 function ReaderTypesetPanel:showPage(page)
     self.page = page
+    local parent = PARENT_PAGES[page]
     local panel = Panel:new{
         content = self:pageContent(),
-        on_back = page == "more" and function() self:showPage("main") end or nil,
+        on_back = parent and function() self:showPage(parent) end or nil,
         hide_top_bar = true,
     }
     panel.on_close = function()
@@ -300,7 +412,12 @@ function ReaderTypesetPanel:showPage(page)
 end
 
 function ReaderTypesetPanel:pageContent()
-    return self.page == "more" and self:moreContent() or self:mainContent()
+    if self.page == "paragraph" then
+        return self:paragraphContent()
+    elseif self.page == "more" then
+        return self:moreContent()
+    end
+    return self:mainContent()
 end
 
 --- Re-renders the shown page with the current values ("ui" on the panel's rect).
@@ -488,6 +605,78 @@ function ReaderTypesetPanel:fontCards(width)
 end
 
 ------------------------------------------------------------------------
+-- Paragraphs, with KOReader's paragraph style tweaks (ui/data/css_tweaks), for this book
+
+local FLUSH_TWEAK, INDENT_TWEAK = "paragraph_no_indent", "paragraph_indent"
+-- Over the indent, these leave unindented the first paragraph of a block (a common style, still 首行缩进), or all
+-- the others (a mix that is neither mode).
+local FOLLOWING_FLUSH_TWEAK = "paragraph_following_no_indent"
+local SPACING_TWEAK, HALF_SPACING_TWEAK = "paragraph_whitespace", "paragraph_whitespace_half"
+
+--- The paragraph mode the style tweaks set: "flush" or "indent", or nil when they leave the first lines to the book's
+-- styles or indent only some of them.
+function ReaderTypesetPanel:paragraphMode()
+    local styletweak = self.ui.styletweak
+    if not styletweak.enabled then return end
+    if styletweak:isTweakEnabled(FLUSH_TWEAK) then
+        return "flush" -- also over the indent, later in the style sheet
+    end
+    if styletweak:isTweakEnabled(INDENT_TWEAK) and not styletweak:isTweakEnabled(FOLLOWING_FLUSH_TWEAK) then
+        return "indent"
+    end
+end
+
+--- Whether the style tweaks add space between paragraphs: a line, or half a line.
+function ReaderTypesetPanel:paragraphSpacing()
+    local styletweak = self.ui.styletweak
+    return styletweak.enabled
+        and (styletweak:isTweakEnabled(SPACING_TWEAK) or styletweak:isTweakEnabled(HALF_SPACING_TWEAK))
+end
+
+-- Turns style tweaks on or off for this book, as their menu does, in a single re-render. `tweaks`: { { id, on }, ... }
+function ReaderTypesetPanel:setStyleTweaks(tweaks)
+    local styletweak = self.ui.styletweak
+    self.ui:handleEvent(Event:new("BatchedUpdate"))
+    for __, tweak in ipairs(tweaks) do
+        self.ui:handleEvent(Event:new("ToggleStyleTweak", tweak, styletweak.tweaks_by_id[tweak[1]], true))
+    end
+    self.ui:handleEvent(Event:new("BatchedUpdateDone"))
+end
+
+--- Sets the paragraph mode, "flush" or "indent", turning off the tweaks that go against it.
+function ReaderTypesetPanel:setParagraphMode(mode)
+    if mode == "flush" then
+        self:setStyleTweaks{ { INDENT_TWEAK, false }, { FLUSH_TWEAK, true } }
+    else
+        self:setStyleTweaks{ { FLUSH_TWEAK, false }, { FOLLOWING_FLUSH_TWEAK, false }, { INDENT_TWEAK, true } }
+    end
+end
+
+function ReaderTypesetPanel:setParagraphSpacing(on)
+    if on then
+        self:setStyleTweaks{ { SPACING_TWEAK, true } } -- in place of half a line
+    else
+        self:setStyleTweaks{ { SPACING_TWEAK, false }, { HALF_SPACING_TWEAK, false } }
+    end
+end
+
+--- Whether paragraph changes would show: not with style tweaks turned off for this book (in their menu). Says so.
+function ReaderTypesetPanel:canSetParagraphs()
+    if self.ui.styletweak.enabled then return true end
+    UIManager:show(InfoMessage:new{ text = _("Style tweaks are disabled for this book.") })
+    return false
+end
+
+local function paragraphModeName(mode)
+    if mode == "flush" then
+        return _("First line flush")
+    elseif mode == "indent" then
+        return _("First line indented")
+    end
+    return _("Paragraphs") -- the book's own
+end
+
+------------------------------------------------------------------------
 -- Existing menus, opened on their own
 
 --- Shows a menu item table (the original menu's format) as a single-tab menu, after closing the panel and the toolbar.
@@ -570,7 +759,10 @@ function ReaderTypesetPanel:mainContent()
     local weight_step = indexOf(weights, weight)
     local margins = self.configurable.h_page_margins
     local small, large = C_("Typeset track", "Small"), C_("Typeset track", "Large")
-    local entry = EntryPill:new{ text = _("More layout options"), callback = function() self:showPage("more") end }
+    local entry = EntryPill:new{
+        text = paragraphModeName(self:paragraphMode()),
+        callback = function() self:showPage("paragraph") end,
+    }
     return VerticalGroup:new{
         align = "left",
         HorizontalGroup:new{
@@ -625,6 +817,55 @@ function ReaderTypesetPanel:toggleRow(label, name, event)
         label = text(label, "ui_label_large", Palette.ink, Panel.getContentWidth() - toggle:getSize().w),
         right = toggle,
     })
+end
+
+--- The paragraph panel: a card for each paragraph mode, the spacing row at the foot of the indent card, and a row to
+-- the more layout settings. A card or the row changes only this book, and leaves the panel open.
+function ReaderTypesetPanel:paragraphContent()
+    local w = Panel.getContentWidth()
+    local gap = Screen:scaleBySize(10)
+    local card_w = math.floor((w - gap) / 2)
+    local mode = self:paragraphMode()
+    local function card(card_mode, props)
+        props.width = card_mode == "flush" and card_w or w - card_w - gap
+        props.label = paragraphModeName(card_mode)
+        props.selected = mode == card_mode
+        props.callback = function()
+            if mode ~= card_mode and self:canSetParagraphs() then
+                self:setParagraphMode(card_mode)
+                self:refreshPanel()
+            end
+        end
+        return ParagraphCard:new(props)
+    end
+    local function spacingRow(width)
+        local row
+        row = SpacingRow:new{
+            width = width,
+            checked = self:paragraphSpacing(),
+            inverted = mode == "indent",
+            callback = function(on)
+                if not self:canSetParagraphs() then
+                    self:refreshPanel() -- the toggle back as it was
+                    return
+                end
+                -- "ui", not a toggle's "fast": the card around it is gray
+                UIManager:setDirty(self.panel.show_parent, "ui", row.toggle.dimen)
+                self:setParagraphSpacing(on)
+            end,
+        }
+        return row
+    end
+    return VerticalGroup:new{
+        align = "left",
+        HorizontalGroup:new{
+            card("flush", {}),
+            HorizontalSpan:new{ width = gap },
+            card("indent", { indent = true, footer = spacingRow }),
+        },
+        VerticalSpan:new{ width = Screen:scaleBySize(16) },
+        linkRow(_("More layout options"), function() self:showPage("more") end),
+    }
 end
 
 function ReaderTypesetPanel:moreContent()
