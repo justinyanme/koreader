@@ -477,6 +477,7 @@ function BottomBar:init()
 end
 
 return {
+    BackArrow = BackArrow,
     BottomBar = BottomBar,
     PageCapsule = PageCapsule,
     Pager = Pager,
