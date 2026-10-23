@@ -24,6 +24,8 @@ so it neither refreshes the hidden book nor holds the toggle up.
 ]]
 
 local CenterContainer = require("ui/widget/container/centercontainer")
+local ConfirmLayer = require("ui/widget/confirmlayer")
+local DataStorage = require("datastorage")
 local Device = require("device")
 local EinkControls = require("ui/widget/einkcontrols")
 local Event = require("ui/event")
@@ -43,9 +45,12 @@ local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
 local TocDrawer = require("apps/reader/modules/readertocdrawer")
 local UIManager = require("ui/uimanager")
+local Toast = require("ui/widget/toast")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Screen = Device.screen
+local lfs = require("libs/libkoreader-lfs")
+local util = require("util")
 local _ = require("gettext")
 
 local function dp(n) return Screen:scaleBySize(n) end
@@ -183,6 +188,85 @@ local EinkSettings = FullscreenPage:extend{
     item_table_stack = nil,
     page = 1,
 }
+
+-- Only these caches: the rest of cache/ may include an open book's mapped render cache.
+local function cacheFiles()
+    local files, size = {}, 0
+    local function collect(path, recursive)
+        local attr, err, code = lfs.symlinkattributes(path)
+        if not attr then
+            assert(code == 2, err) -- a missing cache is empty; unreadable is not
+            return
+        end
+        if attr.mode == "file" then
+            table.insert(files, path)
+            size = size + attr.size
+        elseif recursive and attr.mode == "directory" then
+            for name in lfs.dir(path) do
+                if name ~= "." and name ~= ".." then collect(path .. "/" .. name, true) end
+            end
+        end
+    end
+    local db_path = DataStorage:getSettingsDir() .. "/bookinfo_cache.sqlite3"
+    collect(db_path)
+    collect(db_path .. "-wal")
+    collect(db_path .. "-shm")
+    collect(db_path .. "-journal")
+    local cache_dir = DataStorage:getDataDir() .. "/cache"
+    if lfs.symlinkattributes(cache_dir, "mode") == "directory" then
+        collect(cache_dir .. "/opds-thumbs", true)
+    end
+    return files, size, db_path
+end
+
+function EinkSettings.cacheSize()
+    local ok, __, size = pcall(cacheFiles)
+    return ok and util.getFriendlySize(size) or _("Not available")
+end
+
+function EinkSettings:confirmCacheCleanup()
+    local layer = ConfirmLayer:new{
+        text = _("Clear cached covers, book metadata and book source thumbnails?") .. "\n\n"
+            .. _("Books, notes, download records and settings are kept."),
+        actions = { { text = _("Clear cache"), callback = function()
+            local bim = package.loaded.bookinfomanager
+            if bim and bim:isExtractingInBackground() then
+                UIManager:show(Toast:new{ text = _("Cache is in use. Please try again shortly.") })
+                return
+            end
+            local db
+            local ok, err = pcall(function()
+                local files, __, db_path = cacheFiles()
+                if lfs.symlinkattributes(db_path, "mode") == "file" then
+                    if bim then bim:closeDbConnection() end
+                    db = require("lua-ljsqlite3/init").open(db_path)
+                    -- Re-extraction overwrites ignore_* preferences; keep customized entries intact.
+                    db:exec([[UPDATE bookinfo SET in_progress=0, unsupported=NULL, cover_fetched=NULL,
+                        has_meta=NULL, has_cover=NULL, cover_sizetag=NULL, pages=NULL, title=NULL, authors=NULL,
+                        series=NULL, series_index=NULL, language=NULL, keywords=NULL, description=NULL,
+                        cover_w=NULL, cover_h=NULL, cover_bb_type=NULL, cover_bb_stride=NULL, cover_bb_data=NULL
+                        WHERE ignore_meta IS NULL AND ignore_cover IS NULL;
+                        PRAGMA temp_store=MEMORY; VACUUM; PRAGMA wal_checkpoint(TRUNCATE);]])
+                    db:close()
+                    db = nil
+                end
+                for _, path in ipairs(files) do
+                    -- SQLite manages its own files, including journals of an open connection.
+                    if path ~= db_path and path ~= db_path .. "-wal" and path ~= db_path .. "-shm"
+                            and path ~= db_path .. "-journal" then
+                        assert(os.remove(path))
+                    end
+                end
+            end)
+            if db then db:close() end
+            if not ok then require("logger").warn("Cache cleanup:", err) end
+            self:refreshChanged()
+            UIManager:show(Toast:new{ text = ok and _("Cache cleared.")
+                or _("Some caches could not be cleared. Please try again.") })
+        end } },
+    }
+    UIManager:show(layer, "ui", layer:getRefreshRegion())
+end
 
 --- Shows the settings over `ui`, on `target` (a group or row id); without touch, the original menu.
 function EinkSettings.show(ui, menu, target)

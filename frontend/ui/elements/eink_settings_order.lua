@@ -42,6 +42,9 @@ return {
         { id = "ui_font_size", text = _("Interface font size"),
           open = function() require("apps/settings/uifontsize").show() end,
           value = function() return require("apps/settings/uifontsize").currentName() end },
+        { id = "cache_cleanup", text = _("Clear cache"),
+          open = function(settings) settings:confirmCacheCleanup() end,
+          value = function() return require("apps/settings/einksettings").cacheSize() end },
     } },
     { id = "reading", text = C_("Settings group", "Reading"), rows = {
         { id = "tap_zones", text = _("Page turns and tap zones"), items = { "page_turns" }, preview = "tap_zones" },

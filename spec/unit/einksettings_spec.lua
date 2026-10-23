@@ -253,6 +253,7 @@ describe("Reorganized settings", function()
             { _("Indent first lines of body text"), _("When on, the body text of books is indented on first lines"), "toggle" },
             { _("Show time while reading"), _("When on, the current system time shows while reading"), "toggle" },
             { _("Interface font size"), _("Default"), "chevron" },
+            { _("Clear cache"), require("util").getFriendlySize(0), "chevron" },
         }
     end
 
@@ -273,6 +274,180 @@ describe("Reorganized settings", function()
             if fm.menu.menu_container then fm.menu:onCloseFileManagerMenu() end
             while isSettings(topWidget()) do topWidget():closeMenu(true) end
             fm:onClose()
+        end)
+
+        local function withCacheData(fn)
+            local util = require("util")
+            local root = home .. "/cache-cleanup"
+            util.makePath(root .. "/cache/opds-thumbs")
+            util.makePath(root .. "/settings")
+            local data_dir, settings_dir = DataStorage.getDataDir, DataStorage.getSettingsDir
+            DataStorage.getDataDir = function() return root end
+            DataStorage.getSettingsDir = function() return root .. "/settings" end
+            local saved_home = G_reader_settings:readSetting("home_dir")
+            G_reader_settings:saveSetting("home_dir", root)
+            local saved_bim = package.loaded.bookinfomanager
+            local ok, err = pcall(function() fn(root, util) end)
+            if fm.shelf_view then fm.shelf_view:stop() end
+            local bim = package.loaded.bookinfomanager
+            if bim and bim ~= saved_bim then bim:closeDbConnection() end
+            package.loaded.bookinfomanager = saved_bim
+            G_reader_settings:saveSetting("home_dir", saved_home)
+            DataStorage.getDataDir, DataStorage.getSettingsDir = data_dir, settings_dir
+            while topWidget() ~= fm do UIManager:close(topWidget()) end
+            ffiUtil.purgeDir(root)
+            assert(ok, err)
+        end
+
+        it("shows real cache usage and clears only rebuildable data after confirmation", function()
+            withCacheData(function(root, util)
+                local thumb = root .. "/cache/opds-thumbs/test"
+                assert(util.writeToFile(string.rep("x", 2000), thumb))
+                local book = root .. "/book.epub"
+                assert(util.writeToFile(util.readFromFile(sample_epub), book))
+                local notes = { { text = "Test thought", note = "Keep this", origin = "note", page = "test" } }
+                local doc = DocSettings:open(book)
+                doc:saveSetting("annotations", notes)
+                doc:saveSetting("summary", { status = "reading" })
+                doc:flush()
+                local settings = require("luasettings"):open(root .. "/settings/reader.lua")
+                settings:saveSetting("nickname", "Cache test")
+                settings:flush()
+                local downloads = require("luasettings"):open(root .. "/settings/opds.lua")
+                local source = { url = "https://example.invalid", downloaded = { test = book } }
+                require("apps/opds/booksource").save{ settings = downloads, servers = { source } }
+                local page = openSettings(fm)
+                local spec = row(page, _("Clear cache"))
+                assert.are.equal(util.getFriendlySize(2000), spec.subtitle)
+                assert.are.equal("chevron", spec.kind)
+                tap(spec.rect)
+                local confirm = topWidget()
+                assert.is_truthy(confirm.text:find(_("Books, notes, download records and settings are kept."), 1, true))
+                tap(find(confirm, function(w) return w.text == _("Cancel") and w.callback end).dimen)
+                assert.are.equal(2000, lfs.attributes(thumb, "size"))
+                assert.are.equal(page, topWidget())
+                tap(row(page, _("Clear cache")).rect)
+                press("Back")
+                assert.are.equal(page, topWidget())
+                assert.are.equal(2000, lfs.attributes(thumb, "size"))
+                tap(row(page, _("Clear cache")).rect)
+                confirm = topWidget()
+                local refreshes = refreshesOf(function()
+                    tap(find(confirm, function(w) return w.text == _("Clear cache") and w.callback end).dimen)
+                end)
+                assert.is_nil(lfs.attributes(thumb))
+                assert.are.equal(util.readFromFile(sample_epub), util.readFromFile(book))
+                assert.are.same(notes, DocSettings:open(book):readSetting("annotations"))
+                assert.are.same({ status = "reading" }, DocSettings:open(book):readSetting("summary"))
+                assert.are.equal("Cache test", require("luasettings"):open(settings.file):readSetting("nickname"))
+                assert.are.same({ source }, require("luasettings"):open(downloads.file):readSetting("servers"))
+                assert.are.equal(util.getFriendlySize(0), row(page, _("Clear cache")).subtitle)
+                for __, refresh in ipairs(refreshes) do assert.are_not.equal("full", refresh.mode) end
+                UIManager:close(topWidget()) -- feedback
+                tap(page.bar.back.dimen)
+                assert.is_false(isSettings(topWidget()))
+            end)
+        end)
+
+        it("reclaims cached metadata and covers without losing database or per-book preferences", function()
+            withCacheData(function(root, util)
+                local book = root .. "/book.epub"
+                assert(util.writeToFile(util.readFromFile(sample_epub), book))
+                local bim = dofile("plugins/coverbrowser.koplugin/bookinfomanager.lua")
+                package.loaded.bookinfomanager = bim
+                bim:createDB()
+                UIManager:close(topWidget()) -- schema-created feedback
+                bim:saveSetting("show_series", "series_in_separate_line")
+                bim:openDbConnection()
+                bim.db_conn:exec("INSERT INTO bookinfo(directory, filename, title, has_meta, cover_fetched, in_progress, description) "
+                    .. "VALUES ('" .. root .. "/', 'book.epub', 'Cached title', 'Y', 'Y', 0, '" .. string.rep("x", 100000) .. "');")
+                assert.are.equal("Cached title", bim:getBookInfo(book).title)
+                for __, name in ipairs{ "cover", "hidden" } do
+                    assert(util.writeToFile(util.readFromFile(sample_epub), root .. "/" .. name .. ".epub"))
+                end
+                bim.db_conn:exec("INSERT INTO bookinfo(directory, filename, title, authors, has_meta, cover_fetched, ignore_cover, in_progress) "
+                    .. "VALUES ('" .. root .. "/', 'cover.epub', 'Custom cover title', 'Author', 'Y', 'Y', 'Y', 0);")
+                bim.db_conn:exec("INSERT INTO bookinfo(directory, filename, title, has_meta, cover_fetched, ignore_meta, in_progress) "
+                    .. "VALUES ('" .. root .. "/', 'hidden.epub', 'Hidden metadata', 'Y', 'Y', 'Y', 0);")
+                local page = openSettings(fm)
+                local before = row(page, _("Clear cache")).subtitle
+                tap(row(page, _("Clear cache")).rect)
+                tap(find(topWidget(), function(w) return w.text == _("Clear cache") and w.callback end).dimen)
+                assert.are.equal(_("Cache cleared."), topWidget().text)
+                local info = bim:getBookInfo(book)
+                assert.is_nil(info.title)
+                assert.is_nil(info.has_meta)
+                assert.are.equal("Y", bim:getBookInfo(root .. "/cover.epub").ignore_cover)
+                assert.are.equal("Custom cover title", bim:getBookInfo(root .. "/cover.epub").title)
+                assert.are.equal("Y", bim:getBookInfo(root .. "/hidden.epub").ignore_meta)
+                bim.settings = nil -- reload from disk
+                assert.are.equal("series_in_separate_line", bim:getSetting("show_series"))
+                assert.are_not.equal(before, row(page, _("Clear cache")).subtitle)
+                assert.is_true(lfs.attributes(bim.db_location, "size") < 100000)
+                UIManager:close(topWidget())
+                tap(page.bar.back.dimen)
+                fm:onClose()
+                fm = openFM()
+                assert.is_truthy(findText(fm, "Custom cover title"))
+                assert.is_truthy(findText(fm, "Author"))
+                assert.is_truthy(findText(fm, "hidden"))
+                assert.is_nil(findText(fm, "Hidden metadata"))
+                -- Let the real shelf finish rebuilding the ordinary entry through its scheduled jobs.
+                local time = require("ui/time")
+                local deadline = time.now() + time.s(5)
+                UIManager:setInputTimeout(0)
+                repeat
+                    UIManager:shiftScheduledTasksBy(-time.s(1))
+                    UIManager:handleInput()
+                    ffiUtil.usleep(25000)
+                until findText(fm, "Romeo and Juliet") or time.now() > deadline
+                assert.is_truthy(findText(fm, "Romeo and Juliet"))
+                assert.is_truthy(findText(fm, "Custom cover title"))
+                assert.is_truthy(findText(fm, "hidden"))
+                assert.are.equal("Y", bim:getBookInfo(root .. "/hidden.epub").ignore_meta)
+                page = openSettings(fm)
+                assert.are.equal(util.getFriendlySize(lfs.attributes(bim.db_location, "size")
+                    + (lfs.attributes(bim.db_location .. "-wal", "size") or 0)
+                    + (lfs.attributes(bim.db_location .. "-shm", "size") or 0)), row(page, _("Clear cache")).subtitle)
+            end)
+        end)
+
+        it("handles an empty cache and never follows thumbnail symlinks or clears other caches", function()
+            withCacheData(function(root, util)
+                local page = openSettings(fm)
+                assert.are.equal(util.getFriendlySize(0), row(page, _("Clear cache")).subtitle)
+                local retained = root .. "/cache/render-cache"
+                assert(util.writeToFile("keep", retained))
+                assert(lfs.link(retained, root .. "/cache/opds-thumbs/link", true))
+                util.makePath(root .. "/cache/opds-thumbs/nested")
+                assert(util.writeToFile("thumb", root .. "/cache/opds-thumbs/nested/image"))
+                page:closeMenu()
+                page = openSettings(fm)
+                assert.are.equal(util.getFriendlySize(5), row(page, _("Clear cache")).subtitle)
+                for i = 1, 2 do
+                    tap(row(page, _("Clear cache")).rect)
+                    tap(find(topWidget(), function(w) return w.text == _("Clear cache") and w.callback end).dimen)
+                    assert.are.equal(_("Cache cleared."), topWidget().text)
+                    assert.are.equal("keep", util.readFromFile(retained))
+                    assert.is_nil(lfs.attributes(root .. "/cache/opds-thumbs/nested/image"))
+                    UIManager:close(topWidget())
+                    assert.are.equal(util.getFriendlySize(0), row(page, _("Clear cache")).subtitle)
+                end
+            end)
+        end)
+
+        it("reports cleanup failures and keeps the remaining usage visible", function()
+            withCacheData(function(root, util)
+                local db_path = root .. "/settings/bookinfo_cache.sqlite3"
+                assert(util.writeToFile("corrupt cache", db_path))
+                local page = openSettings(fm)
+                tap(row(page, _("Clear cache")).rect)
+                tap(find(topWidget(), function(w) return w.text == _("Clear cache") and w.callback end).dimen)
+                assert.are.equal(_("Some caches could not be cleared. Please try again."), topWidget().text)
+                UIManager:close(topWidget())
+                assert.are.equal(util.getFriendlySize(13), row(page, _("Clear cache")).subtitle)
+                assert.are.equal("corrupt cache", util.readFromFile(db_path))
+            end)
         end)
 
         it("shows exactly six groups with the issues' rows, after the reading preferences", function()
@@ -587,7 +762,7 @@ describe("Reorganized settings", function()
             assert.is_true(isSettings(page))
             assert.are.equal(1, page.page)
             local shown = {}
-            for i = 1, 4 do
+            for i = 1, 5 do
                 local spec = page.shown[i]
                 table.insert(shown, { spec.name, spec.subtitle, spec.kind })
                 -- the name in bold over the subtitle, both in ink, the toggle or chevron at the right
@@ -603,7 +778,7 @@ describe("Reorganized settings", function()
             assert.are.same(expectedPreferences(), shown)
             assert.are.equal(page.content_rect.y, page.shown[1].rect.y) -- right under the title
             -- the groups follow, from their headers
-            assert.are.same({ "header", C_("Settings group", "Reading") }, { page.shown[5].kind, page.shown[5].name })
+            assert.are.same({ "header", C_("Settings group", "Reading") }, { page.shown[6].kind, page.shown[6].name })
             -- the toggles read the settings they switch
             assert.are.equal(G_reader_settings:isTrue("page_turns_left_tap_forward"), toggleShowsOn(page.shown[1]))
             local footer = G_reader_settings:readSetting("footer") or require("apps/reader/modules/readerfooter").default_settings
@@ -736,7 +911,7 @@ describe("Reorganized settings", function()
                 table.insert(msgids, r.text)
                 if r.subtitle then table.insert(msgids, r.subtitle) end
             end
-            assert.are.equal(7, #msgids) -- four names, three subtitles
+            assert.are.equal(8, #msgids) -- five names, three subtitles
             local ok, err = pcall(function()
                 _.changeLang("zh_CN")
                 for __, msgid in ipairs(msgids) do

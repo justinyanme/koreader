@@ -300,17 +300,18 @@ describe("Interface font size", function()
             fm:onClose()
         end)
 
-        it("is the last of the reading preferences, shows the current size under its name, and opens its page", function()
+        it("precedes cache cleanup in the reading preferences, shows the current size under its name, and opens its page", function()
             local settings = openSettings(fm)
-            local last
+            local font_row, cache_row
             for i, entry in ipairs(settings.home) do
                 if entry.header then
-                    last = settings.home[i - 1]
+                    font_row, cache_row = settings.home[i - 2], settings.home[i - 1]
                     break
                 end
             end
-            assert.are.equal("preferences", last.group_id)
-            assert.are.equal(_("Interface font size"), last.text)
+            assert.are.equal("preferences", font_row.group_id)
+            assert.are.equal(_("Interface font size"), font_row.text)
+            assert.are.equal(_("Clear cache"), cache_row.text)
             local spec = row(settings, _("Interface font size"))
             assert.are.equal("chevron", spec.kind)
             assert.are.equal(_("Default"), spec.subtitle)
