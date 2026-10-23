@@ -197,6 +197,8 @@ function EinkSettings:rowItems(row)
     local items = {}
     if row.file then
         table.insert(items, dofile(row.file))
+    elseif row.item then
+        table.insert(items, row.item())
     end
     for _, id in ipairs(row.items or {}) do
         local item = self.by_id[id]

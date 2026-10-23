@@ -18,7 +18,8 @@ New highlights are lines unless a default style was saved, in 设置 → 阅读 
 划线样式 or the original menu; markers and waves keep showing
 (doc/adr/0006-straight-line-default-highlight.md). One highlight is restyled from
 a long-press on "Delete highlight", a secondary entry the reference does not show.
-The settings row sends "DefaultHighlightStyleChanged" to the open book.
+The settings row (genDefaultStyleMenuItem) sends "DefaultHighlightStyleChanged" to
+the open book.
 
 Refreshes: both popovers and the toast are black and white, so they show and
 close with "fast" on their own rect, or "ui" where the page under them is gray
@@ -133,6 +134,41 @@ local DEFAULT_DRAWER = "underscore"
 --- The style of new highlights: the saved default, else a line.
 function ReaderHighlightBubble.getDefaultDrawer()
     return G_reader_settings:readSetting("highlight_drawing_style") or DEFAULT_DRAWER
+end
+
+--- The 划线样式 row of the reorganized settings (ui/elements/eink_settings_order.lua): line, marker or
+-- wave as one choice for new highlights; existing highlights keep their own style. A default saved in
+-- another style from the original menu (strikethrough, invert) is listed too, checked, so that it shows
+-- as the row's value.
+function ReaderHighlightBubble.genDefaultStyleMenuItem()
+    local styles = {}
+    local default, listed = ReaderHighlightBubble.getDefaultDrawer(), false
+    for _, style in ipairs(ReaderHighlightBubble.STYLES) do
+        table.insert(styles, style)
+        if style[2] == default then listed = true end
+    end
+    if not listed then
+        for _, style in ipairs(ReaderHighlight.getHighlightStyles()) do
+            if style[2] == default then table.insert(styles, style) end
+        end
+    end
+    local sub_item_table = {}
+    for _, style in ipairs(styles) do
+        local drawer = style[2]
+        table.insert(sub_item_table, {
+            text = style[1],
+            radio = true,
+            checked_func = function()
+                return ReaderHighlightBubble.getDefaultDrawer() == drawer
+            end,
+            callback = function()
+                G_reader_settings:saveSetting("highlight_drawing_style", drawer)
+                -- for the open book's next highlight
+                UIManager:broadcastEvent(Event:new("DefaultHighlightStyleChanged"))
+            end,
+        })
+    end
+    return { text = C_("Settings", "Highlight style"), sub_item_table = sub_item_table }
 end
 
 --- Registers the bubbles in their replacement slot.

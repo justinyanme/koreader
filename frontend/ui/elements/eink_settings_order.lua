@@ -2,11 +2,11 @@
 Groups of the reorganized settings (apps/settings/einksettings.lua), next to the
 original menus' reader_menu_order.lua and filemanager_menu_order.lua.
 
-Each row is backed by items of the original menus, by id, or by an element table:
+Each row is backed by items of the original menus, by id, or by an item of the redesign's own:
     id      row id, the target of the "ShowEinkSettings" event (as are group ids)
     items   original menu item ids; one item opens its own entries, several are listed together
-    file    an element table (instead of items): one the original menu embeds without an id, or one of
-            the redesign's own (highlight_style_menu_table.lua)
+    file    an element table the original menu embeds without an id (instead of items)
+    item    function returning a menu item of the redesign's own (instead of items), built each time
     toggle  the single item is a checkbox, shown as a toggle on the row
     choice  the entries up to the first separator are one single choice, shown with a check mark
     value   function(item) returning the row's current value; by default the "Name: value" text or checked radio entry
@@ -29,7 +29,7 @@ return {
         { id = "footer", text = C_("Settings", "Status bar"), items = { "status_bar" } },
         { id = "end_action", text = _("After finishing a book"), items = { "document_end_action" } },
         { id = "highlight_style", text = C_("Settings", "Highlight style"), choice = true,
-          file = "frontend/ui/elements/highlight_style_menu_table.lua" },
+          item = function() return require("apps/reader/modules/readerhighlightbubble").genDefaultStyleMenuItem() end },
     } },
     { id = "screen", text = C_("Settings group", "Screen"), rows = {
         { id = "refresh", text = _("Refresh and ghosting"), items = { "screen_eink_opt" } },
