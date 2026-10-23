@@ -1,11 +1,11 @@
 --[[--
 "More" panel of the e-ink redesign (see DESIGN.md, Panels), opened from the
-reader toolbar's top bar: book information, tap zones, note export, reading
-statistics and the reorganized settings. Also holds the tap zone overlay,
+reader toolbar's top bar: brightness, book information, tap zones, note export,
+reading statistics and the reorganized settings. Also holds the tap zone overlay,
 which the settings preview too (apps/settings/einksettings).
 
-Each entry closes the toolbar and its panel ("ui" on their rects) before
-opening its target.
+Brightness opens its panel in place of this one. Each other entry closes the
+toolbar and its panel ("ui" on their rects) before opening its target.
 
 @usage
     toolbar:showPanel("more", ReaderMorePanel:new{ toolbar = toolbar })
@@ -150,6 +150,9 @@ function ReaderMorePanel:buildContent()
         end
     end
     local tiles = {
+        -- the bottom bar has no brightness entry (WeChat Read's has none): its panel takes this one's place
+        { "eink/light", _("Brightness"), true, function() ui:handleEvent(Event:new("ShowToolbarPanel", "brightness")) end,
+          in_place = true },
         { "eink/info", _("Book information"), true, function() ui.bookinfo:onShowBookInfo() end },
         { "eink/zones", _("Tap zones"), Device:isTouchDevice(), function()
             local zones = TapZones:new{ layout = toolbar:getTapLayout() }
@@ -172,7 +175,7 @@ function ReaderMorePanel:buildContent()
         else
             table.insert(row, HorizontalSpan:new{ width = gap })
         end
-        table.insert(row, Tile:new{ icon = t[1], label = t[2], enabled = t[3], width = tile_w, callback = go(t[4]) })
+        table.insert(row, Tile:new{ icon = t[1], label = t[2], enabled = t[3], width = tile_w, callback = t.in_place and t[4] or go(t[4]) })
     end
     table.insert(group, row)
     return group
