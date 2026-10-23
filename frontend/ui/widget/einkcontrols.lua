@@ -170,42 +170,55 @@ function TickStepper:init()
 end
 
 --- Track: a 33dp pill between a − and a + circle button (33dp, 1dp ink outline), on a 44dp row. The pill is marker
--- gray, and ink up to the knob with a 1dp paper rule at each passed stop. `low` and `high` label its ends inside it,
--- and the knob, a paper disc with a 1dp ink outline, shows `label`; it widens to a pill for a longer label.
+-- gray, and ink up to the knob, with a 1dp paper rule at each passed stop when `ticks` is set. `low` and `high` label
+-- its ends inside it, and the knob, a paper disc with a 1dp ink outline, shows `label` if any; it widens to a pill for
+-- a longer label. A `caption` sits above the knob, in a band above the row.
 -- `position` goes from 1 to `count`, and falls between two stops for a value that is not on one; a value past an end
--- is drawn at that end. The buttons take taps over 44dp at the row's ends, and are rule gray and ignore them when
--- there is no stop left their way; the pill picks the stop nearest to a tap.
+-- is drawn at that end. With `clear_ends`, the end stops leave the end labels clear of the knob (the typeset panel);
+-- without, the stops run to the ends of the pill and the knob covers the end label at an end stop (the interface
+-- font size page). The buttons take taps over 44dp at the row's ends (`minus_rect`, `plus_rect`), and are rule gray
+-- and ignore them when there is no stop left their way; the pill between (`track_rect`) picks the stop nearest to a tap.
 local Track = InputContainer:extend{
     count = 2,
     position = 1,
-    label = "",
+    label = nil,
+    caption = nil,
     low = "",
     high = "",
+    ticks = true,
+    clear_ends = true,
     width = nil,
     on_change = nil, -- function(stop), for a tap on the pill
     on_step = nil, -- function(direction), for − (-1) and + (+1)
 }
-Track.height = Screen:scaleBySize(44)
+Track.height = Screen:scaleBySize(44) -- of the row
 
 function Track:init()
-    self.dimen = Geom:new{ w = self.width, h = Track.height }
     self.button_d = Screen:scaleBySize(33)
     self.pill_h = Screen:scaleBySize(33)
     self.pill_x = self.button_d + Screen:scaleBySize(9)
     self.pill_w = self.width - 2 * self.pill_x
     self.end_pad = Screen:scaleBySize(12)
-    -- a long translation is cut short rather than squeeze the stops
-    local max_width = math.floor(self.pill_w / 5)
-    local function caption(str, color)
+    local function caption(str, color, max_width)
         return TextWidget:new{ text = str, face = Font:getFace("ui_caption"), bold = true, fgcolor = color, max_width = max_width }
     end
-    self.low_text = caption(self.low, Palette.paper)
-    self.high_text = caption(self.high, Palette.ink)
-    self.knob_text = caption(self.label, Palette.ink)
-    self.knob_w = math.max(self.pill_h, self.knob_text:getSize().w + 2 * Screen:scaleBySize(6))
-    -- the first and last stops leave the end labels clear of the knob
-    local ends = self.end_pad + math.max(self.low_text:getSize().w, self.high_text:getSize().w) + Screen:scaleBySize(6)
-    self.inset = math.max(self.pill_h, ends) + math.floor(self.knob_w / 2)
+    -- a long translation is cut short rather than squeeze the stops
+    local max_width = math.floor(self.pill_w / 5)
+    -- the low label is on ink, or under the knob at the first of edge-to-edge stops
+    self.low_text = caption(self.low, (self.clear_ends or self.position > 1) and Palette.paper or Palette.ink, max_width)
+    self.high_text = caption(self.high, Palette.ink, max_width)
+    self.knob_text = self.label and caption(self.label, Palette.ink, max_width)
+    self.knob_w = math.max(self.pill_h, self.knob_text and self.knob_text:getSize().w + 2 * Screen:scaleBySize(6) or 0)
+    self.inset = math.floor(self.knob_w / 2)
+    if self.clear_ends then
+        local ends = self.end_pad + math.max(self.low_text:getSize().w, self.high_text:getSize().w) + Screen:scaleBySize(6)
+        self.inset = self.inset + math.max(self.pill_h, ends)
+    end
+    -- the caption's center is 35dp above the row's
+    self.caption_text = self.caption and caption(self.caption, Palette.ink, self.width)
+    self.row_y = self.caption_text and Screen:scaleBySize(35) - math.floor(Track.height / 2)
+        + math.ceil(self.caption_text:getSize().h / 2) or 0
+    self.dimen = Geom:new{ w = self.width, h = self.row_y + Track.height }
     self.can_step = { [-1] = self.position > 1, [1] = self.position < self.count }
     local icon_size = Screen:scaleBySize(22)
     self.icons = {}
@@ -214,7 +227,15 @@ function Track:init()
             icon = icon, width = icon_size, height = icon_size, alpha = true, dim = not self.can_step[direction] or nil,
         }
     end
-    self.ges_events = tapEvents(self.dimen)
+    local touch = Screen:scaleBySize(44)
+    self.minus_rect = Geom:new{ w = touch, h = Track.height }
+    self.plus_rect = Geom:new{ w = touch, h = Track.height }
+    self.track_rect = Geom:new{ w = self.width - 2 * touch, h = Track.height }
+    self.ges_events = {
+        TapMinus = { GestureRange:new{ ges = "tap", range = self.minus_rect } },
+        TapPlus = { GestureRange:new{ ges = "tap", range = self.plus_rect } },
+        TapTrack = { GestureRange:new{ ges = "tap", range = self.track_rect } },
+    }
 end
 
 --- The x of a position (a stop, or between two), from the row's left edge.
@@ -225,7 +246,11 @@ end
 
 function Track:paintTo(bb, x, y)
     self.dimen.x, self.dimen.y = x, y
-    local mid = y + math.floor(self.dimen.h / 2)
+    local row_y = y + self.row_y
+    self.minus_rect.x, self.minus_rect.y = x, row_y
+    self.track_rect.x, self.track_rect.y = x + self.minus_rect.w, row_y
+    self.plus_rect.x, self.plus_rect.y = x + self.width - self.plus_rect.w, row_y
+    local mid = row_y + math.floor(Track.height / 2)
     local bw = Size.border.default
     local anti_alias = G_reader_settings:nilOrTrue("anti_alias_ui")
     local function disc(dx, w, h, fill, outline)
@@ -236,9 +261,9 @@ function Track:paintTo(bb, x, y)
             bb:paintBorder(dx, dy, w, h, bw, outline, r, anti_alias)
         end
     end
-    local function centered(widget, cx)
+    local function centered(widget, cx, cy)
         local size = widget:getSize()
-        widget:paintTo(bb, cx - math.floor(size.w / 2), mid - math.floor(size.h / 2))
+        widget:paintTo(bb, cx - math.floor(size.w / 2), (cy or mid) - math.floor(size.h / 2))
     end
     -- the − and + buttons
     local d = self.button_d
@@ -252,27 +277,40 @@ function Track:paintTo(bb, x, y)
     local position = math.max(1, math.min(self.count, self.position))
     local kx = x + self:stopX(position)
     disc(px, self.pill_w, h, Palette.mark)
-    disc(px, kx - px, h, Palette.ink) -- its round right end goes under the knob
-    for i = 1, math.ceil(position) - 1 do
-        bb:paintRect(x + self:stopX(i), py, bw, h, Palette.paper)
+    if self.clear_ends or position > 1 then
+        disc(px, math.max(h, kx - px), h, Palette.ink) -- its round right end goes under the knob
+    end
+    if self.ticks then
+        for i = 1, math.ceil(position) - 1 do
+            bb:paintRect(x + self:stopX(i), py, bw, h, Palette.paper)
+        end
     end
     local low, high = self.low_text:getSize(), self.high_text:getSize()
     self.low_text:paintTo(bb, px + self.end_pad, mid - math.floor(low.h / 2))
     self.high_text:paintTo(bb, px + self.pill_w - self.end_pad - high.w, mid - math.floor(high.h / 2))
     disc(kx - math.floor(self.knob_w / 2), self.knob_w, h, Palette.paper, Palette.ink)
-    centered(self.knob_text, kx)
+    if self.knob_text then
+        centered(self.knob_text, kx)
+    end
+    if self.caption_text then
+        local w = self.caption_text:getSize().w
+        local cx = math.max(x + math.floor(w / 2), math.min(kx, x + self.width - math.ceil(w / 2)))
+        centered(self.caption_text, cx, mid - Screen:scaleBySize(35))
+    end
 end
 
-function Track:onTapSelect(_, ges)
-    local tx = ges.pos.x - self.dimen.x
-    local button_w = Screen:scaleBySize(44)
-    local direction = tx < button_w and -1 or tx >= self.width - button_w and 1
-    if direction then
-        if self.can_step[direction] and self.on_step then
-            self.on_step(direction)
-        end
-        return true
+function Track:step(direction)
+    if self.can_step[direction] and self.on_step then
+        self.on_step(direction)
     end
+    return true
+end
+
+function Track:onTapMinus() return self:step(-1) end
+function Track:onTapPlus() return self:step(1) end
+
+function Track:onTapTrack(_, ges)
+    local tx = ges.pos.x - self.dimen.x
     local best, best_d
     for i = 1, self.count do
         local dist = math.abs(tx - self:stopX(i))
@@ -286,11 +324,11 @@ end
 
 -- The labels and icons are painted by hand, not children: free them on rebuild and on close.
 function Track:free()
-    self.low_text:free()
-    self.high_text:free()
-    self.knob_text:free()
-    self.icons[-1]:free()
-    self.icons[1]:free()
+    for __, widget in ipairs{ self.low_text, self.high_text, self.icons[-1], self.icons[1] } do
+        widget:free()
+    end
+    if self.knob_text then self.knob_text:free() end
+    if self.caption_text then self.caption_text:free() end
 end
 
 Track.onCloseWidget = Track.free
