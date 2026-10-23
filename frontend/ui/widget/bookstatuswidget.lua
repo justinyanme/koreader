@@ -196,7 +196,7 @@ end
 
 function BookStatusWidget:onChangeBookStatus(option_name, option_value)
     BookList.setBookInfoCacheProperty(self.ui.document.file, "status", option_name[option_value])
-    self.summary.status = option_name[option_value]
+    BookList.setSummaryStatus(self.summary, option_name[option_value])
     self.summary.modified = os.date("%Y-%m-%d", os.time())
     self.updated = true
     return true

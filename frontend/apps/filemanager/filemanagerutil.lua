@@ -132,7 +132,7 @@ function filemanagerutil.genStatusButtonsRow(doc_settings_or_file, caller_callba
             text = BookList.getBookStatusString(to_status, false, true) .. (status == to_status and "  ✓" or ""),
             enabled = status ~= to_status,
             callback = function()
-                summary.status = to_status
+                BookList.setSummaryStatus(summary, to_status)
                 filemanagerutil.saveSummary(doc_settings_or_file, summary)
                 BookList.setBookInfoCacheProperty(file, "status", to_status)
                 caller_callback()
@@ -159,7 +159,7 @@ function filemanagerutil.genMultipleStatusButtonsRow(files, caller_callback, but
                         for file in pairs(files) do
                             local doc_settings = BookList.getDocSettings(file)
                             local summary = doc_settings:readSetting("summary") or {}
-                            summary.status = to_status
+                            BookList.setSummaryStatus(summary, to_status)
                             filemanagerutil.saveSummary(doc_settings, summary)
                             BookList.setBookInfoCacheProperty(file, "status", to_status)
                         end

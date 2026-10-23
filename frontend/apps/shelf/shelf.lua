@@ -288,7 +288,7 @@ end
 function Shelf.setStatus(file, status)
     local doc_settings = DocSettings:open(file)
     local summary = doc_settings:readSetting("summary") or {}
-    summary.status = status
+    BookList.setSummaryStatus(summary, status)
     filemanagerutil.saveSummary(doc_settings, summary)
     local saved = DocSettings:open(file):readSetting("summary")
     if not (saved and saved.status == status) then
