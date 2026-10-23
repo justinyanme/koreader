@@ -57,29 +57,39 @@ describe("ReaderToolbar module", function()
         tap(widget.dimen.x + math.floor(widget.dimen.w / 2), widget.dimen.y + math.floor(widget.dimen.h / 2))
     end
 
-    -- A quick swipe, as GestureDetector reports it: pans while the finger moves, then the swipe from where it started.
-    local function swipe(x0, y0, x1, y1)
-        local dx, dy = x1 - x0, y1 - y0
-        local direction
+    local function direction(dx, dy)
         if math.abs(dx) > math.abs(dy) then
-            direction = dx > 0 and "east" or "west"
-        else
-            direction = dy > 0 and "south" or "north"
+            return dx > 0 and "east" or "west"
         end
+        return dy > 0 and "south" or "north"
+    end
+
+    -- A finger that went down at (x0, y0) and is now at (x, y), as GestureDetector reports it while it moves;
+    -- with `end_swipe`, it lifts there and the swipe is reported from where it started.
+    local function moveEvent(x0, y0, x, y, at, end_swipe)
+        local dx, dy = x - x0, y - y0
         local start = Geom:new{ x = x0, y = y0, w = 0, h = 0 }
+        local here = Geom:new{ x = x, y = y, w = 0, h = 0 }
         local distance = math.floor(math.sqrt(dx * dx + dy * dy))
-        for _, f in ipairs{ 0.25, 0.5 } do
+        if end_swipe then
             UIManager:sendEvent(Event:new("Gesture", {
-                ges = "pan", direction = direction, distance = math.floor(distance * f),
-                relative = { x = math.floor(dx * f), y = math.floor(dy * f) },
-                start_pos = start, pos = Geom:new{ x = x0 + math.floor(dx * f), y = y0 + math.floor(dy * f), w = 0, h = 0 },
-                time = time.now(),
+                ges = "swipe", direction = direction(dx, dy), distance = distance,
+                pos = start, end_pos = here, time = at,
+            }))
+        else
+            UIManager:sendEvent(Event:new("Gesture", {
+                ges = "pan", direction = direction(dx, dy), distance = distance, relative = { x = dx, y = dy },
+                start_pos = start, pos = here, time = at,
             }))
         end
-        UIManager:sendEvent(Event:new("Gesture", {
-            ges = "swipe", direction = direction, distance = distance,
-            pos = start, end_pos = Geom:new{ x = x1, y = y1, w = 0, h = 0 }, time = time.now(),
-        }))
+    end
+
+    -- A quick swipe: pans while the finger moves, then the swipe.
+    local function swipe(x0, y0, x1, y1)
+        for _, f in ipairs{ 0.25, 0.5 } do
+            moveEvent(x0, y0, x0 + math.floor((x1 - x0) * f), y0 + math.floor((y1 - y0) * f), time.now())
+        end
+        moveEvent(x0, y0, x1, y1, time.now(), true)
     end
 
     -- Whether anything is drawn on the screen in that rect.
@@ -323,10 +333,19 @@ describe("ReaderToolbar module", function()
                 UIManager:forceRePaint()
                 assert.is_nil(ui.menu.bars)
                 assert.are.equal(ui, topWidget())
-                swipe(sw / 2, sh - 5, sw / 2, sh * 0.7)
+                -- from the bottom edge: the pans that leave the edge scroll, as on a device, once scrolling's
+                -- activation delay has passed; the swipe then shows the bars and scrolls back
+                local pos = ui.rolling.current_pos
+                local x, y0, t0 = sw / 2, sh - 5, time.now()
+                moveEvent(x, y0, x, sh * 0.85, t0) -- on the edge: the toolbar takes it, waiting for the swipe
+                moveEvent(x, y0, x, sh * 0.6, t0 + time.s(0.2)) -- off the edge: scrolling starts...
+                moveEvent(x, y0, x, sh * 0.4, t0 + time.s(0.8)) -- ...once its delay has passed
+                assert.are_not.equal(pos, ui.rolling.current_pos)
+                moveEvent(x, y0, x, sh * 0.3, t0 + time.s(0.9), true)
                 UIManager:forceRePaint()
                 assert.are.equal(ui.menu.bars, topWidget())
                 assert.is_nil(ui.config.config_dialog)
+                assert.are.equal(pos, ui.rolling.current_pos)
             end)
             ui.menu:hideToolbar()
             ui:handleEvent(Event:new("SetViewMode", "page"))
@@ -889,6 +908,52 @@ describe("ReaderToolbar module", function()
             assert.are_not.equal(ui, reloaded)
             assert.is_false(hintShown(reloaded))
             closeReader(reloaded)
+        end)
+
+        it("should not cover the text near the bottom when the footer is hidden", function()
+            -- with the footer's height reclaimed, hiding it lets the text run down to the bottom margin
+            local footer_settings = G_reader_settings:readSetting("footer")
+            footer_settings.reclaim_height = true
+            local ui = openReader(sample_epub)
+            local rect
+            -- The darkest pixel where the hint shows: its pencil gray over its paper, or the book's ink without it.
+            local function darkest()
+                UIManager:forceRePaint()
+                local v = 0xFF
+                for y = rect.y, rect.y + rect.h - 1 do
+                    for x = rect.x, rect.x + rect.w - 1 do
+                        v = math.min(v, Screen.bb:getPixel(x, y):getColor8().a)
+                    end
+                end
+                return v
+            end
+            local ok, err = pcall(function()
+                ui.rolling:onGotoPage(10)
+                assert.is_true(hintShown(ui))
+                rect = ui.view.view_modules.toolbar_hint.dimen:copy()
+                assert.is_true(darkest() >= 0x40) -- the hint, gray on paper
+                -- the reader hides the footer: the text now reaches the hint's line, and shows there
+                ui:handleEvent(Event:new("ToggleFooterMode"))
+                assert.is_false(ui.view.footer_visible)
+                assert.is_true(darkest() < 0x20)
+                -- and the hint doesn't come back with the footer
+                ui:handleEvent(Event:new("ToggleFooterMode"))
+                assert.is_true(ui.view.footer_visible)
+                assert.is_false(hintShown(ui))
+                ui:handleEvent(Event:new("ToggleFooterMode"))
+            end)
+            closeReader(ui)
+            assert(ok, err)
+            -- a book opened with the footer hidden gets no hint over its last line
+            ui = openReader(sample_epub, true)
+            ok, err = pcall(function()
+                assert.is_false(ui.view.footer_visible)
+                assert.is_true(darkest() < 0x20)
+            end)
+            ui:handleEvent(Event:new("ToggleFooterMode")) -- the footer back on, as the other tests expect
+            closeReader(ui)
+            footer_settings.reclaim_height = false
+            assert(ok, err)
         end)
 
         it("should not show when Activate menu leaves swipes out, which then don't show the bars", function()

@@ -283,9 +283,18 @@ end
 
 function ReaderToolbar:onReaderReady()
     self:initGesListener()
-    -- each time a book opens, but not when a setting reloads it, nor when swipes don't show the toolbar
-    if Device:isTouchDevice() and not self.ui.reloading and self.activation_menu ~= "tap" then
+    -- each time a book opens, but not when a setting reloads it, nor when swipes don't show the toolbar,
+    -- nor without a footer line to sit on (the text may then reach the bottom)
+    if Device:isTouchDevice() and not self.ui.reloading and self.activation_menu ~= "tap"
+            and self.view.footer_visible then
         self:showHint()
+    end
+end
+
+-- Hiding the footer takes the open-book hint with it, for good.
+function ReaderToolbar:onReaderFooterVisibilityChange()
+    if self.hint and not self.view.footer_visible then
+        self:dismissHint(true)
     end
 end
 

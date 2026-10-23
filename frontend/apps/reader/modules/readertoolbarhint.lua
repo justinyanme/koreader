@@ -4,9 +4,10 @@ in pencil gray, centered on the footer line, as in WeChat Read (15-supplement/10
 
 ReaderToolbar shows it each time a book opens, as a view module: it is part of the page and stays through
 page turns, until the toolbar first shows or TIMEOUT seconds have passed, and never comes back for that
-book until it opens again. It lays a paper ground under itself, over whatever a customized footer centers
-on its line, and the footer paints it again when it repaints alone (its refreshes on resume, frontlight or
-charging changes).
+book until it opens again. It needs the footer: it isn't shown, nor painted, while the footer is
+hidden. It lays a paper ground under itself, over whatever a customized footer centers on its line, and
+the footer paints it again when it repaints alone (its refreshes on resume, frontlight or charging
+changes).
 
 @usage
     ui.view:registerViewModule("toolbar_hint", ReaderToolbarHint:new{})
@@ -45,7 +46,7 @@ function ReaderToolbarHint:init()
 end
 
 function ReaderToolbarHint:paintTo(bb, x, y)
-    if not self.shown then return end
+    if not (self.shown and self.view.footer_visible) then return end -- without the footer, the text may be there
     local size = self.content:getSize()
     local pad = Screen:scaleBySize(8)
     -- the footer's text sits in the middle of a band of its height, above its bottom padding; the reference's
