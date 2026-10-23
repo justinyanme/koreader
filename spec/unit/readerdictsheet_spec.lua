@@ -73,6 +73,10 @@ describe("ReaderDictSheet module", function()
         DocSettings:open(sample_pdf):purge()
     end)
 
+    -- Phrase lookup starts from a temporary selection with the explicit legacy Ask action.
+    before_each(function() G_reader_settings:saveSetting("default_highlight_action", "ask") end)
+    after_each(function() G_reader_settings:delSetting("default_highlight_action") end)
+
     local function topWidget()
         return UIManager._window_stack[#UIManager._window_stack].widget
     end

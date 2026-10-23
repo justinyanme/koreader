@@ -410,21 +410,29 @@ describe("ReaderTocPage module", function()
             UIManager:forceRePaint()
         end)
 
-        it("should open the bookmarks of the old drawer from 书签, which no longer has a contents tab", function()
+        it("should open the notes page from 书签, on the bookmarks when there are any", function()
             local page = openPage(ui)
             local refreshes = refreshesOf(function() tapWidget(page.bookmarks_button) end)
-            local drawer = ui.menu.drawer
+            local notes = ui.menu.drawer
             assert.is_false(UIManager:isWidgetShown(page))
-            assert.are.equal(drawer, topWidget())
-            assert.are.equal("bookmarks", drawer.tab)
+            assert.are.equal(notes, topWidget())
+            assert.is_true(notes.covers_fullscreen)
+            assert.is_true(hasText(notes, C_("Notes page", "Notes")))
+            assert.is_nil(notes.filter) -- no bookmarks yet: nothing to filter
+            assert.is_truthy(notes.empty_card)
             for _, r in ipairs(refreshes) do
                 assert.are.equal("ui", r.mode)
             end
-            assert.is_true(hasText(drawer.panel, _("No bookmarks yet")))
-            assert.is_nil(find(drawer.panel, function(w) return w.text == C_("Reader toolbar", "Contents") end))
-            drawer:onClose()
-            UIManager:forceRePaint()
+            back(notes)
             assert.is_nil(ui.menu.drawer)
+
+            ui:handleEvent(Event:new("ToggleBookmark"))
+            page = openPage(ui)
+            tapWidget(page.bookmarks_button)
+            notes = ui.menu.drawer
+            assert.are.equal("bookmarks", notes.filter)
+            assert.are.equal(1, #notes.cards)
+            back(notes)
         end)
 
         it("should keep the chevron column only for contents with groups", function()

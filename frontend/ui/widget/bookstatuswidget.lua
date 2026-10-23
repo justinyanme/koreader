@@ -46,6 +46,7 @@ local BookStatusWidget = FocusManager:extend{
     summary = nil, -- hash
     note_frame = nil, -- FrameContainer wrapping the review text
     note_widget = nil, -- TextBoxWidget showing the review text
+    close_refresh = "flashpartial", -- refresh on closing; the e-ink redesign's 书籍详情 asks for "ui"
 }
 
 function BookStatusWidget:init()
@@ -554,7 +555,7 @@ function BookStatusWidget:onClose()
         self.ui.doc_settings:flush()
     end
     -- NOTE: Flash on close to avoid ghosting, since we show an image.
-    UIManager:close(self, "flashpartial")
+    UIManager:close(self, self.close_refresh)
     if self.close_callback then
         self.close_callback()
     end
