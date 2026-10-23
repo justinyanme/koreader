@@ -288,8 +288,10 @@ end
 function ReaderToolbar:onReaderReady()
     self:initGesListener()
     self.view.dogear:free()
-    self.view.dogear = require("apps/reader/modules/readertoolbardogear"):new{ view = self.view }
+    self.view.dogear = require("apps/reader/modules/readertoolbardogear"):new{ view = self.view, ui = self.ui }
     self.view[1] = self.view.dogear
+    self.view.dogear:onReadSettings(self.ui.doc_settings)
+    self.view.dogear:onReaderReady()
     -- each time a book opens, but not when a setting reloads it, nor when swipes don't show the toolbar,
     -- nor without a footer line to sit on (the text may then reach the bottom)
     if Device:isTouchDevice() and not self.ui.reloading and self.activation_menu ~= "tap"
@@ -490,10 +492,7 @@ function ReaderToolbar:buildTopBar()
         }
     end
     self.bookmark_button = iconButton(self:bookmarkIcon(), function() self:toggleBookmark() end)
-    -- A book's eligibility is stable while it is open; do not scan the home folder on every page turn.
-    if self.shelf_eligible == nil then
-        self.shelf_eligible = Shelf.isInHome(self.ui.document.file)
-    end
+    self.shelf_eligible = Shelf.isInHome(self.ui.document.file)
     local on_shelf = self.shelf_eligible and not Shelf.isRemoved(self.ui.document.file)
     self.shelf_button = iconButton(on_shelf and "eink/shelf-on" or "eink/shelf", function() self:toggleShelf() end)
     return FrameContainer:new{
@@ -712,10 +711,11 @@ function ReaderToolbar:bookmarkIcon()
 end
 
 function ReaderToolbar:toggleBookmark()
-    self.ui.bookmark:onToggleBookmark() -- also refreshes the dog-ear
-    self:updateBookmarkButton()
+    local was_bookmarked = self.ui.bookmark:isPageBookmarked()
     self:hideToolbar()
-    UIManager:show(Toast:new{ text = self.ui.bookmark:isPageBookmarked() and _("Bookmark added") or _("Bookmark removed") })
+    self.ui.bookmark:onToggleBookmark() -- also refreshes the dog-ear
+    self.ui.bookmark:setDogearVisibility(self.ui.bookmark:getCurrentPageNumber())
+    UIManager:show(Toast:new{ text = was_bookmarked and _("Bookmark removed") or _("Bookmark added") })
 end
 
 function ReaderToolbar:toggleShelf()
@@ -727,7 +727,10 @@ function ReaderToolbar:toggleShelf()
         })
     elseif Shelf.isRemoved(file) then
         Shelf.restore(file)
-        self:hideToolbar()
+        local rect = self.shelf_button.dimen:copy()
+        self.shelf_button:setIcon("eink/shelf-on")
+        self.shelf_button.dimen.x, self.shelf_button.dimen.y = rect.x, rect.y
+        UIManager:setDirty(self.bars, "fast", rect)
         UIManager:show(Toast:new{ text = _("Added to shelf") })
     else
         self:hideToolbar()

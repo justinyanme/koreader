@@ -192,17 +192,38 @@ function Shelf.view(books, filter, sort, query)
     return shown, counts
 end
 
---- Returns the hidden books ({ [file] = time removed }), pruning missing files.
+-- Remember the filesystem boundary while the book is accessible. An unmounted card may
+-- leave its mountpoint directory behind, so existence alone does not establish availability.
+local function fileVolume(file)
+    local device = lfs.attributes(file, "dev")
+    if not device then return end
+    local dir = file:match("^(.*)/")
+    while dir ~= "" and dir ~= "/" do
+        local parent = dir:match("^(.*)/")
+        if parent == "" then parent = "/" end
+        if lfs.attributes(parent, "dev") ~= device then break end
+        dir = parent
+    end
+    return { volume = dir == "" and "/" or dir, device = device }
+end
+
+--- Hidden books, keyed by real path. Legacy timestamps acquire volume information when accessible.
 function Shelf.removed()
     local removed = G_reader_settings:readSetting("shelf_removed")
     if not removed then return {} end
     local kept, changed = {}, false
-    for file, removed_at in pairs(removed) do
+    for file, record in pairs(removed) do
         local path = ffiUtil.realpath(file)
         if path then
-            kept[path] = math.max(kept[path] or 0, removed_at)
+            local entry = type(record) == "table" and record or fileVolume(path) or record
+            kept[path] = entry
+            changed = changed or path ~= file or entry ~= record
+        elseif type(record) == "table" and record.volume and record.device
+                and lfs.attributes(record.volume, "dev") == record.device then
+            changed = true -- the volume is present, so the missing file really is gone
+        else
+            kept[file] = record -- unknown legacy volume or unavailable storage: retain the user's choice
         end
-        changed = changed or path ~= file
     end
     if changed then
         G_reader_settings:saveSetting("shelf_removed", kept)
@@ -215,14 +236,29 @@ function Shelf.isRemoved(file)
     return Shelf.removed()[ffiUtil.realpath(file) or file] ~= nil
 end
 
---- Whether the file belongs to the home scan, including its exclusions, before hiding books.
+--- Whether a supported book's real path is inside home, excluding hidden and app folders.
 function Shelf.isInHome(file)
-    -- Reuse the scan's rules (including symlink and app-folder exclusions).
-    local path = ffiUtil.realpath(file) or file
-    for _, found in ipairs(Shelf.scan(Shelf.homeDir())) do
-        if (ffiUtil.realpath(found.file) or found.file) == path then return true end
+    if image_suffixes[util.getFileNameSuffix(file):lower()] or not DocumentRegistry:hasProvider(file) then
+        return false
     end
-    return false
+    local path = ffiUtil.realpath(file)
+    local home = ffiUtil.realpath(Shelf.homeDir())
+    if not path or not home then return false end
+    local prefix = home:gsub("/$", "") .. "/"
+    if path:sub(1, #prefix) ~= prefix then return false end
+    local relative = path:sub(#prefix + 1)
+    for part in relative:gmatch("[^/]+") do
+        if part:sub(1, 1) == "." then return false end
+    end
+    if relative:match("%.sdr/") then return false end
+    for _, dir in ipairs{ DataStorage:getDataDir(), lfs.currentdir() } do
+        local excluded = ffiUtil.realpath(dir)
+        if excluded and excluded ~= home and excluded:sub(1, #prefix) == prefix
+                and path:sub(1, #excluded + 1) == excluded .. "/" then
+            return false
+        end
+    end
+    return true
 end
 
 --- Restores a hidden book, without changing its file or book status.
@@ -238,7 +274,8 @@ end
 function Shelf.remove(files)
     local removed = Shelf.removed()
     for _, file in ipairs(files) do
-        removed[ffiUtil.realpath(file) or file] = os.time()
+        local path = ffiUtil.realpath(file) or file
+        removed[path] = fileVolume(path) or os.time()
     end
     G_reader_settings:saveSetting("shelf_removed", removed)
     G_reader_settings:flush()
