@@ -399,7 +399,7 @@ describe("ReaderTocPage module", function()
             end
         end)
 
-        it("should hand the search field over to the full-text search input", function()
+        it("should hand the search field over to the original search input without the search page", function()
             local page = openPage(ui)
             tapWidget(page.search_field)
             assert.is_false(UIManager:isWidgetShown(page))
