@@ -228,6 +228,33 @@ function ReaderToolbar.applyFooterDefaults()
     end
 end
 
+--- The settings' 阅读时显示时间 toggle (WeChat Read's 13-reading-preferences/02-settings.png): the footer's time
+-- item, the same setting as its checkbox in the status bar menu. With `ui` a reader, its footer follows at once;
+-- elsewhere, the next book's footer does.
+function ReaderToolbar.genTimeMenuItem(ui)
+    local ReaderFooter = require("apps/reader/modules/readerfooter")
+    local footer = ui and ui.view and ui.view.footer
+    local function settings()
+        if footer then return footer.settings end
+        return G_reader_settings:readSetting("footer") or ReaderFooter.default_settings
+    end
+    return {
+        text = _("Show time while reading"),
+        checked_func = function()
+            return settings().time == true
+        end,
+        callback = function()
+            if footer then
+                footer:toggleItem("time")
+            else
+                local saved = G_reader_settings:readSetting("footer") or require("util").tableDeepCopy(ReaderFooter.default_settings)
+                saved.time = not saved.time
+                G_reader_settings:saveSetting("footer", saved)
+            end
+        end,
+    }
+end
+
 function ReaderToolbar:initGesListener()
     if not Device:isTouchDevice() then return end
     -- The tap and the swipe use the original menu's zone ids, which links, highlights and the gestures
@@ -307,13 +334,54 @@ function ReaderToolbar:onReaderFooterVisibilityChange()
     end
 end
 
+-- Whether page turn taps go to the sides of the page (the default thirds, or custom zones side by side) rather than
+-- to its top and bottom.
+local function turnsPagesOnSides()
+    local zones = G_reader_settings:readSetting("page_turns_tap_zones", "default")
+    return zones == "default" or zones == "left_right"
+end
+
 --[[--
 Where taps go on the page, as screen-ratio rects: { x, y, w, h, kind } with kind
 "backward", "forward", "toolbar" or "none" (page turn taps disabled), first match wins.
 Default: thirds. Custom page turn zones keep their size; the toolbar gets the band
-left between them, or the screen's center when they leave none.
+left between them, or the screen's center when they leave none. With 点击左侧翻到下一页
+(see genLeftTapForwardMenuItem) and zones on the sides, the backward side goes forward
+too, so that both sides turn to the next page.
 ]]
 function ReaderToolbar:getTapLayout()
+    local layout = self:getPageTurnTapLayout()
+    if G_reader_settings:isTrue("page_turns_left_tap_forward") and turnsPagesOnSides() then
+        -- not a swap: the side going forward keeps going forward (the right, or the left with inverted page turns)
+        for _, z in ipairs(layout) do
+            if z[5] == "backward" then
+                z[5] = "forward"
+            end
+        end
+    end
+    return layout
+end
+
+--- The settings' 点击左侧翻到下一页 toggle (WeChat Read's 13-reading-preferences/02-settings.png): taps on both sides
+-- of the page turn to the next page. Dimmed while taps don't turn pages, or turn them with zones stacked top and
+-- bottom, which have no sides.
+function ReaderToolbar.genLeftTapForwardMenuItem()
+    return {
+        text = _("Tap left side for next page"),
+        enabled_func = function()
+            return G_reader_settings:nilOrFalse("page_turns_disable_tap") and turnsPagesOnSides()
+        end,
+        checked_func = function()
+            return G_reader_settings:isTrue("page_turns_left_tap_forward")
+        end,
+        callback = function()
+            G_reader_settings:flipNilOrFalse("page_turns_left_tap_forward")
+        end,
+    }
+end
+
+--- The tap layout of the page turn settings alone, before 点击左侧翻到下一页.
+function ReaderToolbar:getPageTurnTapLayout()
     local third = 1/3
     if G_reader_settings:isTrue("page_turns_disable_tap") then
         return { { 0, 0, third, 1, "none" }, { third, 0, third, 1, "toolbar" }, { 2 * third, 0, third, 1, "none" } }
