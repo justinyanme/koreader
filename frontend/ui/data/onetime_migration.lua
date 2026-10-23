@@ -12,7 +12,7 @@ local util = require("util")
 local _ = require("gettext")
 
 -- Date at which the last migration snippet was added
-local CURRENT_MIGRATION_DATE = 20260804
+local CURRENT_MIGRATION_DATE = 20261024
 
 -- Retrieve the date of the previous migration, if any
 local last_migration_date = G_reader_settings:readSetting("last_migration_date", 0)
@@ -20,6 +20,12 @@ local last_migration_date = G_reader_settings:readSetting("last_migration_date",
 -- If there's nothing new to migrate since the last time, we're done.
 if last_migration_date == CURRENT_MIGRATION_DATE then
     return
+end
+
+-- Initialize before older migrations load widgets and scan the font directories (#110).
+if last_migration_date < 20261024 and require("device"):isAndroid()
+    and not G_reader_settings:has("system_fonts") then
+    G_reader_settings:saveSetting("system_fonts", true)
 end
 
 -- Keep this in perfect chronological order, with a reference to the PR that implemented the change.

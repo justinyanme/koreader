@@ -172,7 +172,7 @@ describe("Shelf home (FileManager replacement)", function()
         require("apps/shelf/shelffilemanager") -- registers the replacement
         ShelfView = require("apps/shelf/shelfview")
         saved_settings = {}
-        for __, key in ipairs{ "home_dir", "lastdir", "shelf_removed", "shelf_sort", "shelf_filter", "back_in_filemanager" } do
+        for __, key in ipairs{ "home_dir", "lastdir", "shelf_removed", "shelf_sort", "shelf_filter", "shelf_search_history", "back_in_filemanager" } do
             saved_settings[key] = G_reader_settings:readSetting(key)
             G_reader_settings:delSetting(key)
         end
@@ -187,6 +187,223 @@ describe("Shelf home (FileManager replacement)", function()
             G_reader_settings:saveSetting(key, value)
         end
         Replacements.filemanager = nil
+    end)
+
+    describe("shelf state from the reader toolbar", function()
+        local home, old_menu
+        before_each(function()
+            old_menu = Replacements.reader_menu
+            Replacements.reader_menu = require("apps/reader/modules/readertoolbar")
+            G_reader_settings:delSetting("shelf_removed")
+            G_reader_settings:delSetting("shelf_filter")
+            home = makeHome("reader_shelf_home", {
+                { name = "book.epub", source = "juliet.epub", status = "complete" },
+                { name = "book.pdf", source = "sample.pdf", status = "abandoned" },
+            })
+        end)
+        after_each(function()
+            closeToasts()
+            if ReaderUI.instance then ReaderUI.instance:onClose() end
+            if FileManager.instance then FileManager.instance:onClose() end
+            Replacements.reader_menu = old_menu
+            G_reader_settings:delSetting("shelf_removed")
+            ffiUtil.purgeDir(home)
+        end)
+
+        local function toolbar()
+            gesture("tap", Screen:getWidth() / 2, Screen:getHeight() / 2)
+            return ReaderUI.instance.menu.bars
+        end
+
+        for __, name in ipairs{ "book.epub", "book.pdf" } do
+            it("confirms hiding, keeps it hidden on exit and reopen, and explicitly restores " .. name, function()
+                local path = home .. "/" .. name
+                local original = util.readFromFile(path)
+                ReaderUI:doShowReader(path)
+                UIManager:forceRePaint()
+                local page = ReaderUI.instance:getCurrentPage()
+                tap(find(toolbar(), "eink/shelf-on").dimen)
+                local layer = topWidget()
+                assert.are.equal(require("ui/widget/confirmlayer"), getmetatable(layer).__index)
+                assert.is_truthy(layer.text:find(ReaderUI.instance.doc_props.display_title, 1, true))
+                tap(find(layer, _("Cancel")).dimen)
+                assert.are.equal(page, ReaderUI.instance:getCurrentPage())
+                assert.is_nil(G_reader_settings:readSetting("shelf_removed"))
+                tap(find(toolbar(), "eink/shelf-on").dimen)
+                press("Back")
+                assert.are.equal(ReaderUI.instance, topWidget())
+                tap(find(toolbar(), "eink/shelf-on").dimen)
+                tap(find(topWidget(), C_("Shelf", "Remove")).dimen)
+                assert.are.equal(_("Removed from shelf"), toastText())
+                assert.are.equal(page, ReaderUI.instance:getCurrentPage())
+                assert.are.equal(original, util.readFromFile(path))
+                local bars = toolbar()
+                assert.is_truthy(find(bars, "eink/shelf"))
+                tap(find(bars.bottom, "eink/arrow.left").dimen)
+                local fm = FileManager.instance
+                assert.are.equal(1, #fm.shelf_view.books)
+                assert.are_not.equal(path, fm.shelf_view.books[1].file)
+                fm:onClose()
+                -- Reopen the file through the real ReaderUI entry, without adding it back implicitly.
+                ReaderUI:doShowReader(path)
+                UIManager:forceRePaint()
+                bars = toolbar()
+                assert.is_truthy(find(bars, "eink/shelf"))
+                local icon_rect = find(bars, "eink/shelf").dimen:copy()
+                local refreshes, restore = spyRefreshes()
+                tap(icon_rect)
+                restore()
+                assert.are.equal(_("Added to shelf"), toastText())
+                assert.are.equal(bars, ReaderUI.instance.menu.bars)
+                local icon_refreshed = false
+                for __, r in ipairs(refreshes) do
+                    if r.requested then
+                        assert.are.equal("fast", r.type)
+                        if icon_rect:contains(r.region) then
+                            icon_refreshed = true
+                        else
+                            assert.is_true(topWidget().dimen:contains(r.region)) -- the toast only
+                        end
+                    end
+                end
+                assert.is_true(icon_refreshed)
+                assert.is_truthy(find(bars, "eink/shelf-on"))
+                tap(find(bars.bottom, "eink/arrow.left").dimen)
+                fm = FileManager.instance
+                assert.are.equal(2, #fm.shelf_view.books)
+                assert.are.equal(1, fm.shelf_view.counts.complete)
+                assert.are.equal(1, fm.shelf_view.counts.abandoned)
+                assert.are.equal(original, util.readFromFile(path))
+            end)
+        end
+
+        it("shares removal and restoration between a shelf symlink and its target opened from history", function()
+            local target = home .. "/book.epub"
+            local link = home .. "/linked.epub"
+            assert(lfs.link(target, link, true))
+            -- A persisted removal from the old shelf may use the link's path.
+            G_reader_settings:saveSetting("shelf_removed", { [link] = os.time() })
+            ReaderUI:doShowReader(target)
+            UIManager:forceRePaint()
+            local bars = toolbar()
+            assert.is_truthy(find(bars, "eink/shelf"))
+            tap(find(bars, "eink/shelf").dimen)
+            assert.is_truthy(find(bars, "eink/shelf-on"))
+            tap(find(bars.bottom, "eink/arrow.left").dimen)
+            assert.are.equal(3, #FileManager.instance.shelf_view.books)
+            FileManager.instance:onClose()
+            ReaderUI:doShowReader(target)
+            UIManager:forceRePaint()
+            tap(find(toolbar(), "eink/shelf-on").dimen)
+            tap(find(topWidget(), C_("Shelf", "Remove")).dimen)
+            bars = toolbar()
+            tap(find(bars.bottom, "eink/arrow.left").dimen)
+            assert.are.equal(1, #FileManager.instance.shelf_view.books)
+            assert.are.equal("link", lfs.symlinkattributes(link, "mode"))
+            assert.are.equal("file", lfs.attributes(target, "mode"))
+        end)
+
+        it("immediately hides every alias when a shelf cover is removed in selection mode", function()
+            local target, link = home .. "/book.epub", home .. "/linked.epub"
+            assert(lfs.link(target, link, true))
+            local fm, view = openShelf(home)
+            assert.are.equal(3, #view.books)
+            local cell = find(view, "linked")
+            assert.is_truthy(cell)
+            gesture("hold", cell.dimen.x + view.grid.cover_w / 2, cell.dimen.y + view.grid.cover_h / 2)
+            tap(find(fm, "eink/shelf.remove").dimen)
+            tap(find(topWidget(), C_("Shelf", "Remove")).dimen)
+            assert.are.equal(1, #view.books)
+            assert.are.equal(home .. "/book.pdf", view.books[1].file)
+            assert.are.equal("file", lfs.attributes(target, "mode"))
+            assert.are.equal("link", lfs.symlinkattributes(link, "mode"))
+            closeToasts()
+            fm:onClose()
+            fm, view = openShelf(home)
+            assert.are.equal(1, #view.books)
+        end)
+
+        it("retains hidden books on an unavailable volume and only prunes after it returns", function()
+            local attributes = lfs.attributes
+            local online = true
+            local device = attributes(home, "dev")
+            lfs.attributes = function(path, key)
+                if key == "dev" and online and (path == home or path:sub(1, #home + 1) == home .. "/") then
+                    return device + 1 -- filesystem boundary, independent of the Docker mount layout
+                end
+                return attributes(path, key)
+            end
+            local ok, err = pcall(function()
+                ReaderUI:doShowReader(home .. "/book.epub")
+                UIManager:forceRePaint()
+                tap(find(toolbar(), "eink/shelf-on").dimen)
+                tap(find(topWidget(), C_("Shelf", "Remove")).dimen)
+                closeToasts()
+                ReaderUI.instance:onClose()
+                assert(os.rename(home, home .. ".offline"))
+                assert(lfs.mkdir(home)) -- an unmounted volume can leave its mountpoint behind
+                online = false
+                local fm = openShelf(home)
+                assert.is_truthy(G_reader_settings:readSetting("shelf_removed")[home .. "/book.epub"])
+                fm:onClose()
+                assert(lfs.rmdir(home))
+                assert(os.rename(home .. ".offline", home))
+                online = true
+                fm = openShelf(home)
+                assert.are.equal(1, #fm.shelf_view.books)
+                fm:onClose()
+                assert(os.remove(home .. "/book.epub"))
+                fm = openShelf(home)
+                assert.is_nil(G_reader_settings:readSetting("shelf_removed")[home .. "/book.epub"])
+                fm:onClose()
+            end)
+            lfs.attributes = attributes
+            if lfs.attributes(home .. ".offline") then
+                ffiUtil.purgeDir(home)
+                os.rename(home .. ".offline", home)
+            end
+            assert(ok, err)
+        end)
+
+        it("checks reader membership without enumerating the home tree", function()
+            ReaderUI:doShowReader(home .. "/book.epub")
+            UIManager:forceRePaint()
+            local dir = lfs.dir
+            lfs.dir = function() error("toolbar must not enumerate directories") end
+            local ok, err = pcall(function()
+                assert.is_truthy(find(toolbar(), "eink/shelf-on"))
+            end)
+            lfs.dir = dir
+            assert(ok, err)
+        end)
+
+        it("does not show a picture opened from the home folder as a shelf book", function()
+            local path = home .. "/photo.png"
+            Screen:shot(path)
+            table.insert(cleanup_files, path)
+            ReaderUI:doShowReader(path)
+            UIManager:forceRePaint()
+            local bars = toolbar()
+            assert.is_nil(find(bars, "eink/shelf-on"))
+            assert.is_truthy(find(bars, "eink/shelf"))
+            tap(find(bars.bottom, "eink/arrow.left").dimen)
+            assert.are.equal(2, #FileManager.instance.shelf_view.books)
+        end)
+
+        it("explains the home-folder rule for an outside book without pretending it was added", function()
+            local path = ffiUtil.realpath("spec/front/unit/data/juliet.epub")
+            ReaderUI:doShowReader(path)
+            UIManager:forceRePaint()
+            tap(find(toolbar(), "eink/shelf").dimen)
+            local message = topWidget()
+            assert.are.equal(T(_("To add this book to the shelf, place its file in the home folder:\n%1"), home), message.text)
+            UIManager:close(message)
+            local bars = toolbar()
+            assert.is_nil(find(bars, "eink/shelf-on"))
+            tap(find(bars.bottom, "eink/arrow.left").dimen)
+            assert.are.equal(2, #FileManager.instance.shelf_view.books)
+            assert.are.equal("file", lfs.attributes(path, "mode"))
+        end)
     end)
 
     describe("with a small library", function()
@@ -393,11 +610,6 @@ describe("Shelf home (FileManager replacement)", function()
             fm:onClose()
             fm, view = openShelf(home)
             assert.are.same({ "a.epub", "b.epub", "c.pdf", "d.txt", "e.pdf" }, names(view.shown))
-            -- searching still narrows the shelf in place until the search page replaces it
-            view:setQuery("B")
-            assert.are.same({ "b.epub" }, names(view.shown))
-            assert.are.equal(1, view.counts.all)
-            view:setQuery(nil)
             -- and back to 最近阅读
             fm:handleEvent(Event:new("ShowEinkSettings", "shelf_sort"))
             UIManager:forceRePaint()
@@ -425,7 +637,7 @@ describe("Shelf home (FileManager replacement)", function()
             fm:onClose()
         end)
 
-        it("removes a book from the shelf but keeps the file, until the book is opened again", function()
+        it("keeps a removed book hidden even when its reading history changes", function()
             local fm, view = openShelf(home)
             view:getBookActions(bookNamed(view, "d.txt"))[5].callback() -- Remove from shelf, once confirmed
             UIManager:forceRePaint()
@@ -438,20 +650,20 @@ describe("Shelf home (FileManager replacement)", function()
             assert.is_nil(bookNamed(view, "d.txt"))
             assert.are.equal(1, view.counts.new)
             fm:onClose()
-            -- opened again (from 文件 or anywhere): back on the shelf
+            -- Reading and closing update history, but must not undo an explicit removal.
             ReadHistory:addItem(bookPath("d.txt"), os.time() + 10)
             fm, view = openShelf(home)
-            assert.is_truthy(bookNamed(view, "d.txt"))
-            assert.is_nil(G_reader_settings:readSetting("shelf_removed")[bookPath("d.txt")])
+            assert.is_nil(bookNamed(view, "d.txt"))
+            assert.is_truthy(G_reader_settings:readSetting("shelf_removed")[bookPath("d.txt")])
             fm:onClose()
             ReadHistory:removeItemByPath(bookPath("d.txt"))
             lfs.touch(bookPath("d.txt"), 800, 800)
         end)
 
-        it("prunes removed entries whose file is gone", function()
+        it("retains legacy missing entries whose volume is unknown", function()
             G_reader_settings:saveSetting("shelf_removed", { [home .. "/gone.epub"] = os.time() })
             local fm = openShelf(home)
-            assert.is_nil(G_reader_settings:readSetting("shelf_removed")[home .. "/gone.epub"])
+            assert.is_truthy(G_reader_settings:readSetting("shelf_removed")[home .. "/gone.epub"])
             fm:onClose()
         end)
 
@@ -601,6 +813,186 @@ describe("Shelf home (FileManager replacement)", function()
             reader:onHome()
             FileManager.instance:onClose()
         end)
+        describe("home search", function()
+            local function searchFor(page, query)
+                tap(page.search_field.dimen)
+                assert.is_true(page.input.focused)
+                UIManager:sendEvent(Event:new("TextInput", query))
+                assert.are.equal(query, page.input:getText())
+                press("Press")
+                fastforward_ui_events()
+                UIManager:forceRePaint()
+                if util.trim(query) ~= "" then assert.are.equal(util.trim(query), page.query) end
+            end
+
+            local saved_scale, saved_keyboard
+            before_each(function()
+                G_reader_settings:delSetting("shelf_search_history")
+                saved_scale = require("ui/font"):getUIScale()
+                saved_keyboard = G_reader_settings:readSetting("virtual_keyboard_enabled")
+            end)
+
+            after_each(function()
+                require("ui/font"):setUIScale(saved_scale)
+                G_reader_settings:saveSetting("virtual_keyboard_enabled", saved_keyboard)
+            end)
+
+            it("searches the whole shelf on its own page and returns to the original filter", function()
+                local fm, view = openShelf(home)
+                tap(view.title_button.dimen)
+                local menu = topWidget()
+                tap(find(menu, C_("Status of group of books", "Finished")).dimen)
+                local before = names(view.shown)
+                local refreshes, restore = spyRefreshes()
+                tap(find(view, _("Search books")).dimen)
+                local page = topWidget()
+                assert.is_true(page.covers_fullscreen)
+                assert.is_truthy(find(page, _("Search history")))
+                assert.is_truthy(find(page, _("No search history")))
+                searchFor(page, "  A  ")
+                assert.is_truthy((find(page, T(_("Search in shelf: %1"), "A"))))
+                assert.are.equal("a", page.shown_rows[1][1][1][3][1].text)
+                assert.are.equal("A", page.input:getText())
+                assert.are.equal(1, #page.shown_rows)
+                assert.are.same(before, names(view.shown))
+                assert.are.same({ "A" }, G_reader_settings:readSetting("shelf_search_history"))
+                assert.are.same({ "A" }, require("luasettings"):open(G_reader_settings.file):readSetting("shelf_search_history"))
+                tap(page.bar.back.dimen)
+                restore()
+                assert.are.equal(fm, topWidget())
+                assert.are.same(before, names(view.shown))
+                assert.are.equal("complete", view.filter)
+                for __, r in ipairs(refreshes) do
+                    if r.requested then assert.are_not.equal("full", r.type) end
+                end
+                fm:onClose()
+            end)
+
+            it("keeps only the 20 newest queries on disk when another query is submitted", function()
+                local history = {}
+                for i = 1, 20 do history[i] = "query " .. i end
+                G_reader_settings:saveSetting("shelf_search_history", history)
+                local fm, view = openShelf(home)
+                tap(find(view, _("Search books")).dimen)
+                local page = topWidget()
+                searchFor(page, "new query")
+                local saved = require("luasettings"):open(G_reader_settings.file):readSetting("shelf_search_history")
+                assert.are.equal(20, #saved)
+                assert.are.equal("new query", saved[1])
+                assert.are.equal("query 19", saved[20])
+                tap(page.bar.back.dimen)
+                fm:onClose()
+            end)
+
+            it("keeps history across reopening, reuses it, and clears only after confirmation", function()
+                local fm, view = openShelf(home)
+                tap(find(view, _("Search books")).dimen)
+                local page = topWidget()
+                searchFor(page, "b")
+                tap(page.bar.back.dimen)
+                fm:onClose()
+                fm, view = openShelf(home)
+                tap(find(view, _("Search books")).dimen)
+                page = topWidget()
+                tap(find(page, "b").dimen)
+                assert.is_truthy(find(page, T(_("Search in shelf: %1"), "b")))
+                assert.are.same({ "b" }, G_reader_settings:readSetting("shelf_search_history"))
+                tap(page.clear_button.dimen)
+                tap(page.bar.back.dimen)
+                tap(find(view, _("Search books")).dimen)
+                page = topWidget()
+                tap(page.clear_history.dimen)
+                local confirm = topWidget()
+                assert.are.equal(_("Clear shelf search history?"), confirm.text)
+                press("Back")
+                assert.are.same({ "b" }, G_reader_settings:readSetting("shelf_search_history"))
+                assert.is_truthy(find(page, "b"))
+                tap(page.clear_history.dimen)
+                confirm = topWidget()
+                tap(find(confirm, C_("Search history", "Clear")).dimen)
+                assert.is_nil(G_reader_settings:readSetting("shelf_search_history"))
+                assert.is_truthy(find(page, _("No search history")))
+                assert.is_true(lfs.attributes(bookPath("sub/b.epub"), "mode") == "file")
+                tap(page.bar.back.dimen)
+                fm:onClose()
+            end)
+
+            it("paginates history above the keyboard at large UI size and cancels unsubmitted text", function()
+                local history = {}
+                for i = 1, 30 do history[i] = "历史 " .. i end
+                G_reader_settings:saveSetting("shelf_search_history", history)
+                G_reader_settings:saveSetting("virtual_keyboard_enabled", true)
+                local Font = require("ui/font")
+                Font:setUIScale(1.35)
+                local fm, view = openShelf(home)
+                tap(find(view, _("Search books")).dimen)
+                local page = topWidget()
+                assert.is_truthy(find(page, "历史 1"))
+                assert.is_true(page.page_count > 1)
+                tap(page.bar.capsule.next_rect)
+                assert.are.equal(2, page.page)
+                press("LPgBack")
+                assert.are.equal(1, page.page)
+                tap(page.search_field.dimen)
+                assert.is_true(page.input:isKeyboardVisible())
+                assert.is_true(page.bar.dimen.y + page.bar.dimen.h <= page.input:getKeyboardDimen().y)
+                UIManager:sendEvent(Event:new("TextInput", "未提交"))
+                UIManager:forceRePaint()
+                tap(page.bar.back.dimen)
+                assert.are.equal(fm, topWidget())
+                assert.are.same(history, G_reader_settings:readSetting("shelf_search_history"))
+                assert.is_false(page.input:isKeyboardVisible())
+                fm:onClose()
+            end)
+
+            it("opens a PDF result and never searches books hidden from the shelf", function()
+                local __, view = openShelf(home)
+                G_reader_settings:saveSetting("shelf_removed", { [bookPath("d.txt")] = true })
+                tap(find(view, _("Search books")).dimen)
+                local page = topWidget()
+                searchFor(page, "d")
+                assert.is_truthy(find(page, _("No matching content found")))
+                tap(page.clear_button.dimen)
+                searchFor(page, "c")
+                tap(page.shown_rows[1].dimen)
+                fastforward_ui_events()
+                assert.are.equal(bookPath("sub/c.pdf"), ReaderUI.instance.document.file)
+                ReaderUI.instance:onHome()
+                FileManager.instance:onClose()
+                G_reader_settings:delSetting("shelf_removed")
+            end)
+
+            it("keeps empty and missing queries usable, and opens an EPUB result at its saved position", function()
+                local __, view = openShelf(home)
+                tap(find(view, _("Search books")).dimen)
+                local page = topWidget()
+                searchFor(page, "   ")
+                assert.is_nil(G_reader_settings:readSetting("shelf_search_history"))
+                tap(page.clear_button.dimen)
+                searchFor(page, "not.a.book%[")
+                assert.is_truthy(find(page, _("No matching content found")))
+                assert.is_false(page.bar.capsule.next_enabled)
+                tap(page.clear_button.dimen)
+                searchFor(page, "a")
+                tap(page.shown_rows[1].dimen)
+                fastforward_ui_events()
+                local reader = ReaderUI.instance
+                assert.are.equal(bookPath("a.epub"), reader.document.file)
+                reader:handleEvent(Event:new("GotoPage", 3))
+                reader:onHome()
+                view = FileManager.instance.shelf_view
+                UIManager:forceRePaint()
+                tap(find(view, _("Search books")).dimen)
+                page = topWidget()
+                tap(find(page, "a").dimen)
+                tap(page.shown_rows[1].dimen)
+                fastforward_ui_events()
+                assert.are.equal(3, ReaderUI.instance:getCurrentPage())
+                ReaderUI.instance:onHome()
+                FileManager.instance:onClose()
+            end)
+        end)
+
     end)
 
     describe("in selection mode", function()
@@ -906,37 +1298,21 @@ describe("Shelf home (FileManager replacement)", function()
             assert(ok, err)
         end)
 
-        it("takes no taps on the search field or its clear button while selecting", function()
+        it("disables the search entry while selecting and restores it on cancel", function()
             local fm, view = openShelf(home)
-            local function inputDialog()
-                for __, window in ipairs(UIManager._window_stack) do
-                    if window.widget.getInputText then return window.widget end
-                end
-            end
-            -- a search narrows the shelf in place
-            tap(find(view, _("Search books")).dimen)
-            local dialog = inputDialog()
-            assert.is_truthy(dialog)
-            dialog:setInputText("s0")
-            tap(find(dialog, _("Search")).dimen)
-            assert.is_nil(inputDialog())
-            assert.are.equal(9, #view.shown)
             tap(find(view, _("Select")).dimen)
-            -- the field and its clear button do nothing while selecting
             local refreshes, restore = spyRefreshes()
-            tap(find(view, "s0").dimen)
-            local clear = find(view, "close")
-            tap(clear.dimen)
+            tap(find(view, _("Search books")).dimen)
             restore()
-            assert.is_nil(inputDialog())
             assert.are.equal(fm, topWidget())
-            assert.are.equal(9, #view.shown)
+            assert.are.equal(count, #view.shown)
             assert.is_truthy(find(view, _("Select books")))
             assert.are.same({}, refreshes)
-            -- out of selection mode, they work again
             tap(find(view, _("Cancel")).dimen)
-            tap(clear.dimen)
-            assert.are.equal(count, #view.shown)
+            tap(find(view, _("Search books")).dimen)
+            local page = topWidget()
+            assert.is_truthy(find(page, _("Search history")))
+            tap(page.bar.back.dimen)
             fm:onClose()
         end)
 
@@ -1279,7 +1655,7 @@ describe("Shelf home (FileManager replacement)", function()
 
             addRow("book01.txt", { title = "Meta Title", ignore_meta = "Y" })
             addRow("book02.txt", { has_cover = "Y", ignore_cover = "Y" })
-            addRow("book03.txt", { title = "Call to Arms", authors = "Lu Xun", has_cover = "Y" })
+            addRow("book03.txt", { title = "Call to Arms", authors = "Lu Xun, 鲁迅", has_cover = "Y" })
         end)
 
         teardown(function()
@@ -1305,8 +1681,85 @@ describe("Shelf home (FileManager replacement)", function()
             for __, book in ipairs(view.books) do by_file[book.file:gsub(".*/", "")] = book end
             assert.are.equal("book01", by_file["book01.txt"].title) -- ignore_meta
             assert.is_false(by_file["book02.txt"].has_cover) -- ignore_cover
-            view:setQuery("lu xun")
-            assert.are.same({ "book03.txt" }, names(view.shown))
+            tap(find(view, _("Search books")).dimen)
+            local search = topWidget()
+            tap(search.search_field.dimen)
+            UIManager:sendEvent(Event:new("TextInput", "lu xun"))
+            press("Press")
+            fastforward_ui_events()
+            UIManager:forceRePaint()
+            assert.is_truthy(find(search, "Call to Arms"))
+            assert.is_truthy(find(search, "Lu Xun, 鲁迅"))
+            assert.are.equal(1, #search.shown_rows)
+            tap(search.clear_button.dimen)
+            UIManager:sendEvent(Event:new("TextInput", "鲁迅"))
+            press("Press")
+            fastforward_ui_events()
+            UIManager:forceRePaint()
+            assert.is_truthy(find(search, "Call to Arms"))
+            assert.are.equal(1, #search.shown_rows)
+            tap(search.bar.back.dimen)
+            fm:onClose()
+        end)
+
+        it("matches title case and partial authors without changing the underlying shelf", function()
+            local fm, view = openShelf(home)
+            view:stop()
+            local books, shown, counts = view.books, view.shown, util.tableDeepCopy(view.counts)
+            local jobs = #stub.jobs
+            tap(find(view, _("Search books")).dimen)
+            local search = topWidget()
+            for i, query in ipairs{ "CALL", "cAlL", "xUn" } do
+                if i > 1 then tap(search.clear_button.dimen) else tap(search.search_field.dimen) end
+                UIManager:sendEvent(Event:new("TextInput", query))
+                press("Press")
+                fastforward_ui_events()
+                UIManager:forceRePaint()
+                assert.are.equal(1, #search.shown_rows)
+                assert.are.equal("Call to Arms", search.shown_rows[1][1][1][3][1].text)
+                assert.are.equal(books, view.books)
+                assert.are.equal(shown, view.shown)
+                assert.are.same(counts, view.counts)
+                assert.is_nil(view.extracting)
+                assert.are.equal(jobs, #stub.jobs)
+            end
+            tap(search.bar.back.dimen)
+            assert.is_truthy(find(view, "Call to Arms"))
+            fm:onClose()
+        end)
+
+        it("paginates every search result once and returns to the shelf's original page", function()
+            local fm, view = openShelf(home)
+            view:stop()
+            tap(capsule(fm).next_rect)
+            local shelf_page = view.page
+            tap(find(view, _("Search books")).dimen)
+            local page = topWidget()
+            tap(page.search_field.dimen)
+            UIManager:sendEvent(Event:new("TextInput", "book"))
+            press("Press")
+            fastforward_ui_events()
+            UIManager:forceRePaint()
+            local seen, count = {}, 0
+            while true do
+                for __, row in ipairs(page.shown_rows) do
+                    local label = row[1][1][3][1].text
+                    assert.is_nil(seen[label])
+                    assert.is_truthy(find(page, label))
+                    seen[label], count = true, count + 1
+                    assert.is_true(row.dimen.y + row.dimen.h <= page.bar.dimen.y)
+                end
+                if not page.bar.capsule.next_enabled then break end
+                swipe("north")
+            end
+            assert.are.equal(44, count) -- Call to Arms matches neither title nor author
+            local last = page.page
+            press("LPgFwd")
+            assert.are.equal(last, page.page)
+            tap(page.bar.capsule.prev_rect)
+            assert.are.equal(last - 1, page.page)
+            tap(page.bar.back.dimen)
+            assert.are.equal(shelf_page, view.page)
             fm:onClose()
         end)
 
