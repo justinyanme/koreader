@@ -1,47 +1,60 @@
 --[[--
-Dictionary sheet of the e-ink redesign (see DESIGN.md, Bottom sheet, and the
-prototype's dictSheet()).
+Lookup cards of the e-ink redesign (查询, see DESIGN.md, Other pages: Lookup), after WeChat Read's
+07-selection-and-lookup/02-translation-result.png, 18-chinese-lookup-result.png and
+22-english-translation-result.png.
 
-Replaces ReaderDictionary in the reader on touch devices (apps/replacements
-reader_dictionary slot); the file manager keeps the upstream popup.
-- Lookups are exact over a list of candidates: a Chinese selection that is not
-  a word is matched by the longest word it contains (up to 20 characters), and
-  an English word also tries simple lemmas (plural, past tense, -ing). The
-  fuzzy search setting is not used here, so a miss shows the empty state.
-- The sheet shows the headword with its phonetic, the senses by part of speech
-  (paginated), 词典 / 维基百科 source chips, add to vocabulary builder, search the
-  book, and a "Full entry" link to the upstream popup with the same results.
+Replaces ReaderDictionary in the reader on touch devices (apps/replacements reader_dictionary slot); the file
+manager keeps the upstream popup. A lookup opens a full-screen page (ui/widget/fullscreenpage) with a stack of
+cards, from the top:
+- the headword with its phonetic, or the selection; 查询中… under it while the lookup runs;
+- one card per dictionary that has the word, named on the card, with its senses by part of speech. A card that
+  does not fit continues on the next page under its name, and so does a sense taller than a page, from its next
+  line. A tap opens that dictionary's full entry in the upstream popup (rich HTML entries, plugin buttons), over
+  the page: closing it comes back to the cards, updated (a word added to the vocabulary builder there);
+- when no dictionary has it: a card saying why (not in the local dictionaries, none installed or enabled, the
+  selection too long), with 在线翻译 for a word that is not CJK;
+- the online translation (Translator), named as needing the network: for a selection of several words that is
+  not CJK and that no dictionary has, or after 在线翻译. It has its own loading, offline (打开 Wi-Fi) and failure
+  (重试) states;
+- 维基百科, loaded on a tap, then its intro, which a tap opens as the full article in the upstream popup, as above;
+- 加入生词本 (vocabulary builder), removing a word after the confirm layer, and 在本书中搜索.
+Lookups are exact over a list of candidates: a Chinese selection that is not a word is matched by the longest
+word it contains (up to 20 characters), and an English word also tries simple lemmas (plural, past tense, -ing).
+The fuzzy search setting is not used here. Chinese text is never sent to the translator.
 
-Refreshes: showing and closing refresh the sheet's rect ("ui"). Switching the
-source, the page or the vocabulary state refreshes the sheet ("ui"); the sheet
-keeps its height across these unless the new content is taller.
+The back arrow (or the Back key) returns to the page of the selection, which stays a moment, as upstream.
+
+Refreshes: the page opens and closes whole, and turning a page or a card changing state repaints the content and
+the bar (all "ui"). A local lookup slower than upstream's delay shows the page with 查询中… (a tap cancels it, as
+upstream); a faster one opens the page with its results. Nothing here asks for "full" (the upstream popup flashes
+as it closes, as it always has).
 ]]
 
-local BottomSheet = require("ui/widget/bottomsheet")
-local ConfirmBox = require("ui/widget/confirmbox")
+local CenterContainer = require("ui/widget/container/centercontainer")
+local ConfirmLayer = require("ui/widget/confirmlayer")
 local Device = require("device")
 local DictQuickLookup = require("ui/widget/dictquicklookup")
 local EinkControls = require("ui/widget/einkcontrols")
 local Event = require("ui/event")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
+local FullscreenPage = require("ui/widget/fullscreenpage")
 local Geom = require("ui/geometry")
-local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
-local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
-local LineWidget = require("ui/widget/linewidget")
 local NetworkMgr = require("ui/network/manager")
-local Notification = require("ui/widget/notification")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local Palette = require("ui/palette")
 local ReaderDictionary = require("apps/reader/modules/readerdictionary")
 local RightContainer = require("ui/widget/container/rightcontainer")
 local Size = require("ui/size")
+local Tappable = require("apps/shelf/shelfwidgets").Tappable
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
+local Toast = require("ui/widget/toast")
+local Translator = require("ui/translator")
 local TrapWidget = require("ui/widget/trapwidget")
 local Trapper = require("ui/trapper")
 local UIManager = require("ui/uimanager")
@@ -58,7 +71,7 @@ local _ = require("gettext")
 local C_ = _.pgettext
 
 local MAX_MATCH_CHARS = 20 -- longer selections are only looked up as a whole
-local MAX_SENSES = 40 -- longer entries are cut; "Full entry" has the rest
+local MAX_SENSES = 100 -- longer entries are cut, saying so; the upstream popup has the rest
 
 -- Part-of-speech abbreviations that start a sense line ("n. 旅居者").
 local POS = {}
@@ -68,6 +81,25 @@ for _, p in ipairs{ "n", "v", "vt", "vi", "adj", "a", "adv", "ad", "prep", "pron
 end
 
 local function dp(n) return Screen:scaleBySize(n) end
+
+-- Card page geometry, after the Leaf5 reference (DESIGN.md, Layout and Cards).
+local COLUMN_W = dp(416) -- the centered column of cards
+local GUTTER = dp(22)
+local TOP = dp(62) -- above the first card
+local BOTTOM = dp(13) -- between the last card and the bottom bar
+local CARD_GAP = dp(13)
+local CARD_PAD = dp(20)
+local CARD_RADIUS = dp(14)
+-- the reference's outline is 2px on the Leaf5, where 1dp (Size.border.default) rounds up to 3px
+local CARD_BORDER = dp(0.94)
+local HEADING_GAP = dp(12) -- between a card's heading and its body
+local UNIT_GAP = dp(8) -- between senses
+local POS_GAP = dp(8) -- between a part of speech and its sense
+local LEADING = 0.9 -- extra line spacing of card text (of its size): loose, as in the reference
+local HEADWORD_LEADING = 0.3 -- but not of the headword, whose card is as tall as one line in the reference
+local INTRO_LINES = 4 -- the Wikipedia intro is clamped, as the reference's encyclopedia card
+local HEADWORD_LINES = 3 -- a long selection is clamped on the headword card
+local CHEV = dp(16)
 
 --- Stem forms to try for a suffix-stripped English stem, most likely first.
 local function stemForms(s)
@@ -98,6 +130,12 @@ local function lemmas(w)
     s = w:match("^(%a%a+)ing$")
     if s then add(stemForms(s)) end
     return out
+end
+
+--- Whether a selection is several words of text that is not CJK (such as an English phrase or sentence):
+-- the translator takes it when no dictionary has it.
+local function isPhrase(word)
+    return not util.hasCJKChar(word) and word:find("%S%s+%S") ~= nil
 end
 
 local ReaderDictSheet = ReaderDictionary:extend{}
@@ -147,6 +185,11 @@ function ReaderDictSheet.candidates(word, extra)
     return list
 end
 
+--- Whether a lookup happens from inside the upstream popup (its links, its search, enlarging): it stays there.
+function ReaderDictSheet:inUpstreamPopup()
+    return #DictQuickLookup.window_list > 0 or DictQuickLookup.temp_large_window_request ~= nil
+end
+
 -- Exact lookups of all candidates in one sdcv run; the first candidate with results wins.
 function ReaderDictSheet:startSdcv(word, dict_names)
     local extra
@@ -154,12 +197,14 @@ function ReaderDictSheet:startSdcv(word, dict_names)
         extra = self.ui.languagesupport:extraDictionaryFormCandidates(word)
     end
     local words = self.candidates(word, extra)
-    local cancelled, results = self:rawSdcv(words, dict_names, false, self.lookup_progress_msg or false)
+    -- the waiting page is the lookup's trap widget: a tap on it cancels the lookup
+    local trap = self.lookup_page or self.lookup_progress_msg or false
+    local cancelled, results = self:rawSdcv(words, dict_names, false, trap)
     if results == nil then
         return { {
-            dict = "",
+            dict = _("No dictionaries installed"),
             word = word,
-            definition = _([[No dictionaries installed. Please search for "Dictionary support" in the KOReader Wiki to get more information about installing new dictionaries.]]),
+            definition = _([[To install dictionaries, search for "Dictionary support" in the KOReader wiki.]]),
             no_result = true,
         } }
     end
@@ -175,35 +220,66 @@ function ReaderDictSheet:startSdcv(word, dict_names)
     }
 end
 
--- No input dialog offering fuzzy search: the sheet shows its empty state.
+-- No input dialog offering fuzzy search: the page shows why nothing was found.
 function ReaderDictSheet:showNoResultsDialog()
     return false
 end
 
-local DictSheet
+local LookupPage
+
+--- A slow lookup shows the page with 查询中… after the delay. The page is shown at once, invisible, so that it
+-- catches taps from the start, as upstream's lookup message does: a tap cancels the lookup.
+function ReaderDictSheet:showLookupInfo(word, show_delay)
+    if self:inUpstreamPopup() then
+        return ReaderDictionary.showLookupInfo(self, word, show_delay)
+    end
+    self.lookup_page = LookupPage:new{ dictionary = self, highlight = self.highlight, word = word }
+    self.lookup_page:showAfter(show_delay)
+end
+
+function ReaderDictSheet:stardictLookup(word, dict_names, ...)
+    if dict_names and #dict_names == 0 and self:getNumberOfDictionaries() == 0 then
+        -- none enabled because none is installed: upstream would say they are all disabled, sdcv says none is there
+        dict_names = nil
+    end
+    ReaderDictionary.stardictLookup(self, word, dict_names, ...)
+    -- a lookup cancelled right away ends without results (upstream has cleared the selection): drop its page
+    if self.lookup_page then
+        self.lookup_page:dispose()
+        self.lookup_page = nil
+    end
+end
 
 function ReaderDictSheet:showDict(word, results, boxes, link, dict_close_callback)
-    if #DictQuickLookup.window_list > 0 or DictQuickLookup.temp_large_window_request then
-        -- a lookup from inside the upstream popup (links, its search, enlarging) stays there
+    if self:inUpstreamPopup() then
         return ReaderDictionary.showDict(self, word, results, boxes, link, dict_close_callback)
     end
     self:dismissLookupInfo()
-    if not (results and results[1]) then return end
-    self.dict_window = DictSheet:new{
-        dictionary = self,
-        highlight = self.highlight,
-        word = word,
-        results = results,
-        boxes = boxes,
-        link = link,
-        dict_close_callback = dict_close_callback,
-    }
-    UIManager:show(self.dict_window, "ui", self.dict_window:getRefreshRegion())
-    if not results.lookup_cancelled and self._lookup_start_time
-            and (time.now() - self._lookup_start_time) > self.quick_dismiss_before_delay then
+    local page = self.lookup_page
+    self.lookup_page = nil
+    if not (results and results[1]) or results.lookup_cancelled then
+        -- cancelled by a tap on the waiting page (its back arrow): back to the book, as from the page
+        if page then page:dispose() end
+        if results and results.lookup_cancelled then
+            LookupPage.leave(self.highlight, false, dict_close_callback)
+        end
+        return
+    end
+    local args = { word = word, results = results, boxes = boxes, link = link, dict_close_callback = dict_close_callback }
+    if page and not page.closed then
+        page:setResults(args)
+    else
+        args.dictionary, args.highlight = self, self.highlight
+        page = LookupPage:new(args)
+        page:build() -- LookupPage:init() doesn't: the waiting page has nothing to show before its delay
+        UIManager:show(page, "ui", page.dimen)
+    end
+    self.dict_window = page
+    if self._lookup_start_time and (time.now() - self._lookup_start_time) > self.quick_dismiss_before_delay then
         -- as upstream: taps made while waiting must not close the late result
         Device.input:inhibitInputUntil(true)
     end
+    page:requestTranslation()
 end
 
 --- Phonetic and senses of sdcv results. A leading /…/ or […] is the phonetic
@@ -244,216 +320,598 @@ function ReaderDictSheet.parseEntry(results)
     return phonetic, senses
 end
 
---- A tappable row: its callback runs on tap.
-local Tappable = InputContainer:extend{
-    callback = nil,
-}
-
-function Tappable:init()
-    self.dimen = Geom:new{ w = self[1]:getSize().w, h = self[1]:getSize().h }
-    self.ges_events = { TapSelect = { GestureRange:new{ ges = "tap", range = self.dimen } } }
+--- The results of each dictionary, in their order, with their phonetic and senses.
+local function byDictionary(results)
+    local groups = {}
+    for _, r in ipairs(results) do
+        local last = groups[#groups]
+        if last and last.dict == r.dict then
+            table.insert(last.results, r)
+        else
+            table.insert(groups, { dict = r.dict, results = { r } })
+        end
+    end
+    for _, g in ipairs(groups) do
+        g.phonetic, g.senses = ReaderDictSheet.parseEntry(g.results)
+        g.cut = #g.senses > MAX_SENSES
+        for i = #g.senses, MAX_SENSES + 1, -1 do
+            g.senses[i] = nil
+        end
+    end
+    return groups
 end
 
-function Tappable:onTapSelect()
-    self.callback()
-    return true
+--- The main translation in a translate server response, or nil.
+local function translationOf(result)
+    if type(result) ~= "table" or type(result[1]) ~= "table" then return end
+    local parts = {}
+    for _, r in ipairs(result[1]) do
+        if type(r) == "table" and type(r[1]) == "string" then
+            table.insert(parts, r[1])
+        end
+    end
+    local text = util.trim(table.concat(parts))
+    return text ~= "" and text or nil
 end
 
-DictSheet = BottomSheet:extend{
+--- Text of a card, clamped to max_lines with an ellipsis if given.
+local function textBox(text, face, width, max_lines, leading)
+    local args = { text = text, face = face, fgcolor = Palette.ink, width = width, line_height = leading or LEADING }
+    local box = TextBoxWidget:new(args)
+    if max_lines and #box.vertical_string_list > max_lines then
+        args.height = max_lines * box:getLineHeight()
+        box:free()
+        args.height_overflow_show_ellipsis = true
+        box = TextBoxWidget:new(args)
+    end
+    return box
+end
+
+local function chevron()
+    return IconWidget:new{ icon = "eink/chev", width = CHEV, height = CHEV, alpha = true }
+end
+
+local function headingFace() return Font:getFace("ui_headline", 18) end
+local function bodyFace() return Font:getFace("ui_body", 16) end
+
+LookupPage = FullscreenPage:extend{
     dictionary = nil, -- ReaderDictSheet
     highlight = nil, -- ReaderHighlight that made the selection, if any
     word = nil, -- the looked up text
-    results = nil, -- sdcv results
+    results = nil, -- sdcv results; nil while the lookup runs
     boxes = nil,
     link = nil,
     dict_close_callback = nil,
-    source = "dict", -- or "wiki"
-    page = 1,
+    translation = nil, -- { loading | offline | failed | text }, once asked for
+    wiki = nil, -- { loading | offline | failed | results }, once asked for
 }
 
-function DictSheet:init()
-    self.title = C_("Dictionary sheet", "Look up")
+function LookupPage:init()
+    FullscreenPage.init(self)
     self.ui = self.dictionary.ui
+    self.column_w = math.min(COLUMN_W, self.dimen.w - 2 * GUTTER)
+    self.inner_w = self.column_w - 2 * (CARD_PAD + CARD_BORDER)
+    if self.results then
+        self:readResults()
+    end
+end
+
+function LookupPage:readResults()
     self.not_found = self.results[1].no_result
-    self.headword = self.not_found and self.word or self.results[1].word
-    if not self.not_found then
-        self.phonetic, self.senses = ReaderDictSheet.parseEntry(self.results)
-        for i = #self.senses, MAX_SENSES + 1, -1 do
-            self.senses[i] = nil
+    if self.not_found then
+        self.headword = self.word
+        self.groups = {}
+        if isPhrase(self.word) then -- no dictionary has the phrase: the translator takes it
+            self:setTranslationState()
+        end
+    else
+        self.headword = self.results[1].word
+        self.groups = byDictionary(self.results)
+    end
+    -- beside the headword: the first phonetic any dictionary has
+    self.phonetic = nil
+    for _, g in ipairs(self.groups) do
+        if g.phonetic then
+            self.phonetic = g.phonetic
+            break
         end
     end
-    self.content = self:buildContent()
-    BottomSheet.init(self)
+    -- the units of each dictionary's card, kept with their heights once measured
+    for __, g in ipairs(self.groups) do -- not _, which is gettext
+        g.units = {}
+        if g.phonetic and g.phonetic ~= self.phonetic then -- another one than beside the headword
+            table.insert(g.units, { text = g.phonetic })
+        end
+        for __, sense in ipairs(g.senses) do table.insert(g.units, sense) end
+        if g.cut then
+            table.insert(g.units, { text = _("Tap the card for the rest of the entry.") })
+        end
+    end
+    self.pages = nil
 end
 
---- Height left for the content when the sheet is as tall as it may get (84% of the screen).
-function DictSheet:maxContentHeight()
-    return math.floor(Screen:getHeight() * 0.84) - Size.border.default - dp(54) - dp(20)
+--- Shows the waiting page, invisible until `delay` has passed.
+function LookupPage:showAfter(delay)
+    self.invisible = true
+    self.covers_fullscreen = false
+    UIManager:show(self) -- no refresh while invisible
+    self._reveal = function() self:reveal() end
+    UIManager:scheduleIn(delay, self._reveal)
 end
 
-local function rule(w)
-    return LineWidget:new{ dimen = Geom:new{ w = w, h = Size.border.default }, background = Palette.rule }
+--- Shows the waiting page after its delay, or sooner with the results: as opening the page.
+function LookupPage:reveal()
+    UIManager:unschedule(self._reveal)
+    self._reveal = nil
+    self.invisible = false
+    self.covers_fullscreen = true
+    self:build()
+    UIManager:setDirty(self, "ui", self.dimen)
 end
 
-local function emptyState(w, title, body)
-    local group = VerticalGroup:new{
-        align = "center",
-        VerticalSpan:new{ width = dp(40) },
-        TextBoxWidget:new{ text = title, face = Font:getFace("ui_title"), fgcolor = Palette.ink, width = w, alignment = "center" },
+--- The lookup is done: shows its results on the waiting page.
+function LookupPage:setResults(args)
+    for k, v in pairs(args) do self[k] = v end
+    self.dismiss_callback = nil -- the trap of the finished lookup
+    self:readResults()
+    if self.invisible then -- the lookup was quicker than the delay
+        self:reveal()
+    else
+        self:update()
+    end
+end
+
+function LookupPage:paintTo(bb, x, y)
+    if self.invisible then return end
+    FullscreenPage.paintTo(self, bb, x, y)
+end
+
+function LookupPage:showsVocabulary()
+    -- not from within the vocabulary builder, as upstream
+    local vocab = self.ui.vocabbuilder
+    return self.results and not self.not_found and vocab and not vocab.widget
+end
+
+--- The cards, in order. A card has a `kind`; one with `units` (senses, paragraphs) can continue on the next page.
+function LookupPage:cards()
+    local cards = { { kind = "headword" } }
+    if not self.results then return cards end
+    local phrase = isPhrase(self.word)
+    for __, g in ipairs(self.groups) do
+        table.insert(cards, { kind = "dict", group = g, title = g.dict, units = g.units })
+    end
+    -- the translation takes a phrase that no dictionary has, unless none is there
+    if self.not_found and (not phrase or self.results[1].dict ~= "") then
+        table.insert(cards, { kind = "empty" })
+    end
+    if self.translation then
+        table.insert(cards, { kind = "translation", title = _("Online translation"), units = self.translation.units })
+    end
+    table.insert(cards, { kind = "wiki" })
+    if self:showsVocabulary() then
+        table.insert(cards, { kind = "vocab" })
+    end
+    if self.highlight then -- as upstream: no search from a lookup not started in the book
+        table.insert(cards, { kind = "search" })
+    end
+    return cards
+end
+
+--- A card: paper, 1dp ink outline, 14dp radius, 20dp padding.
+function LookupPage:cardFrame(content, callback)
+    local card = FrameContainer:new{
+        bordersize = CARD_BORDER,
+        color = Palette.ink,
+        background = Palette.paper,
+        radius = CARD_RADIUS,
+        padding = CARD_PAD,
+        margin = 0,
+        -- as wide as the column, whatever the content
+        LeftContainer:new{ dimen = Geom:new{ w = self.inner_w, h = content:getSize().h }, content },
     }
-    if body and body ~= "" then
-        table.insert(group, VerticalSpan:new{ width = dp(4) })
-        table.insert(group, TextBoxWidget:new{
-            text = body, face = Font:getFace("ui_label_large"), fgcolor = Palette.ink_2, width = w, alignment = "center",
+    if callback then
+        return Tappable:new{ callback = callback, card }
+    end
+    return card
+end
+
+--- A card's heading: its name at the left, then an optional caption and a chevron at the right.
+function LookupPage:heading(title, caption, chev)
+    local right = HorizontalGroup:new{ align = "center" }
+    if caption then
+        table.insert(right, TextWidget:new{
+            text = caption, face = Font:getFace("ui_label"), fgcolor = Palette.ink,
+            max_width = math.floor(self.inner_w / 2),
         })
     end
-    table.insert(group, VerticalSpan:new{ width = dp(40) })
+    if chev then
+        if caption then table.insert(right, HorizontalSpan:new{ width = dp(8) }) end
+        table.insert(right, chevron())
+    end
+    local right_w = right:getSize().w
+    local label = TextWidget:new{
+        text = title, face = headingFace(), fgcolor = Palette.ink,
+        max_width = self.inner_w - right_w - (right_w > 0 and dp(12) or 0),
+    }
+    local h = label:getSize().h
+    return OverlapGroup:new{
+        dimen = Geom:new{ w = self.inner_w, h = h },
+        LeftContainer:new{ dimen = Geom:new{ w = self.inner_w, h = h }, label },
+        RightContainer:new{ dimen = Geom:new{ w = self.inner_w, h = h }, right },
+    }
+end
+
+--- A sense or a paragraph, after its part of speech if any; returns the widget and its text box.
+-- from, count: only these lines of the text (measured), for a unit taller than a page that continues on the next.
+function LookupPage:unitWidget(unit, from, count)
+    local tag = unit.pos and TextWidget:new{ text = unit.pos, face = Font:getFace("ui_title", 16), fgcolor = Palette.ink }
+    local indent = tag and tag:getSize().w + POS_GAP or 0
+    local args = { text = unit.text, face = bodyFace(), fgcolor = Palette.ink, width = self.inner_w - indent, line_height = LEADING }
+    if from then
+        args.virtual_line_num = from
+        args.height = count * unit.line_h
+    end
+    local box = TextBoxWidget:new(args)
+    if not tag then
+        return box, box
+    end
+    if from and from > 1 then -- the rest of a sense: under its text, without the part of speech again
+        tag:free()
+        return HorizontalGroup:new{ align = "top", HorizontalSpan:new{ width = indent }, box }, box
+    end
+    -- the tag sits on the first line of the text
+    local lift = math.max(0, math.floor((box:getLineHeight() - tag:getSize().h) / 2))
+    return HorizontalGroup:new{
+        align = "top",
+        VerticalGroup:new{ VerticalSpan:new{ width = lift }, tag },
+        HorizontalSpan:new{ width = POS_GAP },
+        box,
+    }, box
+end
+
+--- Measures a unit once: its height, its number of lines and their height.
+function LookupPage:measure(unit)
+    if unit.h then return end
+    local widget, box = self:unitWidget(unit)
+    unit.h, unit.lines, unit.line_h = widget:getSize().h, #box.vertical_string_list, box:getLineHeight()
+    widget:free()
+end
+
+--- A state line, its reason and at most one pill, inside a card (DESIGN.md, Loading, empty and error states).
+function LookupPage:stateBlock(title, reason, pill)
+    local group = VerticalGroup:new{ align = "left" }
+    if title then
+        table.insert(group, TextBoxWidget:new{
+            text = title, face = Font:getFace("ui_title"), fgcolor = Palette.ink, width = self.inner_w,
+        })
+    end
+    if reason and reason ~= "" then
+        if #group > 0 then table.insert(group, VerticalSpan:new{ width = dp(4) }) end
+        table.insert(group, TextBoxWidget:new{
+            text = reason, face = Font:getFace("ui_label"), fgcolor = Palette.ink, width = self.inner_w,
+        })
+    end
+    if pill then
+        table.insert(group, VerticalSpan:new{ width = dp(12) })
+        table.insert(group, EinkControls.PillButton:new{ text = pill[1], callback = pill[2] })
+    end
     return group
 end
 
-function DictSheet:senseRow(sense, w, max_h)
-    local gap = dp(10)
-    local text_w = w
-    local row = HorizontalGroup:new{ align = "top" }
-    if sense.pos then
-        local tag = FrameContainer:new{
-            bordersize = Size.border.default,
-            color = Palette.ink,
-            radius = dp(4),
-            padding = 0,
-            padding_left = dp(5),
-            padding_right = dp(5),
-            margin = 0,
-            TextWidget:new{ text = sense.pos, face = Font:getFace("ui_micro"), fgcolor = Palette.ink },
-        }
-        text_w = w - tag:getSize().w - gap
-        table.insert(row, VerticalGroup:new{ VerticalSpan:new{ width = dp(2) }, tag })
-        table.insert(row, HorizontalSpan:new{ width = gap })
-    end
-    local text_args = { text = sense.text, face = Font:getFace("ui_body"), fgcolor = Palette.ink, width = text_w }
-    local text = TextBoxWidget:new(text_args)
-    max_h = max_h and max_h - 2 * gap - Size.border.default
-    if max_h and text:getSize().h > max_h then -- a sense taller than a whole page is clamped
-        text:free()
-        text_args.height = max_h
-        text_args.height_overflow_show_ellipsis = true
-        text = TextBoxWidget:new(text_args)
-    end
-    table.insert(row, text)
-    return VerticalGroup:new{
-        align = "left",
-        VerticalSpan:new{ width = gap },
-        row,
-        VerticalSpan:new{ width = gap },
-        rule(w),
-    }
+function LookupPage:loadingLine()
+    return TextWidget:new{ text = _("Looking up…"), face = bodyFace(), fgcolor = Palette.ink, max_width = self.inner_w }
 end
 
---- Splits the senses into pages that fit `avail`; returns { {first, last}, ... }.
-function DictSheet:paginate(w, avail)
-    local heights, total = {}, 0
-    for i, sense in ipairs(self.senses) do
-        local row = self:senseRow(sense, w)
-        heights[i] = row:getSize().h
-        total = total + heights[i]
-        row:free()
+function LookupPage:headwordCard()
+    local group = VerticalGroup:new{ align = "left" }
+    local phonetic = self.results and self.phonetic
+    local face = Font:getFace("ui_title", 20)
+    if phonetic then
+        local head = TextWidget:new{ text = self.headword, face = face, fgcolor = Palette.ink, max_width = math.floor(self.inner_w * 0.7) }
+        table.insert(group, HorizontalGroup:new{
+            align = "center",
+            head,
+            HorizontalSpan:new{ width = dp(12) },
+            TextWidget:new{
+                text = phonetic, face = Font:getFace("ui_label_large"), fgcolor = Palette.ink,
+                max_width = self.inner_w - head:getSize().w - dp(12),
+            },
+        })
+    else
+        table.insert(group, textBox(self.headword or self.word, face, self.inner_w, HEADWORD_LINES, HEADWORD_LEADING))
     end
-    if total <= avail then
-        return { { 1, #self.senses } }
+    if not self.results then
+        table.insert(group, VerticalSpan:new{ width = dp(8) })
+        table.insert(group, self:loadingLine())
+    elseif not self.not_found and self.headword ~= self.word and util.hasCJKChar(self.word) then
+        local chars = util.splitToChars(self.word)
+        local selected = #chars > 12 and table.concat(chars, "", 1, 12) .. "…" or self.word
+        table.insert(group, VerticalSpan:new{ width = dp(8) })
+        table.insert(group, TextBoxWidget:new{
+            text = T(_("Selected \"%1\", found \"%2\" by longest match"), selected, self.headword),
+            face = Font:getFace("ui_caption"), fgcolor = Palette.ink, width = self.inner_w,
+        })
     end
-    avail = avail - dp(44) -- room for the pager
-    local pages, first, used = {}, 1, 0
-    for i, h in ipairs(heights) do
-        if used + h > avail and i > first then
-            table.insert(pages, { first, i - 1 })
-            first, used = i, 0
+    return self:cardFrame(group)
+end
+
+--- Why nothing was found, with what may help.
+function LookupPage:emptyCard()
+    local r = self.results[1]
+    local title, reason
+    if util.hasCJKChar(self.word) and #util.splitToChars(self.word) > MAX_MATCH_CHARS then
+        title, reason = _("Selection too long to look up"), _("Try searching the book instead.")
+    elseif r.dict ~= "" then -- none installed, or none enabled
+        title, reason = r.dict, r.definition
+    else
+        title = T(_("No \"%1\" in local dictionaries"), self.word)
+        reason = r.definition ~= "" and r.definition or _("Try Wikipedia, or add more StarDict dictionaries in settings.")
+    end
+    local pill
+    if not util.hasCJKChar(self.word) and not self.translation then
+        pill = { _("Translate online"), function() self:translate() end }
+    end
+    return self:cardFrame(self:stateBlock(title, reason, pill))
+end
+
+--- A card with units: its heading, then the blocks of its units on this page (see paginate()).
+function LookupPage:unitsCard(card, blocks)
+    local group = VerticalGroup:new{ align = "left" }
+    -- the translation says it is online, unless its offline state says so already
+    local caption = card.kind == "translation" and not self.translation.offline and _("Needs a network connection") or nil
+    table.insert(group, self:heading(card.title, caption, card.kind == "dict"))
+    if card.units then
+        for i, block in ipairs(blocks) do
+            table.insert(group, VerticalSpan:new{ width = i == 1 and HEADING_GAP or UNIT_GAP })
+            table.insert(group, (self:unitWidget(block.unit, block.from, block.count)))
         end
-        used = used + h
+    else
+        table.insert(group, VerticalSpan:new{ width = HEADING_GAP })
+        table.insert(group, self:translationState())
     end
-    table.insert(pages, { first, #heights })
+    local callback
+    if card.kind == "dict" then
+        callback = function() self:onFullEntry(card.group) end
+    end
+    return self:cardFrame(group, callback)
+end
+
+--- The offline state of an online card: its reason, and 打开 Wi-Fi, which runs `retry` once online.
+function LookupPage:offlineState(reason, retry)
+    return self:stateBlock(_("Needs a network connection"), reason, { C_("Dictionary sheet", "Turn on Wi-Fi"), function()
+        NetworkMgr:runWhenOnline(function()
+            if not self.closed then retry() end
+        end)
+    end })
+end
+
+function LookupPage:translationState()
+    local tr = self.translation
+    if tr.loading then
+        return self:loadingLine()
+    elseif tr.offline then
+        return self:offlineState(_("Online translation needs Wi-Fi. Turn it on and try again."), function() self:translate() end)
+    end
+    return self:stateBlock(_("Translation failed."), _("Check the network connection and try again."),
+        { _("Retry"), function() self:translate() end })
+end
+
+function LookupPage:wikiCard()
+    local wiki = self.wiki
+    local group = VerticalGroup:new{ align = "left" }
+    local title = wiki and wiki.results and wiki.results[1].dict or _("Wikipedia")
+    table.insert(group, self:heading(title, nil, not wiki or wiki.results))
+    local callback
+    if not wiki then
+        callback = function() self:loadWiki() end
+    elseif wiki.results then
+        table.insert(group, VerticalSpan:new{ width = HEADING_GAP })
+        table.insert(group, textBox(wiki.results[1].definition, bodyFace(), self.inner_w, INTRO_LINES))
+        callback = function() self:onFullEntry() end
+    else
+        table.insert(group, VerticalSpan:new{ width = HEADING_GAP })
+        if wiki.loading then
+            table.insert(group, TextWidget:new{ text = _("Searching Wikipedia…"), face = bodyFace(), fgcolor = Palette.ink, max_width = self.inner_w })
+        elseif wiki.offline then
+            table.insert(group, self:offlineState(_("Wikipedia is an online lookup. Turn on Wi-Fi and try again."),
+                function() self:loadWiki() end))
+        else
+            table.insert(group, self:stateBlock(
+                wiki.failed and _("Failed searching Wikipedia.") or T(_("No Wikipedia article for \"%1\""), self.headword)))
+        end
+    end
+    return self:cardFrame(group, callback)
+end
+
+--- A card with a centered label, for an action (加入生词本).
+function LookupPage:vocabCard()
+    local has = self.ui.vocabbuilder:hasWord(self.headword)
+    local text = has and _("In vocabulary builder") or C_("Dictionary sheet", "Add to vocabulary builder")
+    local icon_size = dp(22)
+    local row = HorizontalGroup:new{
+        align = "center",
+        IconWidget:new{ icon = has and "eink/check" or "eink/plus", width = icon_size, height = icon_size, alpha = true },
+        HorizontalSpan:new{ width = dp(12) },
+        TextWidget:new{ text = text, face = headingFace(), fgcolor = Palette.ink, max_width = self.inner_w - icon_size - dp(12) },
+    }
+    return self:cardFrame(CenterContainer:new{ dimen = Geom:new{ w = self.inner_w, h = row:getSize().h }, row },
+        function() self:onVocabulary() end)
+end
+
+function LookupPage:searchCard()
+    return self:cardFrame(self:heading(_("Search in this book"), nil, true),
+        function() self:onSearchBook() end)
+end
+
+--- A card of a page (see paginate()): part.card, with part.blocks of its units.
+function LookupPage:buildCard(part)
+    local card = part.card
+    if card.kind == "headword" then return self:headwordCard()
+    elseif card.kind == "dict" or card.kind == "translation" then return self:unitsCard(card, part.blocks)
+    elseif card.kind == "empty" then return self:emptyCard()
+    elseif card.kind == "wiki" then return self:wikiCard()
+    elseif card.kind == "vocab" then return self:vocabCard()
+    elseif card.kind == "search" then return self:searchCard()
+    end
+end
+
+local function heightOf(widget)
+    local h = widget:getSize().h
+    widget:free()
+    return h
+end
+
+--- Splits the cards into pages of `avail` height: { { { card =, blocks = } ... } ... }, where a block is a unit
+-- (whole, or `count` lines `from` one). A card with units continues on the next page, under its heading again. A
+-- unit that fits a page moves there whole; one taller than a page fills the rest of this one and goes on, line by
+-- line, on the next ones. Nothing is cut.
+function LookupPage:paginate(avail)
+    local pages, page, used = {}, {}, 0
+    local function push()
+        table.insert(pages, page)
+        page, used = {}, 0
+    end
+    local function place(part, h)
+        used = used + (#page > 0 and CARD_GAP or 0) + h
+        table.insert(page, part)
+    end
+    for __, card in ipairs(self:cards()) do
+        if not (card.units and #card.units > 0) then
+            local part = { card = card, blocks = {} }
+            local h = heightOf(self:buildCard(part))
+            if #page > 0 and used + CARD_GAP + h > avail then push() end
+            place(part, h)
+        else
+            local frame_h = heightOf(self:buildCard{ card = card, blocks = {} })
+            local capacity = avail - frame_h - HEADING_GAP -- for units, on a page of their own
+            local units, i, from = card.units, 1, 1 -- the next line to place: line `from` of unit i
+            while i <= #units do
+                local room = avail - used - (#page > 0 and CARD_GAP or 0) - frame_h
+                local blocks, h = {}, 0
+                while i <= #units do
+                    local unit = units[i]
+                    self:measure(unit)
+                    local gap = #blocks > 0 and UNIT_GAP or HEADING_GAP
+                    local lines = unit.lines - from + 1
+                    local rest_h = from == 1 and unit.h or lines * unit.line_h
+                    if h + gap + rest_h <= room then
+                        table.insert(blocks, { unit = unit, from = from > 1 and from or nil, count = from > 1 and lines or nil })
+                        h, i, from = h + gap + rest_h, i + 1, 1
+                    else
+                        local fit = math.floor((room - h - gap) / unit.line_h)
+                        if fit < 1 and #blocks == 0 and #page == 0 then
+                            fit = 1 -- a line taller than a page still shows
+                        end
+                        if rest_h > capacity and fit >= 1 then -- too tall for any page: as much as fits here
+                            table.insert(blocks, { unit = unit, from = from, count = fit })
+                            h, from = h + gap + fit * unit.line_h, from + fit
+                        end
+                        break
+                    end
+                end
+                if #blocks > 0 then
+                    place({ card = card, blocks = blocks }, frame_h + h)
+                end
+                if i <= #units then push() end
+            end
+        end
+    end
+    if #page > 0 or #pages == 0 then push() end
     return pages
 end
 
-function DictSheet:vocabulary()
-    -- not from within the vocabulary builder, as upstream
-    local vocab = self.ui.vocabbuilder
-    return not self.not_found and vocab and not vocab.widget
-end
-
-function DictSheet:onVocabulary()
-    local vocab = self.ui.vocabbuilder
-    local word = self.headword
-    if vocab:hasWord(word) then
-        -- removing loses the review history: confirm, as upstream
-        UIManager:show(ConfirmBox:new{
-            text = T(_("Remove word \"%1\" from vocabulary builder?"), word),
-            ok_text = _("Remove"),
-            ok_callback = function()
-                vocab:removeWord(word)
-                if self.closed then return end
-                self:update()
-                UIManager:show(Notification:new{ text = _("Removed from vocabulary builder") })
-            end,
-        })
-        return
+function LookupPage:buildContent(rect)
+    self.pages = self.pages or self:paginate(rect.h - TOP - BOTTOM)
+    self.page = math.max(1, math.min(self.page, #self.pages))
+    local column = VerticalGroup:new{ align = "left" }
+    for i, part in ipairs(self.pages[self.page]) do
+        if i > 1 then table.insert(column, VerticalSpan:new{ width = CARD_GAP }) end
+        table.insert(column, self:buildCard(part))
     end
-    local title = self.ui.doc_props and self.ui.doc_props.display_title or _("Dictionary lookup")
-    -- the plugin saves the words around the selection, which is still there
-    self.ui:handleEvent(Event:new("WordLookedUp", word, title, true))
-    if vocab:hasWord(word) then
-        self:update()
-        UIManager:show(Notification:new{ text = _("Added to vocabulary builder") })
+    return VerticalGroup:new{
+        align = "left",
+        VerticalSpan:new{ width = TOP },
+        HorizontalGroup:new{ HorizontalSpan:new{ width = math.floor((rect.w - self.column_w) / 2) }, column },
+    }, #self.pages
+end
+
+--- Rebuilds the cards and repaints the content and the bar. focus: the kind of a card to show, on whichever page.
+function LookupPage:update(focus)
+    if self.closed then return end
+    self.pages = nil
+    if focus then
+        self.pages = self:paginate(self.content_rect.h - TOP - BOTTOM)
+        local found
+        for p, parts in ipairs(self.pages) do
+            for _, part in ipairs(parts) do
+                if part.card.kind == focus then found = p break end
+            end
+            if found then break end
+        end
+        self.page = found or self.page
     end
-end
-
-function DictSheet:onSearchBook()
-    if self.highlight then self.highlight:clear() end
-    self:onClose(true)
-    self.ui.search:searchCallback(nil, self.headword)
-end
-
---- Hands the same results to the upstream popup, for rich HTML entries and plugin buttons.
-function DictSheet:onFullEntry()
-    local close_callback = self.dict_close_callback
-    self.dict_close_callback = nil -- the popup calls it
-    self:onClose(true)
-    self.dictionary._lookup_start_time = nil -- no input block: this is not a slow lookup
-    if self.source == "wiki" then
-        local wikipedia = self.ui.wikipedia
-        local highlight = wikipedia.highlight
-        wikipedia.highlight = self.highlight
-        wikipedia:showDict(self.headword, self.wiki.results, self.boxes, nil, close_callback)
-        wikipedia.highlight = highlight
-    else
-        ReaderDictionary.showDict(self.dictionary, self.word, self.results, self.boxes, self.link, close_callback)
+    self:build()
+    if not self.invisible then
+        UIManager:setDirty(self, "ui", self.body_rect)
     end
 end
 
-function DictSheet:setSource(source)
-    if source == self.source then return end
-    self.source = source
-    if source == "wiki" and (not self.wiki or self.wiki.offline) then
-        self:loadWiki()
-    else
-        self:update()
-    end
+--- The translation card waits for the request, or for the network.
+function LookupPage:setTranslationState()
+    self.translation = NetworkMgr:isOnline() and { loading = true } or { offline = true }
 end
 
-function DictSheet:loadWiki()
+--- Online translation of the selection (after 在线翻译, 打开 Wi-Fi or 重试).
+function LookupPage:translate()
+    if self.translation and self.translation.loading then return end -- one request at a time
+    self:setTranslationState()
+    self:update("translation")
+    self:requestTranslation()
+end
+
+--- Sends the selection to the translator for the translation card, if it waits for it.
+function LookupPage:requestTranslation()
+    if not (self.translation and self.translation.loading) then return end
+    UIManager:forceRePaint() -- show 查询中… before the request
+    local text = self.word
+    Trapper:wrap(function()
+        -- in a subprocess, as upstream: closing the page (our dismiss_callback) abandons it
+        local completed, result = Trapper:dismissableRunInSubprocess(function()
+            local ok, res = pcall(Translator.loadPage, Translator, text,
+                Translator:getTargetLanguage(), Translator:getSourceLanguage())
+            return ok and res or nil
+        end, self)
+        self.dismiss_callback = nil
+        if self.closed or not completed then return end
+        local translated = translationOf(result)
+        if translated then
+            self.translation = { text = translated, units = {} }
+            for para in translated:gmatch("[^\n]+") do
+                table.insert(self.translation.units, { text = para })
+            end
+        else
+            self.translation = { failed = true }
+        end
+        self:update("translation")
+    end)
+end
+
+function LookupPage:loadWiki()
+    if self.wiki and self.wiki.loading then return end -- one request at a time
     if not NetworkMgr:isOnline() then
         self.wiki = { offline = true }
-        return self:update()
+        return self:update("wiki")
     end
-    local previous = { source = self.source == "wiki" and self.wiki and "wiki" or "dict", wiki = self.wiki }
+    local previous = self.wiki
     self.wiki = { loading = true }
-    self:update()
+    self:update("wiki")
     UIManager:forceRePaint()
     Trapper:wrap(function()
         local wikipedia = self.ui.wikipedia
         wikipedia:initLanguages(self.headword)
         local lang = wikipedia.wiki_last_language or wikipedia.wiki_languages[1]
-        -- invisible: a tap cancels the request, the sheet shows the progress
-        local trap = TrapWidget:new{ resend_event = true }
+        -- invisible: a tap cancels the request (and goes no further), the card shows the progress
+        local trap = TrapWidget:new{ resend_event = false }
         UIManager:show(trap)
         Wikipedia:setTrapWidget(trap)
         local ok, pages = pcall(Wikipedia.searchAndGetIntros, Wikipedia, self.headword, lang)
@@ -478,224 +936,136 @@ function DictSheet:loadWiki()
         end
         if self.closed then return end
         if not ok and tostring(pages):find(Wikipedia.dismissed_error_code, 1, true) then
-            -- cancelled by a tap: back to where we were
-            self.source, self.wiki = previous.source, previous.wiki
+            self.wiki = previous -- cancelled by a tap: back to where we were
         elseif #results > 0 then
             self.wiki = { results = results }
         else
             self.wiki = { failed = not ok }
         end
-        self:update()
+        self:update("wiki")
     end)
 end
 
---- Rebuilds the content and refreshes the sheet.
-function DictSheet:update()
-    self:setContent(self:buildContent())
+function LookupPage:onVocabulary()
+    local vocab = self.ui.vocabbuilder
+    local word = self.headword
+    if vocab:hasWord(word) then
+        -- removing loses the review history: confirm, as upstream
+        local layer = ConfirmLayer:new{
+            text = T(_("Remove \"%1\" from the vocabulary builder?"), word),
+            actions = { { text = _("Remove"), callback = function()
+                vocab:removeWord(word)
+                if self.closed then return end
+                self:update()
+                UIManager:show(Toast:new{ text = _("Removed from vocabulary builder") })
+            end } },
+        }
+        UIManager:show(layer, "ui", layer:getRefreshRegion())
+        return
+    end
+    local title = self.ui.doc_props and self.ui.doc_props.display_title or _("Dictionary lookup")
+    -- the plugin saves the words around the selection, which is still there
+    self.ui:handleEvent(Event:new("WordLookedUp", word, title, true))
+    if vocab:hasWord(word) then
+        self:update()
+        UIManager:show(Toast:new{ text = _("Added to vocabulary builder") })
+    end
 end
 
-function DictSheet:buildContent()
-    local w = BottomSheet.getContentWidth()
-    local top = VerticalGroup:new{ align = "left" }
-    -- headword and phonetic
-    local headword = TextWidget:new{
-        text = self.headword, face = Font:getFace("ui_headword"), fgcolor = Palette.ink,
-        max_width = self.phonetic and math.floor(w * 0.7) or w,
-    }
-    local head = HorizontalGroup:new{ align = "bottom", headword }
-    if self.phonetic then
-        table.insert(head, HorizontalSpan:new{ width = dp(10) })
-        table.insert(head, VerticalGroup:new{
-            TextWidget:new{
-                text = self.phonetic, face = Font:getFace("ui_label"), fgcolor = Palette.ink_2,
-                max_width = w - headword:getSize().w - dp(10),
-            },
-            VerticalSpan:new{ width = dp(4) },
-        })
-    end
-    table.insert(top, head)
-    if not self.not_found and self.headword ~= self.word and util.hasCJKChar(self.word) then
-        local chars = util.splitToChars(self.word)
-        local selected = #chars > 12 and table.concat(chars, "", 1, 12) .. "…" or self.word
-        table.insert(top, VerticalSpan:new{ width = dp(4) })
-        table.insert(top, TextBoxWidget:new{
-            text = T(_("Selected \"%1\", found \"%2\" by longest match"), selected, self.headword),
-            face = Font:getFace("ui_caption"), fgcolor = Palette.ink_2, width = w,
-        })
-    end
-    -- source chips
-    local chips = HorizontalGroup:new{}
-    for i, source in ipairs{ { "dict", _("Dictionary") }, { "wiki", _("Wikipedia") } } do
-        if i > 1 then table.insert(chips, HorizontalSpan:new{ width = dp(8) }) end
-        table.insert(chips, EinkControls.PillButton:new{
-            text = source[2],
-            face = Font:getFace("ui_label"),
-            height = dp(30),
-            bordersize = Size.border.default,
-            solid = self.source == source[1],
-            callback = function() self:setSource(source[1]) end,
-        })
-    end
-    table.insert(top, VerticalSpan:new{ width = dp(12) })
-    table.insert(top, chips)
-    table.insert(top, VerticalSpan:new{ width = dp(4) })
+function LookupPage:onSearchBook()
+    if self.highlight then self.highlight:clear() end
+    self:onClose(true)
+    self.ui.search:searchCallback(nil, self.headword)
+end
 
-    -- foot: buttons and the link row
-    local bottom = VerticalGroup:new{ align = "left" }
-    local link_note
-    if self.source == "dict" then
-        local gap = dp(10)
-        local buttons = {}
-        if self:vocabulary() then
-            local has = self.ui.vocabbuilder:hasWord(self.headword)
-            table.insert(buttons, {
-                text = has and _("In vocabulary builder") or C_("Dictionary sheet", "Add to vocabulary builder"),
-                solid = has,
-                callback = function() self:onVocabulary() end,
-            })
-        end
-        if self.highlight then -- as upstream: no search from a lookup not started in the book
-            table.insert(buttons, { text = C_("Dictionary sheet", "Search book"), callback = function() self:onSearchBook() end })
-        end
-        if #buttons > 0 then
-            local button_w = math.floor((w - (#buttons - 1) * gap) / #buttons)
-            local row = HorizontalGroup:new{}
-            for i, b in ipairs(buttons) do
-                if i > 1 then table.insert(row, HorizontalSpan:new{ width = gap }) end
-                b.width = button_w
-                table.insert(row, EinkControls.PillButton:new(b))
+--- Opens a full entry in the upstream popup: a dictionary's results, or Wikipedia's without group. The popup opens
+-- over the page without the selection, so that its own search and highlight buttons are off (the page has them).
+-- Closing it comes back to the cards, updated: its plugin buttons may have added the word to the vocabulary builder.
+function LookupPage:onFullEntry(group)
+    self.dictionary._lookup_start_time = nil -- no input block: this is not a slow lookup
+    local module = group and self.dictionary or self.ui.wikipedia
+    local results = group and group.results or self.wiki.results
+    local function closed()
+        -- the popup frees the images it loaded (Wikipedia thumbnails), but leaves them in the results: forget
+        -- them, for the next popup to load them again
+        for __, r in ipairs(results) do
+            for __, im in ipairs(r.images or {}) do
+                im.bb, im.hi_bb = nil, nil
             end
-            table.insert(bottom, VerticalSpan:new{ width = dp(14) })
-            table.insert(bottom, row)
         end
-        if not self.not_found then
-            link_note = self.results[1].dict
-        end
-    elseif self.wiki.results then
-        link_note = self.wiki.results[1].dict
+        if not self.closed then self:update() end
     end
-    if link_note then
-        table.insert(bottom, VerticalSpan:new{ width = dp(10) })
-        table.insert(bottom, rule(w))
-        local chev = dp(16)
-        local note = TextWidget:new{
-            text = link_note, face = Font:getFace("ui_micro"), fgcolor = Palette.ink_3, max_width = math.floor(w / 2),
-        }
-        table.insert(bottom, Tappable:new{
-            callback = function() self:onFullEntry() end,
-            OverlapGroup:new{
-                dimen = Geom:new{ w = w, h = dp(44) },
-                LeftContainer:new{
-                    dimen = Geom:new{ w = w, h = dp(44) },
-                    TextWidget:new{ text = C_("Dictionary sheet", "Full entry"), face = Font:getFace("ui_label"), fgcolor = Palette.ink },
-                },
-                RightContainer:new{
-                    dimen = Geom:new{ w = w, h = dp(44) },
-                    HorizontalGroup:new{
-                        note,
-                        HorizontalSpan:new{ width = dp(6) },
-                        IconWidget:new{ icon = "eink/chev", width = chev, height = chev, alpha = true, dim = true },
-                    },
-                },
-            },
-        })
-    end
-
-    -- body
-    local avail = self:maxContentHeight() - top:getSize().h - bottom:getSize().h
-    local body = VerticalGroup:new{ align = "left" }
-    if self.source == "dict" then
-        if self.not_found then
-            local too_long = util.hasCJKChar(self.word) and #util.splitToChars(self.word) > MAX_MATCH_CHARS
-            if too_long then
-                table.insert(body, emptyState(w, _("Selection too long to look up"), _("Try searching the book instead.")))
-            else
-                local hint = self.results[1].definition
-                table.insert(body, emptyState(w, T(_("No \"%1\" in local dictionaries"), self.headword),
-                    hint ~= "" and hint or _("Try Wikipedia, or add more StarDict dictionaries in settings.")))
-            end
-        else
-            self.pages = self.pages or self:paginate(w, avail)
-            local first, last = unpack(self.pages[self.page])
-            local page_avail = #self.pages > 1 and avail - dp(44) or avail
-            for i = first, last do
-                table.insert(body, self:senseRow(self.senses[i], w, page_avail))
-            end
-            if #self.pages > 1 then
-                self.pager_row = EinkControls.Pager:new{
-                    page = self.page,
-                    pages = #self.pages,
-                    width = w,
-                    on_change = function(page)
-                        self.page = page
-                        self:update()
-                    end,
-                }
-            end
-        end
-    elseif self.wiki.offline then
-        table.insert(body, emptyState(w, _("Needs a network connection"), _("Wikipedia is an online lookup. Turn on Wi-Fi and try again.")))
-        table.insert(body, EinkControls.PillButton:new{
-            text = C_("Dictionary sheet", "Turn on Wi-Fi"),
-            solid = true,
-            width = w,
-            callback = function()
-                NetworkMgr:runWhenOnline(function()
-                    if not self.closed and self.source == "wiki" then self:loadWiki() end
-                end)
-            end,
-        })
-    elseif self.wiki.loading then
-        table.insert(body, emptyState(w, _("Searching Wikipedia…")))
-    elseif self.wiki.results then
-        local args = { text = self.wiki.results[1].definition, face = Font:getFace("ui_body"), fgcolor = Palette.ink, width = w }
-        local intro = TextBoxWidget:new(args)
-        if intro:getSize().h > avail - dp(10) then
-            intro:free()
-            args.height = avail - dp(10)
-            args.height_overflow_show_ellipsis = true
-            intro = TextBoxWidget:new(args)
-        end
-        table.insert(body, VerticalSpan:new{ width = dp(10) })
-        table.insert(body, intro)
+    local highlight = module.highlight
+    module.highlight = nil
+    if group then
+        ReaderDictionary.showDict(self.dictionary, self.word, results, self.boxes, self.link, closed)
     else
-        table.insert(body, emptyState(w,
-            self.wiki.failed and _("Failed searching Wikipedia.") or T(_("No Wikipedia article for \"%1\""), self.headword)))
+        module:showDict(self.headword, results, self.boxes, nil, closed)
     end
+    module.highlight = highlight
+    self.dictionary.dict_window = self -- upstream's showDict took it for the popup
+end
 
-    local content = VerticalGroup:new{ align = "left", top, body }
-    if self.source == "dict" and self.pages and #self.pages > 1 then
-        table.insert(content, self.pager_row)
+--- Back to the book: the selection stays a moment, to see where the lookup was (as upstream), then the close
+-- callback runs.
+function LookupPage.leave(highlight, no_clear, dict_close_callback)
+    if highlight and not no_clear then
+        local clear_id = highlight:getClearId()
+        UIManager:scheduleIn(G_defaults:readSetting("DELAY_CLEAR_HIGHLIGHT_S"), function()
+            highlight:clear(clear_id)
+        end)
     end
-    -- keep the sheet's height across sources and pages
-    local h = content:getSize().h + bottom:getSize().h
-    content:resetLayout()
-    if self.min_h and h < self.min_h then
-        table.insert(content, VerticalSpan:new{ width = self.min_h - h })
+    if dict_close_callback then
+        dict_close_callback()
     end
-    self.min_h = math.max(self.min_h or 0, h)
-    table.insert(content, bottom)
-    return content
+end
+
+--- Takes the page away without leaving the lookup (whose end does that).
+function LookupPage:dispose()
+    if self.closed then return end
+    self.closed = true
+    if self._reveal then
+        UIManager:unschedule(self._reveal)
+        self._reveal = nil
+    end
+    if self.invisible then
+        UIManager:close(self)
+    else
+        UIManager:close(self, "ui", self.dimen)
+    end
 end
 
 --- no_clear: keep the selection, for a lookup or search taking over.
-function DictSheet:onClose(no_clear)
-    self.closed = true
-    BottomSheet.onClose(self)
-    self.dictionary.dict_window = nil
-    if self.highlight and not no_clear then
-        -- as upstream: the selection stays a moment, to see where the lookup was
-        local clear_id = self.highlight:getClearId()
-        UIManager:scheduleIn(G_defaults:readSetting("DELAY_CLEAR_HIGHLIGHT_S"), function()
-            self.highlight:clear(clear_id)
-        end)
+function LookupPage:onClose(no_clear)
+    if self.closed then return true end
+    local waiting = not self.results
+    self:dispose()
+    if self.dictionary.dict_window == self then
+        self.dictionary.dict_window = nil
     end
-    if self.dict_close_callback then
-        self.dict_close_callback()
+    local dismiss = self.dismiss_callback
+    self.dismiss_callback = nil
+    if not waiting then
+        LookupPage.leave(self.highlight, no_clear, self.dict_close_callback)
+    end
+    if dismiss then
+        -- cancels the lookup or the translation; a cancelled lookup leaves by itself (showDict)
+        dismiss()
     end
     return true
 end
 
-ReaderDictSheet.DictSheet = DictSheet
+function LookupPage:goBack()
+    self:onClose()
+end
+
+-- While waiting, even invisible, a tap anywhere cancels the lookup.
+function LookupPage:onTapBlock()
+    if not self.results then
+        self:onClose()
+    end
+    return true
+end
+
 
 return ReaderDictSheet
