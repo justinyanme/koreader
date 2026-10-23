@@ -744,15 +744,19 @@ describe("ReaderDictSheet module", function()
         it("should not ask for Wi-Fi when connected without internet access, and load both online cards on retry", function()
             local Wikipedia = require("ui/wikipedia")
             stubSdcv(ui.dictionary)
-            local online = false
+            local online, connected = false, false
             stub(NetworkMgr, "isOnline").invokes(function() return online end)
-            stub(NetworkMgr, "isConnected").returns(true) -- Wi-Fi on, the internet out of reach
+            stub(NetworkMgr, "isConnected").invokes(function() return connected end)
             local wifi = stub(NetworkMgr, "runWhenOnline")
             local load = stubTranslator({ { { "联网之后", "x" } } })
             stub(Wikipedia, "searchAndGetIntros").returns({ [3] = { title = "Weapon", extract = "A weapon article.", index = 0 } })
             longPress(SAMPSON, unpack(PHRASE))
             tapWidget(button(ui.highlight.highlight_dialog, "Translate"))
             local page = lookupPage()
+            assert.is_truthy(button(cardOf(page, "Online translation"), "Turn on Wi-Fi"))
+            -- Wi-Fi turned on from the system, the internet out of reach: 打开 Wi-Fi only checks again
+            connected = true
+            tapWidget(button(cardOf(page, "Online translation"), "Turn on Wi-Fi"))
             assert.stub(load).was_not_called()
             local translation = cardOf(page, "Online translation")
             assert.is_true(hasText(translation, "Needs a network connection")) -- still said

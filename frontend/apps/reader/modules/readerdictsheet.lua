@@ -743,6 +743,11 @@ end
 --- The offline state of an online card: its reason, and 打开 Wi-Fi, which runs `retry` once online.
 function LookupPage:offlineState(reason, retry)
     return self:stateBlock(_("Needs a network connection"), reason, { C_("Dictionary sheet", "Turn on Wi-Fi"), function()
+        if NetworkMgr:isConnected() then
+            -- Wi-Fi came on meanwhile (from the system): the retry says how things stand, as NetworkMgr would
+            -- only ask to turn it on again without internet access
+            return retry()
+        end
         NetworkMgr:runWhenOnline(function()
             if not self.closed then retry() end
         end)
