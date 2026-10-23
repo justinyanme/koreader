@@ -607,12 +607,20 @@ describe("Interface font size", function()
             assert.is_near(roleSize("ui_body", 1.35), findText(settings, _("Interface font size")).face.orig_size, 1e-9)
             assertFits(settings)
             settings:closeMenu(true)
-            -- the toolbar's labels, and its panels: more, progress, brightness and the typeset panel
+            -- the toolbar's panels (its bars hold icons only): more, brightness from more's first tile,
+            -- progress and the typeset panel
             tap(Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() })
-            assert.are.equal(Screen:scaleBySize(roleSize("ui_caption", 1.35)), findText(ui.menu.bars, _("Progress")).face.size)
-            for __, icon in ipairs{ "eink/more", "eink/progress", "eink/light", "eink/font" } do
-                local entry = findWidget(ui.menu.bars, function(w) return w.icon == icon and w.callback ~= nil end)
-                tap(entry.dimen)
+            local function entry(icon)
+                return findWidget(ui.menu.bars, function(w) return w.icon == icon and w.callback ~= nil end)
+            end
+            tap(entry("eink/more").dimen)
+            assert.are.equal("more", ui.menu.panel_name)
+            assertFits(ui.menu.panel)
+            tap(findWidget(ui.menu.panel, function(w) return w.label == _("Brightness") and w.callback ~= nil end).dimen)
+            assert.are.equal("brightness", ui.menu.panel_name)
+            assertFits(ui.menu.panel)
+            for __, icon in ipairs{ "eink/progress", "eink/font" } do
+                tap(entry(icon).dimen)
                 assert.is_truthy(ui.menu.panel)
                 assertFits(ui.menu.panel)
             end

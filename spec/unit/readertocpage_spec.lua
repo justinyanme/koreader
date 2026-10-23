@@ -215,7 +215,7 @@ describe("ReaderTocPage module", function()
             tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
             UIManager:forceRePaint()
             local contents = find(ui.menu.bars, function(w)
-                return w.callback and w.dimen and hasText(w, C_("Reader toolbar", "Contents"))
+                return w.callback and w.dimen and find(w, function(c) return c.icon == "eink/toc" end) ~= nil
             end)
             local refreshes = refreshesOf(function() tapWidget(contents) end)
             local page = ui.menu.drawer
