@@ -6,6 +6,7 @@ local Button = require("ui/widget/button")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Event = require("ui/event")
+local FinishedBooks = require("finishedbooks")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local FullscreenPage = require("ui/widget/fullscreenpage")
@@ -16,7 +17,6 @@ local IconWidget = require("ui/widget/iconwidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
-local Me = require("apps/shelf/me")
 local Palette = require("ui/palette")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
@@ -176,7 +176,7 @@ function BookEnd:build()
     if self:finishedChanged() then
         local summary = self.ui.doc_settings:readSetting("summary")
         self.finished, self.finished_time = summary.status == "complete", summary.finished_time
-        self.finished_number = Me.finishedNumber(self.ui.document.file, summary)
+        self.finished_number = FinishedBooks.number(self.ui.document.file, summary)
     end
     local finished = self.finished
     local column = VerticalGroup:new{ align = "center" }

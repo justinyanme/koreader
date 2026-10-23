@@ -154,6 +154,9 @@ describe("Shelf home, 我的 tab", function()
         addBook("leaves.epub", "leaves.epub", "Leaves of Grass", {
             highlight("I celebrate myself", "Song of Myself"),
         }, { status = "complete", modified = "2001-01-01" }, 1000)
+        -- finished this year before the time it was marked was recorded: counted by its `modified` date
+        addBook("legacy.pdf", "sample.pdf", "Finished before the time was kept", {},
+            { status = "complete", modified = year .. "-04-01" }, 400)
         -- finished last year; a review written this year moved `modified`, not the year it was finished
         addBook("sample.pdf", "sample.pdf", "No notes here", {}, {
             status = "complete", finished_time = os.time{ year = year - 1, month = 6, day = 1, hour = 12 },
@@ -187,7 +190,8 @@ describe("Shelf home, 我的 tab", function()
         assert.are.same(expected, view.home.week.minutes)
         local shown = texts(view)
         assert.is_true(contains(shown, T(_("%1 h %2 min"), math.floor(total / 60), total % 60)))
-        assert.is_true(contains(shown, T(_("%1-day reading streak · %2 finished this year"), 3, 1)))
+        -- Romeo and Juliet and the legacy book; not Leaves of Grass (2001) nor the one reviewed this year
+        assert.is_true(contains(shown, T(_("%1-day reading streak · %2 finished this year"), 3, 2)))
 
         -- bars are proportional to minutes; days to come have none
         local chart = view.chart

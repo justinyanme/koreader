@@ -649,4 +649,67 @@ describe("Book end", function()
         assert.are.equal(1, finishedNumber(bookEnd(juliet)))
         assert.are.equal(2, finishedNumber(bookEnd(home .. "/sample.pdf")))
     end)
+    it("reads each book's settings at most once, then only the books that changed", function()
+        -- 300 books on the shelf: 100 marked 读完 earlier, 100 being read, 100 never opened
+        for i = 1, 300 do
+            local path = string.format("%s/stub%03d.pdf", home, i)
+            local f = io.open(path, "w")
+            f:write("%PDF-1.4\n")
+            f:close()
+            if i <= 200 then
+                local doc_settings = DocSettings:open(path)
+                doc_settings:saveSetting("summary", i <= 100
+                    and { status = "complete", finished_time = real_time() - 86400 * (400 - i), modified = "2020-01-01" }
+                    or { status = "reading", modified = "2020-01-01" })
+                doc_settings:flush()
+            end
+            BookList.resetBookInfoCache(path)
+        end
+        local opened = {}
+        local docsettings_open = DocSettings.open
+        DocSettings.open = function(doc_settings, path, ...)
+            if path:match("/stub%d+%.pdf$") then opened[path] = (opened[path] or 0) + 1 end
+            return docsettings_open(doc_settings, path, ...)
+        end
+        -- settings files of the stub books opened since the last call, and the most any one was
+        local function reads()
+            local total, most = 0, 0
+            for __, count in pairs(opened) do
+                total, most = total + count, math.max(most, count)
+            end
+            opened = {}
+            return total, most
+        end
+        local ok, err = pcall(function()
+            local juliet = home .. "/juliet.epub"
+            tap(bookEnd(juliet).mark_button)
+            assert.are.equal(101, finishedNumber(ui.status.book_end))
+            local total, most = reads()
+            assert.are.equal(200, total) -- the books with a settings file, each once
+            assert.are.equal(1, most)
+            -- leaving and re-entering the book end, and setting its status again, read none of them
+            gesture("swipe", 100, 200, "east")
+            nextPage()
+            setStatusInDetails(1)
+            setStatusInDetails(3)
+            assert.are.equal(101, finishedNumber(ui.status.book_end))
+            assert.are.equal(0, (reads()))
+            -- nor does another book's end; a deleted book no longer counts
+            exitReading()
+            os.remove(home .. "/stub001.pdf")
+            clock = clock + 60
+            tap(bookEnd(home .. "/sample.pdf").mark_button)
+            assert.are.equal(101, finishedNumber(ui.status.book_end)) -- 99 of them, juliet and this one
+            assert.are.equal(0, (reads()))
+        end)
+        DocSettings.open = docsettings_open
+        assert(ok, err)
+    end)
+
+    it("counts two formats of one book as two books, as the shelf shows them", function()
+        book(home .. "/juliet.pdf", { status = "complete", finished_time = real_time() - 3600, modified = os.date("%Y-%m-%d") })
+        tap(bookEnd(home .. "/juliet.epub").mark_button)
+        assert.are.equal(2, finishedNumber(ui.status.book_end))
+        assert.are.equal(2, exitReading().shelf_view.counts.complete)
+    end)
 end)

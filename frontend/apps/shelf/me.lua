@@ -6,15 +6,13 @@ vocabulary builder's database, and notes and finished books from the sidecars
 of the books in reading history (the books the exporter's "all books" covers).
 Both databases are only read; a missing or unreadable one reads as empty.
 The home page needs counts only; notes and words are loaded by their subpages.
-The book end's 读完的第 N 本 also counts the finished books on the shelf.
 ]]
 
 local BookList = require("ui/widget/booklist")
 local DataStorage = require("datastorage")
+local FinishedBooks = require("finishedbooks")
 local ReadHistory = require("readhistory")
 local SQ3 = require("lua-ljsqlite3/init")
-local Shelf = require("apps/shelf/shelf")
-local ffiUtil = require("ffi/util")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 local util = require("util")
@@ -143,20 +141,6 @@ local function eachHistoryBook(want, fn)
     end
 end
 
--- When a finished book was marked finished. Books finished before that time was recorded only have the day
--- their status last changed, and come before the recorded ones of that day.
-local function finishedKey(path, summary)
-    local time = summary.finished_time
-    return { path = path, time = time, day = time and os.date("%Y-%m-%d", time) or summary.modified or "" }
-end
-
-local function finishedBefore(a, b)
-    if a.day ~= b.day then return a.day < b.day end
-    if (a.time == nil) ~= (b.time == nil) then return a.time == nil end
-    if a.time ~= b.time then return a.time < b.time end
-    return a.path < b.path
-end
-
 --[[--
 `{ note_count, finished_this_year }` over the books in history. Only sidecars of books with
 annotations or a finished status are read. A book counts in the year it was marked finished;
@@ -166,9 +150,9 @@ function Me.counts(now)
     local year = os.date("%Y", now or Me.now())
     local counts = { note_count = 0, finished_this_year = 0 }
     eachHistoryBook(function(info) return info.has_annotations or info.status == "complete" end,
-        function(file, doc_settings, info)
+        function(_, doc_settings, info)
             local summary = doc_settings:readSetting("summary")
-            if info.status == "complete" and summary and finishedKey(file, summary).day:sub(1, 4) == year then
+            if info.status == "complete" and summary and FinishedBooks.day(summary):sub(1, 4) == year then
                 counts.finished_this_year = counts.finished_this_year + 1
             end
             if info.has_annotations then
@@ -176,39 +160,6 @@ function Me.counts(now)
             end
         end)
     return counts
-end
-
---[[--
-The place of the book at `file` among the books marked 读完, the first one marked being 1: the N of 读完的第 N 本.
-It counts finished books of any year on the shelf, hidden from it or opened from elsewhere (history), and the
-book itself, whose `summary` may be newer than its sidecar. Returns nil unless that summary says 读完.
-]]
-function Me.finishedNumber(file, summary)
-    if not (summary and summary.status == "complete") then return end
-    local own_path = ffiUtil.realpath(file) or file
-    local own = finishedKey(own_path, summary)
-    local files = {}
-    for _, item in ipairs(ReadHistory.hist) do
-        table.insert(files, item.file)
-    end
-    for _, book in ipairs(Shelf.scan(Shelf.homeDir())) do
-        table.insert(files, book.file)
-    end
-    local seen = { [own_path] = true } -- a book in history and on the shelf, or linked, is one book
-    local number = 1
-    for _, path in ipairs(files) do
-        local real = ffiUtil.realpath(path) -- nil once the file is gone
-        if real and not seen[real] then
-            seen[real] = true
-            local info = BookList.getBookInfo(path)
-            local other = info.been_opened and info.status == "complete"
-                and BookList.getDocSettings(path):readSetting("summary")
-            if other and other.status == "complete" and finishedBefore(finishedKey(real, other), own) then
-                number = number + 1
-            end
-        end
-    end
-    return number
 end
 
 --- Books in history with notes (last read first): `{ { file, title, notes } }`.
