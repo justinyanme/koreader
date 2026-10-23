@@ -1012,7 +1012,7 @@ function ReaderHighlight:onTap(_, ges)
         local pos = self.view:screenToPageTransform(ges.pos)
         local highlights_tapped, highlights_added = {}, {}
         for _, box in ipairs(self.view.highlight.visible_boxes) do
-            if inside_box(pos, box.rect) then
+            if box.drawer ~= "note" and inside_box(pos, box.rect) then
                 if self.select_mode then
                     if box.index == self.highlight_idx then
                         -- tap on the first fragment: abort select mode, clear highlight
@@ -1351,11 +1351,7 @@ function ReaderHighlight:showHighlightNoteOrDialog(index)
                         text = _("Delete note"),
                         callback = function()
                             UIManager:close(textviewer)
-                            local annotation = self.ui.annotation.annotations[index]
-                            annotation.note = nil
-                            self.ui:handleEvent(Event:new("AnnotationsModified",
-                                    { annotation, nb_highlights_added = 1, nb_notes_added = -1 }))
-                            self:writePdfAnnotation("content", annotation, "")
+                            self.ui.annotation:setNote(index, "")
                             if self.view.highlight.note_mark then -- refresh note marker
                                 UIManager:setDirty(self.dialog, "ui")
                             end
@@ -2333,7 +2329,7 @@ function ReaderHighlight:saveHighlight(extend_to_sentence)
 end
 
 function ReaderHighlight:writePdfAnnotation(action, item, content)
-    if not (self.document.is_pdf and self.highlight_write_into_pdf and item.drawer) then
+    if item.origin == "note" or not (self.document.is_pdf and self.highlight_write_into_pdf and item.drawer) then
         return
     end
     logger.dbg("write to pdf document", action, item)
@@ -2888,6 +2884,7 @@ function ReaderHighlight:getSavedExtendedHighlightPage(highlight, page, index)
         color    = highlight.color or self.view.highlight.saved_color,
         text     = highlight.text,
         note     = highlight.note,
+        origin   = highlight.origin,
         page     = highlight.page,
         pos0     = highlight.ext[page].pos0,
         pos1     = highlight.ext[page].pos1,
