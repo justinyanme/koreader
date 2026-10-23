@@ -2112,13 +2112,13 @@ function VocabBuilder:removeWord(word)
 end
 
 -- Event sent by readerdictionary "WordLookedUp"
-function VocabBuilder:onWordLookedUp(word, title, is_manual)
+function VocabBuilder:onWordLookedUp(word, title, is_manual, force_context)
     if not settings.enabled and not is_manual then return end
     if self.widget and self.widget.current_lookup_word == word then return true end
     local prev_context
     local next_context
     local highlight
-    if settings.with_context and self.ui.highlight then
+    if (settings.with_context or force_context) and self.ui.highlight then
         prev_context, next_context = self.ui.highlight:getSelectedWordContext(15)
         if self.ui.highlight.selected_text and self.ui.highlight.selected_text.text then
             highlight = util.cleanupSelectedText(self.ui.highlight.selected_text.text)
