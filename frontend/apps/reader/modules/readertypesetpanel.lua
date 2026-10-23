@@ -4,8 +4,8 @@ spacing and margins of reflowable books in one panel between the page and the
 reader toolbar's bottom bar, opened from the toolbar's "Font" ("ShowConfigMenu")
 with both bars still showing. The pill at the right of its title row opens the
 layout options page (weight, render mode, embedded fonts and styles, and links
-into the existing hyphenation and style tweak menus): there the top bar hides
-and the bottom bar holds only a back arrow, which leads back to the panel.
+into the existing hyphenation and style tweak menus), nested in the toolbar:
+the top bar hides and the bottom bar holds only a back arrow, back to the panel.
 
 Replaces ReaderConfig (apps/replacements reader_config slot) for reflowable
 books on touch devices. Fixed-layout books and devices without touch keep the
@@ -236,7 +236,7 @@ end
 
 --- The original bottom bar, for reflowable books too.
 function ReaderTypesetPanel:onShowOriginalConfigMenu()
-    self:hideToolbar()
+    self:closeWithToolbar()
     return ReaderConfig.onShowConfigMenu(self)
 end
 
@@ -247,7 +247,7 @@ function ReaderTypesetPanel:onCloseConfigMenu()
 end
 
 function ReaderTypesetPanel:onSetDimensions(dimen)
-    self:hideToolbar(true)
+    self:closeWithToolbar(true)
     self:closeMenu()
     ReaderConfig.onSetDimensions(self, dimen)
     if self.ui.rolling and self.ui.postReaderReadyCallback == nil then
@@ -259,7 +259,7 @@ function ReaderTypesetPanel:onSetDimensions(dimen)
 end
 
 function ReaderTypesetPanel:onCloseWidget()
-    self:hideToolbar(true)
+    self:closeWithToolbar(true)
     self:closeMenu()
 end
 
@@ -271,19 +271,18 @@ function ReaderTypesetPanel:closePanel()
 end
 
 --- Closes the panel, if it shows, and the toolbar with it.
-function ReaderTypesetPanel:hideToolbar(no_refresh)
+function ReaderTypesetPanel:closeWithToolbar(no_refresh)
     if self.panel then
         self.ui.menu:hideToolbar(no_refresh) -- calls the panel's on_close
     end
 end
 
---- Shows a page of the panel in the toolbar: "main", or "more" (the layout options, a page with a way back).
+--- Shows a page of the panel in the toolbar: "main", or "more" (the layout options, nested with a way back).
 function ReaderTypesetPanel:showPage(page)
     self.page = page
-    local more = page == "more"
     local panel = Panel:new{
-        content = more and self:moreContent() or self:mainContent(),
-        on_back = more and function() self:showPage("main") end or nil,
+        content = self:pageContent(),
+        on_back = page == "more" and function() self:showPage("main") end or nil,
     }
     panel.on_close = function()
         if self.panel == panel then
@@ -294,10 +293,14 @@ function ReaderTypesetPanel:showPage(page)
     self.ui.menu:showPanel("font", panel)
 end
 
+function ReaderTypesetPanel:pageContent()
+    return self.page == "more" and self:moreContent() or self:mainContent()
+end
+
 --- Re-renders the shown page with the current values ("ui" on the panel's rect).
 function ReaderTypesetPanel:refreshPanel()
     if self.panel then
-        self.panel:setContent(self.page == "more" and self:moreContent() or self:mainContent())
+        self.panel:setContent(self:pageContent())
     end
 end
 
@@ -490,7 +493,7 @@ end
 
 --- Shows a menu item table (the original menu's format) as a single-tab menu, after closing the panel and the toolbar.
 function ReaderTypesetPanel:showMenu(item_table)
-    self:hideToolbar()
+    self:closeWithToolbar()
     self:closeMenu()
     local TouchMenu = require("ui/widget/touchmenu")
     local tab = { icon = "appbar.typeset", max_per_page = item_table.max_per_page }

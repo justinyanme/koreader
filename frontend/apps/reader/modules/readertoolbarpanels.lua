@@ -6,27 +6,32 @@ ReaderToolbar:showPanel(). The panels live in their own modules:
 - "progress": apps/reader/modules/readerprogresspanel
 - "brightness": apps/reader/modules/readerbrightnesspanel
 - "more": apps/reader/modules/readermorepanel
-- "font": the typeset panel of ReaderTypesetPanel (ui.config), which shows itself
+The typeset panel ("font") is ReaderTypesetPanel's (ui.config): it shows itself
+on "ShowConfigMenu", see ReaderToolbar:openPanel().
 
 @usage
     local panel = require("apps/reader/modules/readertoolbarpanels").progress(toolbar)
 ]]
 
+local ReaderBrightnessPanel = require("apps/reader/modules/readerbrightnesspanel")
+local ReaderMorePanel = require("apps/reader/modules/readermorepanel")
+local ReaderProgressPanel = require("apps/reader/modules/readerprogresspanel")
+
 local Panels = {}
 
 function Panels.progress(toolbar)
-    return require("apps/reader/modules/readerprogresspanel"):new{ toolbar = toolbar }
+    return ReaderProgressPanel:new{ toolbar = toolbar }
 end
 
 function Panels.brightness(toolbar)
-    return require("apps/reader/modules/readerbrightnesspanel"):new{ toolbar = toolbar }
+    return ReaderBrightnessPanel:new{ toolbar = toolbar }
 end
 
 function Panels.more(toolbar)
-    return require("apps/reader/modules/readermorepanel"):new{ toolbar = toolbar }
+    return ReaderMorePanel:new{ toolbar = toolbar }
 end
 
 -- Also previewed from the settings (apps/settings/einksettings).
-Panels.TapZones = require("apps/reader/modules/readermorepanel").TapZones
+Panels.TapZones = ReaderMorePanel.TapZones
 
 return Panels

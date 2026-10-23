@@ -128,6 +128,13 @@ describe("ReaderTypesetPanel module", function()
         return ui.config.panel
     end
 
+    -- the back arrow of the bottom bar under a nested panel
+    local function backArrow(bars)
+        return find(bars.bottom, function(w)
+            return w.callback and w.dimen and find(w, function(c) return c.icon == "eink/arrow.left" end) ~= nil
+        end)
+    end
+
     local function back()
         UIManager:sendEvent(Event:new("KeyPress", require("device/key"):new("Back", {})))
         UIManager:forceRePaint()
@@ -281,7 +288,9 @@ describe("ReaderTypesetPanel module", function()
             -- the top bar hides, the bottom bar holds only a back arrow
             assert.are.equal(bars, topWidget())
             assert.is_false(bars.show_top)
-            assert.is_truthy(find(bars.bottom, function(w) return w.icon == "eink/back" and w.callback end))
+            UIManager:forceRePaint()
+            assert.is_truthy(backArrow(bars))
+            assert.are.equal(0, backArrow(bars).dimen.x) -- at the bottom left, as on full-screen pages
             assert.is_nil(find(bars.bottom, function(w) return w.callback and hasText(w, _("Progress")) end))
             local saw_top = false
             for _, r in ipairs(refreshes) do
@@ -290,7 +299,7 @@ describe("ReaderTypesetPanel module", function()
             end
             assert.is_true(saw_top) -- the page shows again where the top bar was
 
-            tapWidget(find(bars.bottom, function(w) return w.icon == "eink/back" and w.callback end))
+            tapWidget(backArrow(bars))
             UIManager:forceRePaint()
             assert.are.equal("main", ui.config.page)
             assert.are.equal(ui.config.panel, ui.menu.panel)
@@ -400,10 +409,14 @@ describe("ReaderTypesetPanel module", function()
         end)
 
         it("should go back one layer at a time on Back: more layout options, the panel, the bars", function()
-            openPanel(ui)
-            local bars = ui.menu.bars
-            ui.config:showPage("more")
+            runTasks() -- a re-render left by the last font size change
             UIManager:forceRePaint()
+            local page = ui:getCurrentPage()
+            local main = openPanel(ui)
+            local bars = ui.menu.bars
+            tapWidget(find(main, function(w) return w.callback and hasText(w, _("More layout options")) end))
+            UIManager:forceRePaint()
+            assert.are.equal("more", ui.config.page)
             back()
             assert.are.equal("main", ui.config.page)
             assert.are.equal(ui.config.panel, ui.menu.panel)
@@ -415,6 +428,7 @@ describe("ReaderTypesetPanel module", function()
             back()
             assert.is_nil(ui.menu.bars)
             assert.are.equal(ui, topWidget())
+            assert.are.equal(page, ui:getCurrentPage())
         end)
 
         it("should close only the panel on CloseConfigMenu", function()

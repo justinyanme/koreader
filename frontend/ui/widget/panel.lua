@@ -5,9 +5,12 @@ corners. It has no title bar and no close button: the reader toolbar hosts it
 with both bars still showing, switches it in place and closes it (see
 ReaderToolbar:showPanel()).
 
-A panel with `on_back` is a page opened from another panel, such as the
-typeset panel's layout options: the toolbar then hides the top bar and shows
-only a back arrow in the bottom bar.
+A panel with `on_back` is nested: opened from another panel, such as the
+typeset panel's layout options (DESIGN.md's paragraph panel). The toolbar
+then hides the top bar and shows only a back arrow in the bottom bar.
+
+A panel either gets its `content`, or builds it in `buildContent()`, which
+`refresh()` calls again after a change.
 
 Updating the content only refreshes the panel's rect ("ui"), or the union of
 its old and new rects, with the page under them, when its height changes.
@@ -18,6 +21,9 @@ its old and new rects, with the page under them, when its height changes.
     }
     ui.menu:showPanel("progress", panel)
     panel:setContent(VerticalGroup:new{ ... })
+
+    local MyPanel = Panel:extend{}
+    function MyPanel:buildContent() return VerticalGroup:new{ ... } end
 ]]
 
 local Device = require("device")
@@ -28,6 +34,7 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local Palette = require("ui/palette")
+local Size = require("ui/size")
 local UIManager = require("ui/uimanager")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Screen = Device.screen
@@ -36,7 +43,7 @@ local GUTTER = Screen:scaleBySize(22)
 
 local Panel = InputContainer:extend{
     content = nil, -- widget
-    on_back = nil, -- function: leaves this page for the panel it was opened from
+    on_back = nil, -- function: leaves this nested panel for the one it was opened from
     on_close = nil, -- function, called once the panel is closed
     -- set by the toolbar while the panel shows
     bottom_y = nil, -- the panel sits right above this line
@@ -48,11 +55,14 @@ function Panel.getContentWidth()
 end
 
 function Panel:init()
+    if self.buildContent then
+        self.content = self:buildContent()
+    end
     self:build()
 end
 
 function Panel:build()
-    self.rule = Screen:scaleBySize(1)
+    self.rule = Size.border.default
     self[1] = FrameContainer:new{
         bordersize = 0,
         background = Palette.paper,
@@ -69,6 +79,11 @@ end
 --- The on-screen rect of the panel, while it shows.
 function Panel:getRefreshRegion()
     return Geom:new{ x = 0, y = self.bottom_y - self.dimen.h, w = self.dimen.w, h = self.dimen.h }
+end
+
+--- Rebuilds the content with buildContent(), after a change.
+function Panel:refresh()
+    self:setContent(self:buildContent())
 end
 
 --- Replaces the content. While the panel shows, refreshes its rect, or the union of the old and new rects.
@@ -91,7 +106,8 @@ end
 
 function Panel:paintTo(bb, x, y)
     self.dimen.x, self.dimen.y = x, y
-    bb:paintRect(x, y, self.dimen.w, self.rule, Palette.rule)
+    -- rule gray as measured on the Leaf5 (0xBB): Palette.rule is still lighter, see DESIGN.md (Confirm layer)
+    bb:paintRect(x, y, self.dimen.w, self.rule, Palette.confirm_rule)
     self[1]:paintTo(bb, x, y + self.rule)
 end
 

@@ -57,15 +57,6 @@ local ReaderBrightnessPanel = Panel:extend{
     toolbar = nil, -- ReaderToolbar
 }
 
-function ReaderBrightnessPanel:init()
-    self.content = self:buildContent()
-    Panel.init(self)
-end
-
-function ReaderBrightnessPanel:refresh()
-    self:setContent(self:buildContent())
-end
-
 function ReaderBrightnessPanel:toggleRow(label, checked, callback)
     local toggle = EinkControls.Toggle:new{ checked = checked }
     toggle.callback = function(v)

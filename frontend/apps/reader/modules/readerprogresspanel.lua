@@ -100,15 +100,6 @@ local ReaderProgressPanel = Panel:extend{
     toolbar = nil, -- ReaderToolbar
 }
 
-function ReaderProgressPanel:init()
-    self.content = self:buildContent()
-    Panel.init(self)
-end
-
-function ReaderProgressPanel:refresh()
-    self:setContent(self:buildContent())
-end
-
 function ReaderProgressPanel:jump(target)
     local ui = self.toolbar.ui
     ui.link:addCurrentLocationToStack()

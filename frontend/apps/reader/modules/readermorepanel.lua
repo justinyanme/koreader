@@ -137,11 +137,6 @@ local ReaderMorePanel = Panel:extend{
 
 ReaderMorePanel.TapZones = TapZones
 
-function ReaderMorePanel:init()
-    self.content = self:buildContent()
-    Panel.init(self)
-end
-
 function ReaderMorePanel:buildContent()
     local toolbar = self.toolbar
     local ui = toolbar.ui

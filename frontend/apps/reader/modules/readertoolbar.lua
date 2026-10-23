@@ -12,8 +12,9 @@ open between the page and the bottom bar, with both bars still showing; the
 bottom bar draws the open panel's icon filled. Another entry switches the panel
 in place, the open panel's own entry closes it, and a tap on the page closes the
 panel and the bars without turning the page. Back leaves one layer at a time:
-a page opened from a panel (only a back arrow below, no top bar), the panel,
-then the bars.
+a nested panel opened from a panel (only a back arrow below, no top bar), the
+panel, then the bars. What a panel opens elsewhere (book information, menus,
+settings) closes the panel and the bars first.
 
 Showing, switching or hiding the toolbar and its panel only refreshes their
 rects ("ui"), with the page under what they no longer cover.
@@ -22,6 +23,7 @@ rects ("ui"), with the page under what they no longer cover.
 local BD = require("ui/bidi")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
+local EinkControls = require("ui/widget/einkcontrols")
 local Event = require("ui/event")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
@@ -89,16 +91,16 @@ function ToolbarBars:init()
     self:layout()
 end
 
---- Lays the bars out around the toolbar's panel. Below a page opened from a panel,
+--- Lays the bars out around the toolbar's panel. Below a nested panel,
 -- the bottom bar holds only a back arrow and the top bar hides.
 function ToolbarBars:layout()
     local panel = self.toolbar.panel
-    local sub_page = panel ~= nil and panel.on_back ~= nil
+    local nested = panel ~= nil and panel.on_back ~= nil
     if self.bottom then
         self.bottom:free()
     end
-    self.bottom = self.toolbar:buildBottomBar(not sub_page and self.toolbar.panel_name, sub_page)
-    self.show_top = not sub_page
+    self.bottom = self.toolbar:buildBottomBar(not nested and self.toolbar.panel_name, nested)
+    self.show_top = not nested
     local bottom_h = self.bottom:getSize().h
     self.bottom_rect = Geom:new{ x = 0, y = Screen:getHeight() - bottom_h, w = Screen:getWidth(), h = bottom_h }
     -- children receive events: the bars first
@@ -360,7 +362,7 @@ function ReaderToolbar:buildTopBar()
 end
 
 --- The bottom bar, with the icon of the `active` panel's entry filled;
--- with `back_only`, it holds only a back arrow (below a page opened from a panel).
+-- with `back_only`, it holds only the back arrow of full-screen pages (below a nested panel).
 function ReaderToolbar:buildBottomBar(active, back_only)
     local sw = Screen:getWidth()
     local bottom_h = Screen:scaleBySize(76)
@@ -369,10 +371,7 @@ function ReaderToolbar:buildBottomBar(active, back_only)
     if back_only then
         row = LeftContainer:new{
             dimen = Geom:new{ w = sw, h = bottom_h - rule },
-            HorizontalGroup:new{
-                HorizontalSpan:new{ width = BAR_SIDE },
-                iconButton("eink/back", function() self:goBack() end),
-            },
+            EinkControls.BackArrow:new{ height = bottom_h - rule, callback = function() self:goBack() end },
         }
     else
         local cell_w = math.floor(sw / 4)
@@ -402,12 +401,20 @@ function ReaderToolbar:buildBottomBar(active, back_only)
 end
 
 function ReaderToolbar:showToolbar()
-    if self.bars then return true end
-    self.bars = ToolbarBars:new{ toolbar = self }
-    UIManager:show(self.bars) -- no refresh of its own: only the two bars below
-    UIManager:setDirty(nil, "ui", self.bars.top_rect)
-    UIManager:setDirty(nil, "ui", self.bars.bottom_rect)
+    if not self.bars then
+        self:openBars()
+    end
     return true
+end
+
+-- Shows the bars, around the panel if one is set.
+function ReaderToolbar:openBars()
+    self.bars = ToolbarBars:new{ toolbar = self }
+    UIManager:show(self.bars) -- no refresh of its own: only the bars and the panel below
+    if self.bars.show_top then
+        UIManager:setDirty(nil, "ui", self.bars.top_rect)
+    end
+    UIManager:setDirty(nil, "ui", self.bars:getBandRect())
 end
 
 --- Hides the toolbar and its panel.
@@ -419,6 +426,8 @@ function ReaderToolbar:hideToolbar(no_refresh)
     self.bookmark_button = nil
     UIManager:close(bars)
     self:dropPanel()
+    bars.top:free()
+    bars.bottom:free()
     if not no_refresh then
         if snapshot.top then
             UIManager:setDirty(nil, "ui", bars.top_rect)
@@ -435,13 +444,7 @@ function ReaderToolbar:showPanel(name, panel)
     self:dropPanel()
     self.panel, self.panel_name = panel, name
     if not bars then
-        self.bars = ToolbarBars:new{ toolbar = self }
-        UIManager:show(self.bars) -- no refresh of its own: only the bars and the panel below
-        if self.bars.show_top then
-            UIManager:setDirty(nil, "ui", self.bars.top_rect)
-        end
-        UIManager:setDirty(nil, "ui", self.bars:getBandRect())
-        return
+        return self:openBars()
     end
     bars:layout()
     self:refreshBars(before)
@@ -480,7 +483,7 @@ function ReaderToolbar:openPanel(name)
     self:showPanel(name, require("apps/reader/modules/readertoolbarpanels")[name](self))
 end
 
---- Back leaves one layer at a time: a page opened from a panel, the panel, then the bars.
+--- Back leaves one layer at a time: a nested panel, the panel, then the bars.
 function ReaderToolbar:goBack()
     local panel = self.panel
     if panel and panel.on_back then
@@ -522,14 +525,24 @@ end
 
 function ReaderToolbar:toggleBookmark()
     self.ui.bookmark:onToggleBookmark() -- also refreshes the dog-ear
+    self:updateBookmarkButton()
+end
+
+-- Shows whether the current page has a bookmark ("fast" on the button only, when that changed).
+function ReaderToolbar:updateBookmarkButton()
     local button = self.bookmark_button
-    if button then
+    local icon = self:bookmarkIcon()
+    if button and button.icon ~= icon then
         local rect = button.dimen:copy()
-        button:setIcon(self:bookmarkIcon())
+        button:setIcon(icon)
         button.dimen.x, button.dimen.y = rect.x, rect.y
         UIManager:setDirty(self.bars, "fast", rect)
     end
 end
+
+-- The page can change under the bars (a panel's jumps, a reflow).
+ReaderToolbar.onPageUpdate = ReaderToolbar.updateBookmarkButton
+ReaderToolbar.onPosUpdate = ReaderToolbar.updateBookmarkButton
 
 function ReaderToolbar:backToShelf()
     self:hideToolbar(true)

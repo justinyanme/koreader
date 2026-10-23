@@ -196,7 +196,8 @@ describe("ReaderToolbar module", function()
             UIManager:forceRePaint()
         end)
 
-        it("should switch panels in place from the bars, one panel at a time", function()
+        it("should switch panels in place from the bars, one panel at a time, without turning the page", function()
+            local page = ui:getCurrentPage()
             local progress = openFromToolbar(_("Progress"))
             local bars = ui.menu.bars
             local windows = #UIManager._window_stack
@@ -222,9 +223,47 @@ describe("ReaderToolbar module", function()
                 assert.are.equal("ui", r.mode)
             end
             assert.is_nil(find(bars.bottom, function(w) return type(w.icon) == "string" and w.icon:find("%.bold$") end))
+            -- the open entry, below the page's right third, closes only the panel
+            tapWidget(find(bars.top, function(w) return w.icon == "eink/more" and w.callback end))
+            assert.is_nil(ui.menu.panel)
+            assert.are.equal(bars, topWidget())
+            assert.are.equal(page, ui:getCurrentPage())
             ui.menu:hideToolbar()
             UIManager:forceRePaint()
             assert.are.equal(ui, topWidget())
+        end)
+
+        it("should keep the bookmark icon in step with the page the panel jumps to", function()
+            local start_page = ui:getCurrentPage()
+            local panel = openFromToolbar(_("Progress"))
+            local bars = ui.menu.bars
+            local function bookmarkButton()
+                return find(bars.top, function(w)
+                    return (w.icon == "eink/bookmark" or w.icon == "eink/bookmark-on") and w.callback
+                end)
+            end
+            tapWidget(bookmarkButton())
+            UIManager:forceRePaint()
+            assert.are.equal("eink/bookmark-on", bookmarkButton().icon)
+
+            tapWidget(findText(panel, _("Next chapter")))
+            UIManager:forceRePaint()
+            assert.are_not.equal(start_page, ui:getCurrentPage())
+            assert.are.equal("eink/bookmark", bookmarkButton().icon)
+
+            tapWidget(find(panel, function(w)
+                return w.callback and w.dimen and find(w, function(c)
+                    return type(c.text) == "string" and c.text:find("Return to last position", 1, true)
+                end) ~= nil
+            end))
+            UIManager:forceRePaint()
+            assert.are.equal(start_page, ui:getCurrentPage())
+            assert.are.equal("eink/bookmark-on", bookmarkButton().icon)
+            tapWidget(bookmarkButton()) -- remove the test bookmark
+            UIManager:forceRePaint()
+            assert.is_false(ui.bookmark:isPageBookmarked())
+            ui.menu:hideToolbar()
+            UIManager:forceRePaint()
         end)
 
         it("should close the panel and both bars on a tap on the page, without turning the page", function()
@@ -384,11 +423,28 @@ describe("ReaderToolbar module", function()
     end)
 
     describe("with a PDF", function()
-        it("should show the toolbar on a center tap, and open the original bottom bar from Font", function()
+        it("should keep both bars with the progress panel, and open the original bottom bar from Font", function()
             local ui = openReader(sample_pdf)
+            local page = ui:getCurrentPage()
             tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
             assert.is_truthy(ui.menu.bars)
             assert.are.equal(ui.menu.bars, topWidget())
+            UIManager:forceRePaint()
+            local bars = ui.menu.bars
+            tapWidget(findText(bars.bottom, require("gettext")("Progress")))
+            UIManager:forceRePaint()
+            assert.are.equal("progress", ui.menu.panel_name)
+            assert.are.equal(bars, topWidget())
+            assert.is_true(bars.show_top)
+            local rect = ui.menu.panel:getRefreshRegion()
+            assert.are.equal(bars.bottom_rect.y, rect.y + rect.h)
+            -- a tap on the page closes both, without turning the page
+            tap(Screen:getWidth() - 10, bars.top_rect.h + 10)
+            UIManager:forceRePaint()
+            assert.is_nil(ui.menu.bars)
+            assert.are.equal(page, ui:getCurrentPage())
+
+            tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
             UIManager:forceRePaint()
             tapWidget(findText(ui.menu.bars.bottom, require("gettext")("Font")))
             UIManager:forceRePaint()
