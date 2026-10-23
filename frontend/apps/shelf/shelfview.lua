@@ -147,9 +147,15 @@ function ShelfView:isCurrent()
     return self.ui.content and self.ui.content[1] == self
 end
 
---- Whether it is on screen: the current tab, with nothing over the file manager.
+--- Whether it is on screen: the current tab, with no full-screen page (设置, 书源) over the file manager.
+-- A sheet or popover over part of it doesn't count: closing one only repaints its own rect.
 function ShelfView:isShowing()
-    return self:isCurrent() and UIManager:getTopmostVisibleWidget() == self.ui
+    if not self:isCurrent() then return false end
+    for widget in UIManager:topdown_widgets_iter() do
+        if widget == self.ui then return true end
+        if widget.covers_fullscreen then return false end
+    end
+    return false
 end
 
 -- BookInfoManager runs one job at a time: a new job kills the running one (the file browser starts

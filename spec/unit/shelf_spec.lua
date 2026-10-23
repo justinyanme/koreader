@@ -362,7 +362,16 @@ describe("Shelf home (FileManager replacement)", function()
             tap(settings.bar.back.dimen)
             restore()
             assert.are.equal(fm, topWidget())
-            for __, r in ipairs(refreshes) do assert.are.equal("ui", r.type or "ui") end
+            -- closing the page repaints the whole screen, which shows the new order
+            assert.is_true(#refreshes > 0)
+            local screen, whole = Screen:getSize(), false
+            for __, r in ipairs(refreshes) do
+                assert.are.equal("ui", r.type or "ui")
+                if r.region and r.region.x == 0 and r.region.y == 0 and r.region.w == screen.w and r.region.h == screen.h then
+                    whole = true
+                end
+            end
+            assert.is_true(whole)
             fm:onClose()
             fm, view = openShelf(home)
             assert.are.same({ "a.epub", "b.epub", "c.pdf", "d.txt", "e.pdf" }, names(view.shown))
@@ -816,6 +825,53 @@ describe("Shelf home (FileManager replacement)", function()
             tap(find(topWidget(), C_("Status of group of books", "All")).dimen)
             assert.are.equal(_("Shelf"), titleText(view))
             fm:onClose()
+        end)
+
+        it("repaints the title row when indexing ends under a book's sheet, which only repaints itself on closing", function()
+            stub.jobs = {}
+            local added = {}
+            local ok, err = pcall(function()
+                local fm, view = openShelf(home)
+                -- indexing under way: its progress is in the title row
+                stub.extracting = false
+                view:pollExtraction()
+                UIManager:forceRePaint()
+                local progress = T(_("Indexing books %1 / %2…"), 0, 42)
+                assert.is_truthy(find(view, progress))
+                -- a book's long-press sheet covers the lower part of the shelf
+                local cell = find(view, view.shown[1].title)
+                gesture("hold", cell.dimen.x + dp(10), cell.dimen.y + dp(10))
+                local sheet = topWidget()
+                assert.are_not.equal(fm, sheet)
+                assert.is_false(view:titleRect():intersectWith(sheet.sheet_dimen))
+                -- indexing ends under it: the cache now has every book
+                for __, book in ipairs(view.books) do
+                    if book.needs_extract then
+                        addRow((book.file:gsub(".*/", "")))
+                        table.insert(added, book.file)
+                    end
+                end
+                local refreshes, restore = spyRefreshes()
+                stub.extracting = false
+                view:pollExtraction()
+                UIManager:forceRePaint()
+                assert.is_nil(view.extracting)
+                -- a tap beside the sheet closes it; the title row was repainted without the progress
+                gesture("tap", math.floor(Screen:getWidth() / 2), dp(20))
+                restore()
+                assert.are.equal(fm, topWidget())
+                assert.is_nil(find(view, progress))
+                local title_repainted = false
+                for __, r in ipairs(refreshes) do
+                    assert.are.equal("ui", r.type or "ui")
+                    if r.region and r.region:intersectWith(view:titleRect()) then title_repainted = true end
+                end
+                assert.is_true(title_repainted)
+            end)
+            for __, file in ipairs(added) do stub.rows[file] = nil end
+            while topWidget() ~= FileManager.instance do UIManager:close(topWidget()) end
+            FileManager.instance:onClose()
+            assert(ok, err)
         end)
 
         it("extracts in chunks and re-queues books a killed job left behind", function()
