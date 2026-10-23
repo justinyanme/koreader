@@ -1,7 +1,8 @@
--- Q01/Q02/Q04 through ReaderUI and the shelf, with real EPUB/PDF navigation and sidecars.
+-- Q01-Q04 through ReaderUI and the shelf, with real EPUB/PDF navigation, sidecars and history.
 describe("Book end", function()
-    local BookList, DocSettings, Event, FileManager, Geom, Key, ReaderUI, Replacements, Screen, UIManager
-    local ffiUtil, lfs, home, ui, saved, _
+    local BookList, DocSettings, Event, FileManager, Geom, Key, ReadHistory, ReaderUI, Replacements, Screen, UIManager
+    local ffiUtil, lfs, home, outside, ui, saved, saved_hist, _, C_
+    local real_time, clock = os.time, 0
 
     local function top()
         return UIManager._window_stack[#UIManager._window_stack].widget
@@ -58,6 +59,96 @@ describe("Book end", function()
         assert.are.equal(ui.document:getPageCount(), ui:getCurrentPage())
     end
 
+    -- 更多 → 书籍详情, then the status switch's `n`th choice (1 在读, 2 搁置, 3 读完), and back.
+    local function setStatusInDetails(n)
+        toolbar()
+        tap(find(ui.menu.bars.top, "eink/more"))
+        tap(find(ui.menu.panel, _("Book details")))
+        local details = top()
+        local switch = find(details, function(w) return w.toggle and w.args and w.args[3] == "complete" end)
+        local r = switch.dimen
+        gesture("tap", r.x + r.w * (n - 0.5) / 3, r.y + r.h / 2)
+        UIManager:_checkTasks()
+        UIManager:_checkTasks()
+        UIManager:forceRePaint()
+        details:onClose()
+        UIManager:forceRePaint()
+    end
+
+    -- The book end of `file`, one turn after its last body page.
+    local function bookEnd(file)
+        if FileManager.instance then FileManager.instance:onClose() end
+        open(file)
+        lastPage()
+        nextPage()
+        return ui.status.book_end
+    end
+
+    local function exitReading()
+        tap(find(ui.status.book_end, _("Exit reading")))
+        ui = nil
+        return FileManager.instance
+    end
+
+    -- 读完的第 N 本 (Q03): the number in the emblem, or nil. Its caption is the first line of the emblem's text.
+    local function finishedCaption()
+        return (_.pgettext("Book end", "Finished book\nNo. %1"):match("^(.-)\n"))
+    end
+
+    local function finishedNumber(page)
+        local number = find(page.emblem, function(w) return type(w.text) == "string" and w.text:match("^%d+$") end)
+        return number and tonumber(number.text)
+    end
+
+    -- 标记为 on the shelf (seam B), a minute after the last mark: a long press on the cover, 标记为, the status.
+    local function markOnShelf(title, status)
+        clock = clock + 60
+        if not FileManager.instance then FileManager:showFiles(home) end
+        local fm = FileManager.instance
+        local cell = find(fm.shelf_view, title)
+        gesture("hold", cell.dimen.x + 10, cell.dimen.y + 10)
+        tap(find(fm, "eink/mark"))
+        tap(find(top(), C_("Status of single book", status)))
+        while top().toast do UIManager:close(top()) end
+        UIManager:forceRePaint()
+    end
+
+    -- A copy of the sample PDF with `summary` in its settings file and, if `opened`, in reading history.
+    local function book(path, summary, opened)
+        ffiUtil.copyFile("spec/front/unit/data/sample.pdf", path)
+        DocSettings:open(path):purge()
+        if summary then
+            local doc_settings = DocSettings:open(path)
+            doc_settings:saveSetting("summary", summary)
+            doc_settings:flush()
+        end
+        BookList.resetBookInfoCache(path)
+        if opened then ReadHistory:addItem(path, os.time(), true) end
+        return path
+    end
+
+    -- Books marked 读完 earlier, and books not counted: 5 come before a book marked now.
+    local function finishedBooks()
+        local function year(y) return real_time{ year = y, month = 5, day = 1, hour = 12 } end
+        local today = os.date("%Y-%m-%d")
+        local books = {
+            -- marked in 2019; a review written today changed `modified`, not when it was marked
+            reviewed = book(home .. "/reviewed.pdf", { status = "complete", finished_time = year(2019), modified = today }, true),
+            -- marked before the time was recorded: by the day of the status, before the recorded ones of that day
+            legacy = book(home .. "/legacy.pdf", { status = "complete", modified = "2003-01-01" }),
+            earlier = book(home .. "/earlier.pdf", { status = "complete", modified = today }),
+            -- 移出书架 leaves the book status alone; a finished book outside the home is still one
+            hidden = book(home .. "/hidden.pdf", { status = "complete", finished_time = year(2021), modified = "2021-05-01" }),
+            outside = book(outside .. "/outside.pdf", { status = "complete", finished_time = year(2022), modified = "2022-05-01" }, true),
+            gone = book(outside .. "/gone.pdf", { status = "complete", finished_time = year(2020), modified = "2020-05-01" }, true),
+            reading = book(home .. "/reading.pdf", { status = "reading", modified = "2020-05-01" }, true),
+            unopened = book(home .. "/unopened.pdf"),
+        }
+        require("apps/shelf/shelf").remove{ books.hidden }
+        os.remove(books.gone)
+        return books
+    end
+
     setup(function()
         require("commonrequire")
         disable_plugins()
@@ -67,6 +158,7 @@ describe("Book end", function()
         FileManager = require("apps/filemanager/filemanager")
         Geom = require("ui/geometry")
         Key = require("device/key")
+        ReadHistory = require("readhistory")
         ReaderUI = require("apps/reader/readerui")
         Replacements = require("apps/replacements")
         Screen = require("device").screen
@@ -74,13 +166,18 @@ describe("Book end", function()
         ffiUtil = require("ffi/util")
         lfs = require("libs/libkoreader-lfs")
         _ = require("gettext")
+        C_ = _.pgettext
         require("apps/shelf/shelffilemanager")
         Replacements.reader_menu = require("apps/reader/modules/readertoolbar")
         home = ffiUtil.realpath(require("datastorage"):getDataDir()) .. "/book_end_spec"
         ffiUtil.purgeDir(home)
         lfs.mkdir(home)
+        outside = ffiUtil.realpath(require("datastorage"):getDataDir()) .. "/book_end_spec_outside"
+        ffiUtil.purgeDir(outside)
+        lfs.mkdir(outside)
+        saved_hist = ReadHistory.hist
         saved = {}
-        for __, key in ipairs{ "home_dir", "lastdir", "shelf_filter", "end_document_action", "end_document_auto_mark", "collate" } do
+        for __, key in ipairs{ "home_dir", "lastdir", "shelf_filter", "shelf_removed", "end_document_action", "end_document_auto_mark", "collate" } do
             saved[key] = G_reader_settings:readSetting(key)
             G_reader_settings:delSetting(key)
         end
@@ -88,6 +185,10 @@ describe("Book end", function()
     end)
 
     before_each(function()
+        ReadHistory.hist = {} -- the finished books counted are only this file's
+        -- Marks made one after another are seconds apart, as they are for a reader.
+        clock = 0
+        os.time = function(t) return t and real_time(t) or real_time() + clock end -- luacheck: ignore
         for __, file in ipairs{ "juliet.epub", "sample.pdf" } do
             ffiUtil.copyFile("spec/front/unit/data/" .. file, home .. "/" .. file)
             DocSettings:open(home .. "/" .. file):purge()
@@ -106,15 +207,23 @@ describe("Book end", function()
         while UIManager._window_stack[1] do UIManager:close(top()) end
         G_reader_settings:delSetting("end_document_action")
         G_reader_settings:delSetting("end_document_auto_mark")
+        G_reader_settings:delSetting("shelf_removed")
+        os.time = real_time -- luacheck: ignore
+        for __, dir in ipairs{ home, outside } do
+            ffiUtil.purgeDir(dir)
+            lfs.mkdir(dir)
+        end
     end)
 
     teardown(function()
         for key, value in pairs(saved) do G_reader_settings:saveSetting(key, value) end
-        for __, key in ipairs{ "home_dir", "lastdir", "shelf_filter", "end_document_action", "end_document_auto_mark", "collate" } do
+        for __, key in ipairs{ "home_dir", "lastdir", "shelf_filter", "shelf_removed", "end_document_action", "end_document_auto_mark", "collate" } do
             if saved[key] == nil then G_reader_settings:delSetting(key) end
         end
+        ReadHistory.hist = saved_hist
         Replacements.reader_menu, Replacements.filemanager = nil, nil
         ffiUtil.purgeDir(home)
+        ffiUtil.purgeDir(outside)
     end)
 
     for __, file in ipairs{ "juliet.epub", "sample.pdf" } do
@@ -201,10 +310,14 @@ describe("Book end", function()
         assert.is_true(top().toast)
         assert.are.equal(_("Could not save the book status."), top().text)
         assert.are.equal("reading", ui.doc_settings:readSetting("summary").status)
+        assert.is_nil(ui.doc_settings:readSetting("summary").finished_time)
         assert.are.equal("reading", BookList.getBookStatus(file))
+        assert.is_nil(finishedNumber(ui.status.book_end))
         UIManager:close(top())
         tap(ui.status.book_end.mark_button)
         assert.are.equal("complete", DocSettings:open(file):readSetting("summary").status)
+        assert.are.equal(os.time(), DocSettings:open(file):readSetting("summary").finished_time)
+        assert.are.equal(1, finishedNumber(ui.status.book_end))
     end)
 
     it("uses the Menu and page keys on the book end without turning past the body", function()
@@ -287,21 +400,12 @@ describe("Book end", function()
         lastPage()
         nextPage()
         for __, choice in ipairs{ { 3, "complete" }, { 1, "reading" } } do
-            toolbar()
-            tap(find(ui.menu.bars.top, "eink/more"))
-            tap(find(ui.menu.panel, _("Book details")))
-            local details = top()
-            local switch = find(details, function(w) return w.toggle and w.args and w.args[3] == "complete" end)
-            local r = switch.dimen
-            gesture("tap", r.x + r.w * (choice[1] - 0.5) / 3, r.y + r.h / 2)
-            UIManager:_checkTasks()
-            UIManager:_checkTasks()
-            UIManager:forceRePaint()
+            setStatusInDetails(choice[1])
             assert.are.equal(choice[2], ui.doc_settings:readSetting("summary").status)
-            details:onClose()
-            UIManager:forceRePaint()
             local label = choice[2] == "complete" and "Finished" or "Mark as finished"
             assert.is_truthy(find(ui.status.book_end, _.pgettext("Book end", label)))
+            assert.are.equal(choice[2] == "complete" and 1 or nil, finishedNumber(ui.status.book_end))
+            assert.are.equal(choice[2] == "complete" and os.time() or nil, ui.doc_settings:readSetting("summary").finished_time)
         end
     end)
 
@@ -468,5 +572,81 @@ describe("Book end", function()
         assert.are.equal(ui.status.book_end, top())
         assert.is_truthy(find(top(), _("The End")))
         assert.is_true(ui:getCurrentPage() < ui.document:getPageCount())
+    end)
+
+    it("shows 读完的第 N 本 only when finished, counting books marked 读完 in any year", function()
+        finishedBooks()
+        local page = bookEnd(home .. "/juliet.epub")
+        assert.is_nil(finishedNumber(page))
+        assert.is_nil(find(page, finishedCaption()))
+        tap(page.mark_button)
+        assert.are.equal(6, finishedNumber(page))
+        assert.is_truthy(find(page.emblem, finishedCaption()))
+        -- counted when marked: a book finished elsewhere meanwhile is not counted when notes or rotation
+        -- rebuild the page, only once its status changes again
+        book(home .. "/elsewhere.pdf", { status = "complete", finished_time = 1, modified = "1970-01-01" })
+        toolbar()
+        tap(ui.menu.bookmark_button)
+        UIManager:close(top())
+        ui:handleEvent(Event:new("SetDimensions", Screen:getSize()))
+        UIManager:forceRePaint()
+        assert.are.equal(6, finishedNumber(page))
+        setStatusInDetails(1)
+        assert.is_nil(finishedNumber(page))
+        setStatusInDetails(3)
+        assert.are.equal(7, finishedNumber(page))
+    end)
+
+    it("keeps a book's number when it is reopened, marked again automatically, or followed by other books", function()
+        local books = finishedBooks()
+        local juliet = home .. "/juliet.epub"
+        tap(bookEnd(juliet).mark_button)
+        assert.are.equal(6, finishedNumber(ui.status.book_end))
+        local marked = DocSettings:open(juliet):readSetting("summary")
+        exitReading()
+        markOnShelf("sample", "Finished")
+        G_reader_settings:saveSetting("end_document_auto_mark", true)
+        clock = clock + 60
+        assert.are.equal(6, finishedNumber(bookEnd(juliet)))
+        assert.are.same(marked, ui.doc_settings:readSetting("summary"))
+        assert.are.equal(7, finishedNumber(bookEnd(home .. "/sample.pdf")))
+        -- a book finished before the time was recorded keeps its day too
+        assert.are.equal(1, finishedNumber(bookEnd(books.legacy)))
+        assert.are.equal("2003-01-01", ui.doc_settings:readSetting("summary").modified)
+        -- ordered by when they were marked, not by the later review
+        assert.are.equal(2, finishedNumber(bookEnd(books.reviewed)))
+    end)
+
+    it("follows 读完 and 在读 set on the shelf, and numbers a book marked again as the latest", function()
+        local juliet = home .. "/juliet.epub"
+        finishedBooks()
+        tap(bookEnd(juliet).mark_button)
+        exitReading()
+        markOnShelf("juliet", "Reading")
+        local page = bookEnd(juliet)
+        assert.is_nil(finishedNumber(page))
+        assert.is_truthy(find(page, _.pgettext("Book end", "Mark as finished")))
+        exitReading()
+        markOnShelf("sample", "Finished")
+        markOnShelf("juliet", "Finished")
+        assert.are.equal(7, finishedNumber(bookEnd(juliet)))
+        assert.are.equal(6, finishedNumber(bookEnd(home .. "/sample.pdf")))
+    end)
+
+    it("numbers a book marked 读完 in the original file dialog by when it was marked", function()
+        local juliet = home .. "/juliet.epub"
+        tap(bookEnd(juliet).mark_button)
+        local fm = exitReading()
+        clock = clock + 60
+        fm:openFiles()
+        UIManager:forceRePaint()
+        local item = find(fm.file_chooser, "sample.pdf")
+        gesture("hold", item.dimen.x + item.dimen.w / 2, item.dimen.y + item.dimen.h / 2)
+        tap(find(top(), _("More")))
+        assert.are.equal(fm.file_chooser.file_dialog, top())
+        tap(find(top(), C_("Status of single book", "Finished")))
+        assert.are.equal("complete", DocSettings:open(home .. "/sample.pdf"):readSetting("summary").status)
+        assert.are.equal(1, finishedNumber(bookEnd(juliet)))
+        assert.are.equal(2, finishedNumber(bookEnd(home .. "/sample.pdf")))
     end)
 end)

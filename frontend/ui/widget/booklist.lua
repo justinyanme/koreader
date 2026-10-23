@@ -478,6 +478,17 @@ function BookList.getBookStatus(file)
     return book_info.been_opened and book_info.status or "new"
 end
 
+--- Sets the status in a book's summary. A book that becomes finished also gets the time it was marked
+-- finished (`finished_time`), which orders the finished books: `modified` cannot, as a review changes it too.
+function BookList.setSummaryStatus(summary, status)
+    if status ~= "complete" then
+        summary.finished_time = nil
+    elseif summary.status ~= "complete" then
+        summary.finished_time = os.time()
+    end
+    summary.status = status
+end
+
 local status_strings = {
     all       = C_("Status of group of books", "All"),
     deleted   = C_("Status of group of books", "Deleted"),

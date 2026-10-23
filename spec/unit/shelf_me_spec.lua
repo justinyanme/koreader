@@ -154,7 +154,11 @@ describe("Shelf home, 我的 tab", function()
         addBook("leaves.epub", "leaves.epub", "Leaves of Grass", {
             highlight("I celebrate myself", "Song of Myself"),
         }, { status = "complete", modified = "2001-01-01" }, 1000)
-        addBook("sample.pdf", "sample.pdf", "No notes here", {}, nil, 500)
+        -- finished last year; a review written this year moved `modified`, not the year it was finished
+        addBook("sample.pdf", "sample.pdf", "No notes here", {}, {
+            status = "complete", finished_time = os.time{ year = year - 1, month = 6, day = 1, hour = 12 },
+            modified = year .. "-02-01",
+        }, 500)
 
         today = (os.date("*t").wday + 5) % 7 + 1
     end)
