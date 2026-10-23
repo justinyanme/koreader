@@ -4,8 +4,9 @@ thoughts and bookmarks) on a full-screen page (ui/widget/fullscreenpage), after 
 06-notes/01-notes-list.png, 02-notes-next-page.png and 06-empty-notes-completed-book.png, and
 05-bookmarks/04-bookmark-in-notes.png and 05-bookmarks-and-highlights-filter.png.
 
-Opened by "ShowNotes" (ReaderToolbar): the toolbar's 笔记 lists every note, the contents page's 书签 (and the
-search page's) only the bookmarks, when the book has any. In the title band, 笔记, and 仅显示书签 at the right
+Opened by "ShowNotes" (ReaderToolbar): the toolbar's 笔记 lists all notes; the contents page's 书签 (and the
+search page's) lists only bookmarks, when the book has any. The first toolbar entry after a card jump restores the list left once.
+In the title band, 笔记, and 仅显示书签 at the right
 while the book has bookmarks: a toggle, its bookmark icon filled while only the bookmarks are listed. On the
 first page, the overview card: the book title, → 已读到 x% · 共 N 条笔记, ↗ 时长 N 分钟 (with the statistics
 plugin only) and the cover. N counts every note (ReaderAnnotation:getNumberOfAnnotations()), whatever is
@@ -20,6 +21,10 @@ real text), and only up to the page shown: pages are laid out as the reader turn
 on the page left (with the same filter, or the last page when there are fewer now), and follows the notes as they change while it is
 shown (refresh(), which ReaderToolbar calls on "AnnotationsModified").
 
+A hold asks to delete the note in ConfirmLayer. Bookmarks and highlights are removed; thoughts with
+origin "note" are removed, while other thoughts lose only their note text and keep their highlight.
+Cancel changes nothing. Closing the page closes its confirmation too.
+
 A tap on a card goes to its note, with the location stack keeping the position left, as the contents page
 does. A highlight or a thought gets the jump focus there: its text marked in marker gray for a moment
 (JumpFocus, a view module), which saves nothing and leaves the highlight as it is. A bookmark has no text to
@@ -31,6 +36,7 @@ own repaint joins; the jump focus leaves with "ui" over the lines it marked.
 ]]
 
 local CenterContainer = require("ui/widget/container/centercontainer")
+local ConfirmLayer = require("ui/widget/confirmlayer")
 local Event = require("ui/event")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
@@ -271,6 +277,7 @@ local NotesPage = FullscreenPage:extend{
     ui = nil,
     filter = nil, -- "bookmarks": only the bookmarks are listed (dropped when the book has none)
     on_close = nil, -- function, called once the page is closed
+    on_jump = nil, -- function, remembers the list for the first notes entry from the reader
 }
 
 function NotesPage:init()
@@ -285,8 +292,8 @@ function NotesPage:init()
     self.inner_w = self.column_w - 2 * CARD_BORDER - 2 * CARD_PAD_X -- inside a card's outline and side padding
     self.text_w = self.inner_w - DISC - DISC_GAP
     self.page_texts = setmetatable({}, { __mode = "k" }) -- bookmark => the text its page starts with, kept by refresh()
-    self:collect()
     local left = positions[self.ui.document]
+    self:collect()
     if left and left.filter == self.filter then
         self:layOutTo(left.page)
         self.page = math.min(left.page, #self.pages)
@@ -464,6 +471,7 @@ function NotesPage:buildCard(entry)
     local disc = TypeDisc:new{ kind = kind, drawer = item.drawer }
     local card = Tappable:new{
         callback = function() self:jump(item) end,
+        hold_callback = function() self:confirmDelete(item) end,
         self:card(HorizontalGroup:new{
             align = "top",
             -- the disc on the first line
@@ -657,10 +665,34 @@ function NotesPage:refresh()
     UIManager:setDirty(self, "ui", self.dimen)
 end
 
+function NotesPage:confirmDelete(item)
+    self.confirm = ConfirmLayer:new{
+        -- @translators A note here can be a bookmark, a highlight or a thought.
+        text = _("Delete this note?"),
+        actions = { { text = _("Delete"), callback = function()
+            -- Bookmarks created in the same second can share all fields used by getItemIndex.
+            local index = util.arrayContains(self.ui.annotation.annotations, item)
+            if not index then return end
+            if item.drawer and item.note and item.origin ~= "note" then
+                -- Old thoughts without an origin keep their highlight too.
+                self.ui.highlight:setNote(index, "")
+            else
+                self.ui.bookmark:removeItem(item, index)
+                if not item.drawer then
+                    self.ui:handleEvent(Event:new("AnnotationsModified", { item, index_modified = -index }))
+                end
+            end
+        end } },
+        on_close = function() self.confirm = nil end,
+    }
+    UIManager:show(self.confirm, "ui", self.confirm:getRefreshRegion())
+end
+
 function NotesPage:jump(item)
     if self.closed then return end
     self.closed = true
     UIManager:close(self, "partial", self.dimen)
+    if self.on_jump then self.on_jump() end
     self.ui.link:addCurrentLocationToStack()
     if self.ui.rolling then
         -- no margin marker: the jump focus marks the text itself
@@ -674,6 +706,7 @@ function NotesPage:jump(item)
 end
 
 function NotesPage:onCloseWidget()
+    if self.confirm then self.confirm:onClose() end
     if self.ui.document then -- not when the reader closes with the page shown
         positions[self.ui.document] = { filter = self.filter, page = self.page }
     end

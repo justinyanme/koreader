@@ -12,12 +12,15 @@ Replaces ReaderHighlight (apps/replacements reader_highlight slot):
   pages from the page corners as a long-press drag does, the popover hidden
   meanwhile; expanding either way saves one highlight on release and shows
   Delete highlight, unless an explicit legacy action is configured;
-- a tap on a highlight, or a long-press on a word of it, shows the same four
-  actions with "Delete highlight" in the first place; after a long-press, the
-  look-up is for the word pressed;
+- a tap on a highlight, or a long-press on a word of it, replaces "Highlight"
+  with "Delete highlight" and adds "Delete note" when it has a thought;
+  after a long-press, the look-up is for the word pressed;
 - copying closes the popover and confirms with a toast;
-- a note is written in a bottom sheet; highlights with a note get a small mark
-  after their last character.
+- a thought is written in a compact band above the keyboard, over a washed,
+  inert page; Back discards the draft, Save persists it and shows a toast;
+- direct thoughts carry origin = "note" and only a small mark after their last
+  character. Clearing them removes the record; clearing an attached thought
+  leaves its highlight, including old records without origin.
 
 New highlights are lines unless a default style was saved, in 设置 → 阅读 →
 划线样式 (genDefaultStyleMenuItem, which sends "DefaultHighlightStyleChanged" to the
@@ -29,14 +32,15 @@ Refreshes: both popovers and the toast are black and white, so they show and
 close with "fast" on their own rect, or "ui" where the page under them is gray
 (the toast is solid, so it always shows with "fast"). So do the selection's
 lines and handles when it changes or clears (the old and new ones together).
-Saving, restyling or deleting a highlight refreshes its own lines with "ui";
-nothing here refreshes the whole screen, but a selection across pages (the
-page scrolled), as upstream.
+Saving, restyling or deleting a highlight refreshes its own lines with "ui".
+The thought editor and deletion confirmation wash the page, so showing and
+closing them refresh the whole screen with "ui", never "full".
 ]]
 
 local BottomSheet = require("ui/widget/bottomsheet")
+local CenterContainer = require("ui/widget/container/centercontainer")
+local ConfirmLayer = require("ui/widget/confirmlayer")
 local Device = require("device")
-local EinkControls = require("ui/widget/einkcontrols")
 local Event = require("ui/event")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
@@ -46,11 +50,14 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
 local InputText = require("ui/widget/inputtext")
+local InputContainer = require("ui/widget/container/inputcontainer")
+local LineWidget = require("ui/widget/linewidget")
 local Palette = require("ui/palette")
 local ReaderHighlight = require("apps/reader/modules/readerhighlight")
 local SelectionBubble = require("ui/widget/selectionbubble")
 local Size = require("ui/size")
 local TextBoxWidget = require("ui/widget/textboxwidget")
+local TextWidget = require("ui/widget/textwidget")
 local Toast = require("ui/widget/toast")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -74,6 +81,7 @@ function NoteMarks:init()
 end
 
 function NoteMarks:paintTo(bb, x, y)
+    self.targets = {}
     local annotations = self.highlight.ui.annotation.annotations
     local last = {}
     for _, box in ipairs(self.highlight.view.highlight.visible_boxes or {}) do
@@ -82,11 +90,18 @@ function NoteMarks:paintTo(bb, x, y)
             last[box.index] = box
         end
     end
-    for _, box in pairs(last) do
+    for index, box in pairs(last) do
         local r = self.highlight:boxToScreen(box)
         if r then
             -- raised into the line gap: page text cannot reflow around it
-            self.icon:paintTo(bb, x + r.x + r.w, y + r.y - math.floor(self.size / 2))
+            local mark = Geom:new{ x = r.x + r.w, y = r.y - math.floor(self.size / 2), w = self.size, h = self.size }
+            local touch = Screen:scaleBySize(44)
+            self.targets[index] = Geom:new{
+                x = math.max(0, math.min(Screen:getWidth() - touch, mark.x - math.floor((touch - mark.w) / 2))),
+                y = math.max(0, math.min(Screen:getHeight() - touch, mark.y - math.floor((touch - mark.h) / 2))),
+                w = touch, h = touch,
+            }
+            self.icon:paintTo(bb, x + mark.x, y + mark.y)
         end
     end
 end
@@ -170,14 +185,86 @@ function SelectionPopover:paintTo(bb, x, y)
     end
 end
 
---- Note sheet: stays above the on-screen keyboard.
+-- Separate from the editor so typing never washes an already washed page again.
+local NoteWash = Widget:extend{}
+function NoteWash:paintTo(bb, x, y)
+    bb:lightenRect(x, y, Screen:getWidth(), Screen:getHeight(), Palette.wash.a / 0xFF)
+end
+
+local EditorAction = InputContainer:extend{}
+function EditorAction:init()
+    self.dimen = Geom:new{ w = self.width, h = self.height }
+    self[1] = CenterContainer:new{ dimen = self.dimen:copy(), self.label }
+    self.ges_events.TapSelect = { GestureRange:new{ ges = "tap", range = self.dimen } }
+end
+function EditorAction:onTapSelect()
+    self.callback()
+    return true
+end
+
+--- A compact input band, immediately above the keyboard; Back discards this draft.
 local NoteSheet = BottomSheet:extend{
-    input = nil, -- InputText
-    is_always_active = true, -- taps outside the keyboard on top of us still reach us, as with InputDialog
-    close_on_scrim = false, -- a stray tap must not lose the text being typed
+    is_always_active = true,
+    close_on_scrim = false,
+    stop_events_propagation = true,
 }
 
+function NoteSheet:build()
+    local sw = Screen:getWidth()
+    local gap, back_w = Screen:scaleBySize(20), Screen:scaleBySize(75)
+    local rule = Size.border.default
+    local input_h = self.input:getSize().h
+    local quote_h = self.quote:getSize().h
+    local band_h = math.max(Screen:scaleBySize(92), input_h + quote_h + Screen:scaleBySize(20))
+    if not self.frame then
+        local icon_size = Screen:scaleBySize(22)
+        local back = EditorAction:new{
+            width = back_w - rule, height = band_h, callback = function() self:onClose() end,
+            label = VerticalGroup:new{
+                IconWidget:new{ icon = "eink/arrow.left", width = icon_size, height = icon_size },
+                VerticalSpan:new{ width = Screen:scaleBySize(6) },
+                TextWidget:new{ text = _("Back"), face = Font:getFace("ui_caption"), bold = true },
+            },
+        }
+        self.frame = FrameContainer:new{
+            padding = 0, bordersize = 0, background = Palette.paper,
+            VerticalGroup:new{
+                LineWidget:new{ dimen = Geom:new{ w = sw, h = rule }, background = Palette.rule },
+                HorizontalGroup:new{
+                    align = "center",
+                    back,
+                    LineWidget:new{ dimen = Geom:new{ w = rule, h = Screen:scaleBySize(45) }, background = Palette.rule },
+                    HorizontalSpan:new{ width = gap },
+                    VerticalGroup:new{
+                        align = "left",
+                        HorizontalGroup:new{
+                            align = "top",
+                            IconWidget:new{ icon = "eink/thought", width = icon_size, height = icon_size },
+                            HorizontalSpan:new{ width = Screen:scaleBySize(14) },
+                            self.input,
+                            self.save_button,
+                        },
+                        VerticalSpan:new{ width = Screen:scaleBySize(6) },
+                        HorizontalGroup:new{
+                            LineWidget:new{ dimen = Geom:new{ w = Size.border.thick, h = quote_h }, background = Palette.ink },
+                            HorizontalSpan:new{ width = Screen:scaleBySize(8) },
+                            self.quote,
+                        },
+                    },
+                    HorizontalSpan:new{ width = gap },
+                },
+            },
+        }
+    end
+    self.sheet_y = Screen:getHeight() - self.bottom_inset - self.frame:getSize().h
+end
+
+function NoteSheet:paintTo(bb, x, y)
+    self.frame:paintTo(bb, x, y + self.sheet_y)
+end
+
 function NoteSheet:fitKeyboard()
+    if self.closed then return end
     local old = self:getRefreshRegion()
     self.bottom_inset = self.input:isKeyboardVisible() and self.input:getKeyboardDimen().h or 0
     self:build()
@@ -186,7 +273,15 @@ end
 NoteSheet.onKeyboardHeightChanged = NoteSheet.fitKeyboard
 NoteSheet.onKeyboardClosed = NoteSheet.fitKeyboard
 
--- A tap on the text area once the keyboard was hidden: as InputText does without a parent, then make room again.
+-- InputText asks for a focus grid on D-pad devices; this editor has only one input.
+function NoteSheet:getFocusableWidgetXY() end
+
+function NoteSheet:onKeyPress(key)
+    InputContainer.onKeyPress(self, key)
+    return true
+end
+NoteSheet.onKeyRepeat = NoteSheet.onKeyPress
+
 function NoteSheet:onSwitchFocus(input)
     if not ((Device:hasKeyboard() or Device:hasScreenKB()) and G_reader_settings:nilOrFalse("virtual_keyboard_enabled")) then
         input:onShowKeyboard()
@@ -197,9 +292,19 @@ function NoteSheet:onSwitchFocus(input)
 end
 
 function NoteSheet:onClose()
-    -- the keyboard is freed with the input text, so hide it first
+    if self.closed then return true end
+    self.closed = true
     self.input:onCloseKeyboard()
-    return BottomSheet.onClose(self)
+    UIManager:close(self, "ui", Screen:getSize())
+    return true
+end
+NoteSheet.onCloseDialog = NoteSheet.onClose
+
+function NoteSheet:onCloseWidget()
+    self.input:onCloseKeyboard()
+    UIManager:close(self.wash, "ui", Screen:getSize())
+    if self.on_close then self.on_close() end
+    self.frame:free()
 end
 
 local ReaderHighlightBubble = ReaderHighlight:extend{}
@@ -706,12 +811,20 @@ function ReaderHighlightBubble:dismiss()
     self:clear(nil, true)
 end
 
-function ReaderHighlightBubble:onClose(keep_highlight)
+function ReaderHighlightBubble:onCloseWidget()
+    if self.note_sheet then self.note_sheet:onClose() end
     self:closeBubble()
+end
+
+function ReaderHighlightBubble:onClose(keep_highlight)
+    self:onCloseWidget()
     if not keep_highlight then
         self:clear()
     end
 end
+
+-- Close the draft while the document is still alive, before ReaderUI frees it.
+ReaderHighlightBubble.onCloseDocument = ReaderHighlightBubble.onClose
 
 function ReaderHighlightBubble:onHoldRelease()
     if not self.hold_pos and not self.select_mode then
@@ -765,7 +878,7 @@ function ReaderHighlightBubble:highlightsAt(pos)
     local indexes, seen = {}, {}
     for _, box in ipairs(self.view.highlight.visible_boxes or {}) do
         local r = box.rect
-        if not seen[box.index] and (not box.page or box.page == pos.page)
+        if box.drawer ~= "note" and not seen[box.index] and (not box.page or box.page == pos.page)
                 and pos.x >= r.x and pos.x <= r.x + r.w and pos.y >= r.y and pos.y <= r.y + r.h then
             seen[box.index] = true
             table.insert(indexes, box.index)
@@ -843,8 +956,7 @@ function ReaderHighlightBubble:onShowHighlightMenu(index)
                 end
             end),
             { icon = "eink/thought", text = C_("Highlight bubble", "Write note"), callback = function()
-                local index = self:saveSelection()
-                if index then self:showNoteSheet(index, true) end
+                self:showNoteSheet()
             end },
             { icon = "eink/copy", text = C_("Text", "Copy"), callback = function()
                 self:dismiss()
@@ -886,6 +998,17 @@ function ReaderHighlightBubble:showHighlightNoteOrDialog(index)
     self:showHighlightBubble(index)
 end
 
+function ReaderHighlightBubble:onTap(arg, ges)
+    local marks = self.view.view_modules.note_marks
+    for index, rect in pairs(marks and marks.targets or {}) do
+        if ges.pos:intersectWith(rect) then
+            self:showHighlightBubble(index)
+            return true
+        end
+    end
+    return ReaderHighlight.onTap(self, arg, ges)
+end
+
 --- Highlight popover: the selection popover's actions, with "Delete highlight" in the first place.
 -- rects: screen rects of the highlight when it has not been painted yet
 -- word: the selection of a word long-pressed in it, which the look-up is for instead of the whole highlight
@@ -895,28 +1018,47 @@ function ReaderHighlightBubble:showHighlightBubble(index, rects, word)
     if #rects == 0 then
         return ReaderHighlight.showHighlightNoteOrDialog(self, index)
     end
-    local bubble = SelectionBubble:new{
-        rows = { {
-            { icon = "eink/highlight-off", text = C_("Highlight bubble", "Delete highlight"), callback = function()
+    local actions = {}
+    if item.origin ~= "note" then
+        table.insert(actions, {
+            icon = "eink/highlight-off", text = C_("Highlight bubble", "Delete highlight"),
+            callback = function()
                 self:closeBubble()
                 self:deleteHighlight(index)
-            end },
-            self:lookupCell((word or item).text, function()
+            end,
+        })
+    end
+    if item.note then
+        table.insert(actions, {
+            icon = "eink/thought", text = C_("Thought editor", "Delete note"),
+            callback = function()
                 self:closeBubble()
-                self.selected_text = util.tableDeepCopy(word or item)
-                self:lookupDict(not word and index or nil)
-            end),
-            { icon = "eink/thought",
-              text = item.note and C_("Highlight bubble", "Edit note") or C_("Highlight bubble", "Write note"),
-              callback = function()
-                self:closeBubble()
-                self:showNoteSheet(index)
-              end },
-            { icon = "eink/copy", text = C_("Text", "Copy"), callback = function()
-                self:closeBubble()
-                self:copyText(item.text)
-            end },
-        } },
+                local layer = ConfirmLayer:new{
+                    text = C_("Thought editor", "Delete this note?"),
+                    actions = { { text = _("Delete"), callback = function() self:setNote(index, "") end } },
+                }
+                UIManager:show(layer, "ui", layer:getRefreshRegion())
+            end,
+        })
+    end
+    table.insert(actions, self:lookupCell((word or item).text, function()
+        self:closeBubble()
+        self.selected_text = util.tableDeepCopy(word or item)
+        self:lookupDict(not word and index or nil)
+    end))
+    table.insert(actions, {
+        icon = "eink/thought",
+        text = item.note and C_("Highlight bubble", "Edit note") or C_("Highlight bubble", "Write note"),
+        callback = function() self:showNoteSheet(index) end,
+    })
+    table.insert(actions, {
+        icon = "eink/copy", text = C_("Text", "Copy"), callback = function()
+            self:closeBubble()
+            self:copyText(item.text)
+        end,
+    })
+    local bubble = SelectionBubble:new{
+        rows = { actions },
         anchor_rects = rects,
         tap_close_callback = function() self:closeBubble() end,
     }
@@ -931,93 +1073,68 @@ function ReaderHighlightBubble:deleteHighlight(index)
     UIManager:setDirty(self.dialog, "ui", region) -- whole page when not visible, as upstream
 end
 
---- Sets or clears (empty text) the note of a highlight, as ReaderBookmark:setBookmarkNote().
+--- Updates the note through the shared lifecycle, repainting its text and marker.
 function ReaderHighlightBubble:setNote(index, text)
-    local annotation = self.ui.annotation.annotations[index]
-    local value = text ~= "" and text or nil
-    local type_before = self.ui.bookmark.getBookmarkType(annotation)
-    annotation.note = value
-    self:writePdfAnnotation("content", annotation, value or "")
-    local type_after = self.ui.bookmark.getBookmarkType(annotation)
-    if type_before == type_after then
-        self.ui.annotation:onAnnotationsModified({ annotation })
-    elseif type_before == "highlight" then
-        self.ui:handleEvent(Event:new("AnnotationsModified", { annotation, nb_highlights_added = -1, nb_notes_added = 1 }))
-    else
-        self.ui:handleEvent(Event:new("AnnotationsModified", { annotation, nb_highlights_added = 1, nb_notes_added = -1 }))
-    end
+    local region = self:linesRegion(self:highlightRects(index))
+    local _, _, changed = self.ui.annotation:setNote(index, text)
+    if changed then UIManager:setDirty(self.dialog, "ui", region) end
 end
 
---- Note sheet: the quoted text, a text area, cancel and save.
--- is_new: the highlight was made for this note, so cancelling removes it
-function ReaderHighlightBubble:showNoteSheet(index, is_new)
-    local item = self.ui.annotation.annotations[index]
-    local content_w = BottomSheet.getContentWidth()
-    local border, pad, gap = Size.border.button, Screen:scaleBySize(12), Screen:scaleBySize(10)
+--- New thoughts stay drafts until Save; existing thoughts keep their value on Back.
+function ReaderHighlightBubble:showNoteSheet(index)
+    local item = index and self.ui.annotation.annotations[index] or util.tableDeepCopy(self.selected_text)
+    if not item then return end
+    local gap, back_w, icon_w = Screen:scaleBySize(20), Screen:scaleBySize(75), Screen:scaleBySize(36)
+    local content_w = Screen:getWidth() - back_w - 2 * gap
     local sheet
+    local save_label = TextWidget:new{ text = _("Save"), face = Font:getFace("ui_title"), bold = true }
+    local button_w = math.max(Screen:scaleBySize(72), save_label:getSize().w + gap)
     local input = InputText:new{
         text = item.note or "",
-        hint = _("Write down your thoughts…"),
+        hint = _("Write your thoughts on this moment…"),
         face = Font:getFace("ui_body"),
-        width = content_w - 2 * (border + pad),
-        height = Screen:scaleBySize(118) - 2 * (border + pad),
-        scroll = true,
-        bordersize = 0,
-        padding = 0,
-        margin = 0,
+        width = content_w - icon_w - button_w,
+        height = math.max(Screen:scaleBySize(44), 2 * Font:getFace("ui_body").size),
+        scroll = true, bordersize = 0, padding = 0, margin = 0,
     }
-    local saved = false
-    local function done(save)
-        saved = save
-        if save then
-            self:setNote(index, input:getText())
-        end
-        local region = self:linesRegion(self:highlightRects(index))
-        sheet:onClose()
-        if region then
-            UIManager:setDirty(self.dialog, "ui", region)
-        end
-    end
-    local quote_args = { text = item.text, face = Font:getFace("ui_excerpt"), fgcolor = Palette.ink_2, width = content_w }
-    local quote = TextBoxWidget:new(quote_args)
-    if #quote.vertical_string_list > 2 then -- clamp to 2 lines
-        quote_args.height = 2 * quote:getLineHeight()
-        quote:free()
-        quote_args.height_overflow_show_ellipsis = true
-        quote = TextBoxWidget:new(quote_args)
-    end
-    local button_w = math.floor((content_w - gap) / 2)
+    local quote = TextBoxWidget:new{
+        text = util.cleanupSelectedText(item.text), face = Font:getFace("ui_label"), fgcolor = Palette.ink,
+        width = content_w - Screen:scaleBySize(8) - Size.border.thick,
+        height = math.ceil(Font:getFace("ui_label").size * 1.5), height_overflow_show_ellipsis = true,
+    }
     sheet = NoteSheet:new{
-        title = item.note and C_("Note sheet", "Edit note") or C_("Highlight bubble", "Write note"),
-        input = input,
-        content = VerticalGroup:new{
-            align = "left",
-            quote,
-            VerticalSpan:new{ width = pad },
-            FrameContainer:new{
-                bordersize = border,
-                color = Palette.ink,
-                radius = gap,
-                padding = pad,
-                input,
-            },
-            VerticalSpan:new{ width = Screen:scaleBySize(14) },
-            HorizontalGroup:new{
-                EinkControls.PillButton:new{ text = _("Cancel"), width = button_w, callback = function() done(false) end },
-                HorizontalSpan:new{ width = gap },
-                EinkControls.PillButton:new{ text = _("Save"), solid = true, width = button_w, callback = function() done(true) end },
-            },
+        input = input, quote = quote,
+        save_button = EditorAction:new{
+            text = _("Save"), label = save_label, width = button_w, height = Screen:scaleBySize(44),
+            callback = function()
+                local text = input:getText()
+                if not text:find("%S") then text = "" end
+                if index then
+                    self:setNote(index, text)
+                elseif text ~= "" then
+                    self.ui.annotation:addNote(item, text)
+                end
+                sheet:onClose()
+                if text ~= "" then
+                    local toast = Toast:new{ text = _("Thought saved") }
+                    toast.close_refresh_type = self:refreshTypeOver(toast.dimen)
+                    UIManager:show(toast)
+                end
+            end,
         },
-        bottom_inset = input:getKeyboardDimen().h,
+        bottom_inset = 0,
+        wash = NoteWash:new{},
         on_close = function()
-            if is_new and not saved then
-                self:deleteHighlight(index)
-            end
+            self.note_sheet = nil
+            self:dismiss()
         end,
     }
+    self.note_sheet = sheet
     input.parent = sheet
-    UIManager:show(sheet, "ui", sheet:getRefreshRegion())
+    UIManager:show(sheet.wash, "ui", Screen:getSize())
+    UIManager:show(sheet, "ui", Screen:getSize())
     input:onShowKeyboard()
+    sheet:fitKeyboard()
 end
 
 return ReaderHighlightBubble

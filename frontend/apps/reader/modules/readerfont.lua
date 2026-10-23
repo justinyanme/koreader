@@ -160,9 +160,14 @@ function ReaderFont:onSetDimensions(dimen)
 end
 
 function ReaderFont:onReadSettings(config)
+    cre = require("document/credocument"):engineInit()
     self.font_face = config:readSetting("font_face")
                   or G_reader_settings:readSetting("cre_font")
                   or self.ui.document.default_font
+    if not util.arrayContains(cre.getFontFaces(), self.font_face) then
+        self.font_face = self.ui.document.default_font
+        self.missing_font = true
+    end
     self.ui.document:setFontFace(self.font_face)
 
     local header_font = G_reader_settings:readSetting("header_font") or self.ui.document.header_font
@@ -297,6 +302,18 @@ function ReaderFont:onSetFontGamma(gamma)
     return true
 end
 
+function ReaderFont:onTypographyLanguageChanged()
+    if not self.missing_font then return end
+    local lang = self.ui.typography.text_lang_tag or ""
+    local face = lang:lower():match("^zh") and FontList:getSystemFontFace() or self.ui.document.default_font
+    self.font_face = face
+    self.ui.document:setFontFace(face)
+end
+
+function ReaderFont:onReaderReady()
+    self.missing_font = nil
+end
+
 function ReaderFont:onSaveSettings()
     self.ui.doc_settings:saveSetting("font_face", self.font_face)
     self.ui.doc_settings:saveSetting("font_family_fonts", self.font_family_fonts)
@@ -304,14 +321,11 @@ end
 
 function ReaderFont:onSetFont(face)
     if face and self.font_face ~= face then
-        for _, fontinfo in pairs(FontList.fontinfo) do
-            if fontinfo[1].name == face then
-                self.font_face = face
-                self.ui.document:setFontFace(face)
-                -- signal readerrolling to update pos in new height
-                self.ui:handleEvent(Event:new("UpdatePos"))
-                return
-            end
+        if util.arrayContains(cre.getFontFaces(), face) then
+            self.font_face = face
+            self.ui.document:setFontFace(face)
+            -- signal readerrolling to update pos in new height
+            self.ui:handleEvent(Event:new("UpdatePos"))
         end
     end
 end
@@ -718,6 +732,7 @@ Do you want to clear the history of selected fonts?]]),
                 ok_text = _("Clear"),
                 ok_callback = function()
                     G_reader_settings:delSetting("cre_fonts_recently_selected")
+                    G_reader_settings:delSetting("cre_fonts_explicitly_selected")
                     -- Recreate it now, sorted alphabetically (we may not go visit
                     -- and refresh the font menu until quit, but we want to be able
                     -- to notice newly added fonts at next startup).
@@ -812,6 +827,10 @@ This setting allows scaling all monospace fonts by this percentage so they can f
 end
 
 function ReaderFont:addToRecentlySelectedList(face)
+    -- The recent list also tracks discovered fonts; distinguish actual choices without discarding that catalog.
+    local selected = G_reader_settings:readSetting("cre_fonts_explicitly_selected", {})
+    selected[face] = true
+    G_reader_settings:saveSetting("cre_fonts_explicitly_selected", selected)
     local idx = util.arrayContains(self.fonts_recently_selected, face)
     if idx then
         table.remove(self.fonts_recently_selected, idx)
