@@ -101,7 +101,7 @@ function AutoTurn:setInterval(seconds, distance, silent)
 end
 
 function AutoTurn:start()
-    self:setInterval(self.autoturn_sec > 0 and self.autoturn_sec or 60, 1, true)
+    self:setInterval(self.autoturn_sec > 0 and self.autoturn_sec or 60, nil, true)
 end
 
 function AutoTurn:stop()
