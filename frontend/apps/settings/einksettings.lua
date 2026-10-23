@@ -7,7 +7,8 @@ event in the reader (ReaderToolbar) and the file manager (ShelfFileManager): the
 centered title on top, the back arrow and the page capsule at the bottom. Rows are
 backed by the original menu's items: a group row opens its items, and their entries
 open as pages of uniform rows (name, current value, then a chevron, a toggle or a
-check mark). The back arrow goes back up a level, and closes the page from the top.
+check mark). A row may instead open a page of the new settings' own (the interface font
+size). The back arrow goes back up a level, and closes the page from the top.
 The page keeps TouchMenu's state names (item_table, item_table_stack, page) and
 methods (updateItems, closeMenu, backToUpperMenu), so the items' callbacks work
 unchanged.
@@ -231,6 +232,10 @@ function EinkSettings:homeEntry(row, group_id)
     local entry = { text = row.text, row_id = row.id, group_id = group_id, choice = row.choice }
     if row.original then
         entry.callback = function() self:openOriginal() end
+        return entry
+    end
+    if row.open then
+        entry.callback, entry.value_func = row.open, row.value
         return entry
     end
     local items = self:rowItems(row)
@@ -505,6 +510,13 @@ function EinkSettings:hold(spec)
     local help_text = item.help_text_func and item.help_text_func(self) or item.help_text
     if help_text or spec.truncated then
         UIManager:show(InfoMessage:new{ text = help_text or itemText(item), show_icon = help_text ~= nil })
+    end
+end
+
+--- The interface font size changed (apps/settings/uifontsize, on top): rebuilt with the new faces, repainted when uncovered.
+function EinkSettings:onUIFontScaleChanged()
+    if not self.closed then
+        self:build()
     end
 end
 

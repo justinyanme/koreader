@@ -129,7 +129,8 @@ function EntryPill:init()
     local pad = Screen:scaleBySize(12)
     local label = HorizontalGroup:new{
         align = "center",
-        text(self.text, "ui_label", Palette.ink),
+        -- no vertical padding: the largest interface font size fills the pill
+        TextWidget:new{ text = self.text, face = Font:getFace("ui_label"), fgcolor = Palette.ink, padding = 0 },
         HorizontalSpan:new{ width = Screen:scaleBySize(4) },
         IconWidget:new{ icon = "eink/chev", width = chev, height = chev, alpha = true },
     }
