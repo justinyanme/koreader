@@ -3,14 +3,16 @@ Image preview of the e-ink redesign (see DESIGN.md, Image preview): an image of 
 shown over the whole screen, centered on an ink ground, with no title or buttons, as WeChat
 Read shows a tapped illustration (09-images/02-image-preview.png).
 
-- a double tap zooms in to twice the fitting size, the point tapped staying under the finger,
-  and the next one fits it again (09-images/03-image-preview-zoom.png); ImageViewer's pinches, spreads, drags,
-  swipes and keys keep working;
+- a double tap zooms in to twice the fitting size (or as far as ImageViewer's limit allows),
+  the point tapped staying under the finger, and the next one fits it again
+  (09-images/03-image-preview-zoom.png); ImageViewer's pinches, spreads, drags, swipes and
+  keys keep working;
 - a tap closes it, back to the same place in the text, and so do Back and ImageViewer's
   closing swipes; the side thirds still step through the frames of an animated image;
 - the image lies on paper, so that its transparent parts read as they do on the page.
 
-ReaderHighlightBubble opens it for a tap on an image. A long-press still opens ImageViewer
+ReaderHighlightBubble opens it for a tap on an image (from the middle of the page only, for an
+image over half of it). A long-press still opens ImageViewer
 itself, with its buttons (original size, rotation) and, without multitouch, the bottom-left
 corner that saves the view (a two-finger tap does here).
 
@@ -34,16 +36,11 @@ local Screen = Device.screen
 local Paper = WidgetContainer:extend{}
 
 function Paper:paintTo(bb, x, y)
-    local image = self[1]
-    local box = image:getSize() -- renders it
-    -- where ImageWidget:paintTo() blits the image in its box, centered or panned by its offsets
-    local x0, y0 = math.max(0, -image._offset_x), math.max(0, -image._offset_y)
-    local x1 = math.min(box.w, image:getCurrentWidth() - image._offset_x)
-    local y1 = math.min(box.h, image:getCurrentHeight() - image._offset_y)
-    if x1 > x0 and y1 > y0 then
-        bb:paintRect(x + x0, y + y0, x1 - x0, y1 - y0, Palette.paper)
+    local shown = self[1]:getShownRect()
+    if shown.w > 0 and shown.h > 0 then
+        bb:paintRect(x + shown.x, y + shown.y, shown.w, shown.h, Palette.paper)
     end
-    image:paintTo(bb, x, y)
+    self[1]:paintTo(bb, x, y)
 end
 
 local ImagePreview = ImageViewer:extend{
@@ -84,21 +81,30 @@ function ImagePreview:onTap(_, ges)
 end
 
 function ImagePreview:onDoubleTap(_, ges)
-    if self.scale_factor == 0 then -- fitting
-        self:_refreshScaleFactor()
-        -- The point tapped stays under the finger: the center moves from it (as ratios of the image) by its
-        -- offset from the middle of the screen at the new size. ImageWidget still centers a side that fits.
-        local dx, dy = ges.pos.x - Screen:getWidth() / 2, ges.pos.y - Screen:getHeight() / 2
-        local x, y = self._image_wg:getPanByCenterRatio(dx, dy)
-        local zoom = self.double_tap_zoom
-        self._center_x_ratio = x - dx / (self._image_wg:getCurrentWidth() * zoom)
-        self._center_y_ratio = y - dy / (self._image_wg:getCurrentHeight() * zoom)
-        self:_applyNewScaleFactor(self.scale_factor * zoom)
-    else
+    if self.scale_factor ~= 0 then -- zoomed: fit again
         self.scale_factor = 0
         self._center_x_ratio, self._center_y_ratio = 0.5, 0.5
         self:update()
+        return true
     end
+    self:_refreshScaleFactor()
+    local fit = self.scale_factor
+    -- the limits _applyNewScaleFactor() clamps to, which it gets the first time as we do
+    if not self._min_scale_factor or not self._max_scale_factor then
+        self._min_scale_factor, self._max_scale_factor = self._image_wg:getScaleFactorExtrema()
+    end
+    local zoom = math.min(fit * self.double_tap_zoom, self._max_scale_factor) / fit
+    if zoom <= 1 then -- as large as it may be already: it stays fitted
+        self.scale_factor = 0
+        return true
+    end
+    -- The point tapped stays under the finger: the center moves from it (as ratios of the image) by its
+    -- offset from the middle of the screen at the new size. ImageWidget still centers a side that fits.
+    local dx, dy = ges.pos.x - Screen:getWidth() / 2, ges.pos.y - Screen:getHeight() / 2
+    local x, y = self._image_wg:getPanByCenterRatio(dx, dy)
+    self._center_x_ratio = x - dx / (self._image_wg:getCurrentWidth() * zoom)
+    self._center_y_ratio = y - dy / (self._image_wg:getCurrentHeight() * zoom)
+    self:_applyNewScaleFactor(fit * zoom)
     return true
 end
 

@@ -1,6 +1,6 @@
 describe("Image preview", function()
     local DocumentRegistry, DocSettings, ReaderUI, ReaderToolbar, ReaderHighlightBubble, Replacements, UIManager
-    local Event, Geom, Key, ImagePreview, Input, Screen, ffiUtil, lfs
+    local Event, Geom, Key, ImagePreview, ImageViewer, Input, Screen, ffiUtil, lfs, util, _
     local sample_pdf = "spec/front/unit/data/sample.pdf"
     local dir, book
     local W, H
@@ -70,13 +70,61 @@ describe("Image preview", function()
         end)
     end
 
+    -- GIF data of a w x h image with a frame for each pixel(x, y) function, which returns a gray (0 for ink,
+    -- 255 for paper), the gray being the index in its palette. The codes are left uncompressed: a clear code
+    -- before every 250 of them keeps them 9 bits wide.
+    local function gif(w, h, frames)
+        local function le16(n) return string.char(n % 256, math.floor(n / 256)) end
+        local out = { "GIF89a", le16(w), le16(h), "\247\0\0" }
+        for i = 0, 255 do out[#out + 1] = string.char(i, i, i) end
+        for _, pixel in ipairs(frames) do
+            local bytes, acc, nbits, count = {}, 0, 0, 0
+            local function emit(code)
+                acc = acc + code * 2 ^ nbits
+                nbits = nbits + 9
+                while nbits >= 8 do
+                    bytes[#bytes + 1] = string.char(acc % 256)
+                    acc, nbits = math.floor(acc / 256), nbits - 8
+                end
+            end
+            for y = 0, h - 1 do
+                for x = 0, w - 1 do
+                    if count % 250 == 0 then emit(256) end
+                    emit(pixel(x, y))
+                    count = count + 1
+                end
+            end
+            emit(257)
+            if nbits > 0 then bytes[#bytes + 1] = string.char(acc) end
+            local data = table.concat(bytes)
+            out[#out + 1] = "\33\249\4\0" .. le16(50) .. "\0\0" -- half a second, no transparency
+            out[#out + 1] = "\44" .. le16(0) .. le16(0) .. le16(w) .. le16(h) .. "\0\8"
+            for i = 1, #data, 255 do
+                local block = data:sub(i, i + 254)
+                out[#out + 1] = string.char(#block) .. block
+            end
+            out[#out + 1] = "\0"
+        end
+        out[#out + 1] = ";"
+        return table.concat(out)
+    end
+
+    -- A frame of an animated GIF: a 4px ink frame around `inside`.
+    local function framed(w, h, inside)
+        return function(x, y)
+            if x < 4 or y < 4 or x >= w - 4 or y >= h - 4 then return 0 end
+            return inside
+        end
+    end
+
     local function xhtml(body)
         return [[<?xml version="1.0" encoding="utf-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml"><head><title>Images</title></head><body>]] .. body .. "</body></html>"
     end
 
-    -- An EPUB of six pages: text around a wide image, an image in a link to the fourth page,
-    -- a transparent image, the link's target, a list item with a small bullet image, and an SVG image.
+    -- An EPUB of nine pages: text around a wide image, an image in a link to the fourth page,
+    -- a transparent image, the link's target, a list item with a small bullet image, an SVG image,
+    -- an image in a line of text, an animated image, and a list item with an animated bullet.
     local function makeBook(path)
         local Archiver = require("ffi/archiver")
         local epub = Archiver.Writer:new{}
@@ -101,13 +149,20 @@ describe("Image preview", function()
     <item id="c4" href="c4.xhtml" media-type="application/xhtml+xml"/>
     <item id="c5" href="c5.xhtml" media-type="application/xhtml+xml"/>
     <item id="c6" href="c6.xhtml" media-type="application/xhtml+xml"/>
+    <item id="c7" href="c7.xhtml" media-type="application/xhtml+xml"/>
+    <item id="c8" href="c8.xhtml" media-type="application/xhtml+xml"/>
+    <item id="c9" href="c9.xhtml" media-type="application/xhtml+xml"/>
+    <item id="inline" href="inline.png" media-type="image/png"/>
+    <item id="anim" href="anim.gif" media-type="image/gif"/>
+    <item id="abullet" href="abullet.gif" media-type="image/gif"/>
     <item id="bullet" href="bullet.png" media-type="image/png"/>
     <item id="svg" href="framed.svg" media-type="image/svg+xml"/>
     <item id="wide" href="wide.png" media-type="image/png"/>
     <item id="linked" href="linked.png" media-type="image/png"/>
     <item id="clear" href="clear.png" media-type="image/png"/>
   </manifest>
-  <spine><itemref idref="c1"/><itemref idref="c2"/><itemref idref="c3"/><itemref idref="c4"/><itemref idref="c5"/><itemref idref="c6"/></spine>
+  <spine><itemref idref="c1"/><itemref idref="c2"/><itemref idref="c3"/><itemref idref="c4"/><itemref idref="c5"/><itemref idref="c6"/>
+    <itemref idref="c7"/><itemref idref="c8"/><itemref idref="c9"/></spine>
 </package>]], mtime)
         epub:addFileFromMemory("OEBPS/c1.xhtml", xhtml([[
 <p>The text before the picture.</p>
@@ -122,6 +177,16 @@ describe("Image preview", function()
 <p><img src="bullet.png" alt=""/> An item of a list, after its bullet.</p>]]), mtime)
         epub:addFileFromMemory("OEBPS/c6.xhtml", xhtml([[
 <p style="text-align: center"><img src="framed.svg" alt=""/></p>]]), mtime)
+        epub:addFileFromMemory("OEBPS/c7.xhtml", xhtml([[
+<p>Words before <img src="inline.png" alt=""/> and words after the picture, with more words for the paragraph
+to run over a few lines, the picture in its first one.</p>]]), mtime)
+        epub:addFileFromMemory("OEBPS/c8.xhtml", xhtml([[
+<p style="text-align: center"><img src="anim.gif" alt=""/></p>]]), mtime)
+        epub:addFileFromMemory("OEBPS/c9.xhtml", xhtml([[
+<p><img src="abullet.gif" alt=""/> An item of a list, after its animated bullet.</p>]]), mtime)
+        epub:addFileFromMemory("OEBPS/inline.png", framedPng(100, 80), mtime)
+        epub:addFileFromMemory("OEBPS/anim.gif", gif(200, 100, { framed(200, 100, 0xFF), framed(200, 100, 0) }), mtime)
+        epub:addFileFromMemory("OEBPS/abullet.gif", gif(40, 40, { function() return 0 end, function() return 0x80 end }), mtime)
         epub:addFileFromMemory("OEBPS/wide.png", framedPng(400, 100, false, 80), mtime)
         epub:addFileFromMemory("OEBPS/linked.png", framedPng(300, 80), mtime)
         epub:addFileFromMemory("OEBPS/bullet.png", png(50, 50, function() return 0, 0xFF end), mtime)
@@ -145,6 +210,9 @@ describe("Image preview", function()
         Geom = require("ui/geometry")
         Key = require("device/key")
         ImagePreview = require("ui/widget/imagepreview")
+        ImageViewer = require("ui/widget/imageviewer")
+        util = require("util")
+        _ = require("gettext")
         Input = require("device").input
         Screen = require("device").screen
         ffiUtil = require("ffi/util")
@@ -253,6 +321,19 @@ describe("Image preview", function()
         end
         assert.is_truthy(rect)
         return rect
+    end
+
+    -- A point inside the first solid run of ink in the left third of the page (a bullet).
+    local function bulletAt(ui)
+        for y = 0, H - ui.view.footer:getHeight() - 1 do
+            local run = 0
+            for x = 0, W / 3 do
+                run = isInk(x, y) and run + 1 or 0
+                if run >= 20 then
+                    return x - 10, y + 10
+                end
+            end
+        end
     end
 
     local function center(rect)
@@ -406,28 +487,158 @@ describe("Image preview", function()
             assert.is_true(isPaper(5, H / 2))
         end)
 
-        it("should leave a tap on a bullet-sized image to the page", function()
-            ui.rolling:onGotoPage(5)
-            UIManager:forceRePaint()
-            -- the bullet is solid ink, the longest run on the page
-            local bullet
-            for y = 0, H - ui.view.footer:getHeight() - 1 do
-                local run = 0
-                for x = 0, W / 3 do
-                    run = isInk(x, y) and run + 1 or 0
-                    if run >= 20 then
-                        bullet = { x = x - 10, y = y + 10 }
-                        break
-                    end
-                end
-                if bullet then break end
+        it("should leave a tap on a bullet-sized image to the page, an animated one too", function()
+            for _, page in ipairs{ 5, 9 } do
+                ui.rolling:onGotoPage(page)
+                UIManager:forceRePaint()
+                local x, y = bulletAt(ui) -- solid ink, in the third that turns pages back
+                assert.is_truthy(x)
+                tap(x, y)
+                UIManager:forceRePaint()
+                assert.are.equal(ui, topWidget())
+                assert.are.equal(page - 1, ui:getCurrentPage())
             end
-            assert.is_truthy(bullet)
-            assert.is_true(bullet.x < W / 3) -- in the third that turns pages back
-            tap(bullet.x, bullet.y)
+        end)
+
+        it("should open an image smaller than half the page from a tap on it in a side third", function()
+            local r = imageRect(ui)
+            local x = r.x + r.w - 10
+            assert.is_true(x > W * 2 / 3) -- the third that turns pages forward
+            tap(x, r.y + math.floor(r.h / 2))
+            UIManager:forceRePaint()
+            assert.is_true(isPreview(topWidget()))
+            assert.are.equal(1, ui:getCurrentPage())
+        end)
+
+        it("should leave a tap beside an image, where the engine still finds it, to the page", function()
+            -- beside the wide image, on its line (the engine finds the image across the line)
+            local r = imageRect(ui)
+            local x = r.x + r.w + 30
+            assert.is_true(x > W * 2 / 3 and x < W - 20) -- in the text's width, in the third that turns pages forward
+            tap(x, r.y + math.floor(r.h / 2))
             UIManager:forceRePaint()
             assert.are.equal(ui, topWidget())
-            assert.are.equal(4, ui:getCurrentPage())
+            assert.are.equal(2, ui:getCurrentPage())
+            -- beside an image in a line of text: on the word before it, and above that word
+            ui.rolling:onGotoPage(7)
+            UIManager:forceRePaint()
+            r = imageRect(ui)
+            local word_x
+            for col = 0, r.x - 1 do
+                for y = r.y + r.h - 20, r.y + r.h - 1 do
+                    if isInk(col, y) then word_x = word_x or col end
+                end
+            end
+            assert.is_true(word_x and word_x < W / 3) -- the third that turns pages back
+            for _, y in ipairs{ r.y + r.h - 8, r.y + 10 } do
+                tap(word_x + 3, y)
+                UIManager:forceRePaint()
+                assert.is_false(isPreview(topWidget()))
+                assert.are.equal(6, ui:getCurrentPage())
+                ui.rolling:onGotoPage(7)
+                UIManager:forceRePaint()
+            end
+            -- and on the image itself
+            tap(center(r))
+            UIManager:forceRePaint()
+            assert.is_true(isPreview(topWidget()))
+        end)
+
+        it("should show a highlight's popover for a tap on an image inside it", function()
+            ui.rolling:onGotoPage(7)
+            UIManager:forceRePaint()
+            local r = imageRect(ui)
+            local word_x
+            for x = 0, r.x - 1 do
+                for y = r.y + r.h - 20, r.y + r.h - 1 do
+                    if isInk(x, y) then word_x = word_x or x end
+                end
+            end
+            -- from the first word to one after the image, on its line
+            ui.highlight:onHold(nil, { pos = Geom:new{ x = word_x + 3, y = r.y + r.h - 8 } })
+            ui.highlight:onHoldPan(nil, { pos = Geom:new{ x = r.x + r.w + 30, y = r.y + r.h - 8 } })
+            ui.highlight:onHoldRelease()
+            UIManager:forceRePaint()
+            assert.are.equal(1, #ui.annotation.annotations)
+            ui.highlight:closeBubble()
+            UIManager:forceRePaint()
+            local cx, cy = center(r)
+            assert.are.same({ 1 }, ui.highlight:highlightsAt(Geom:new{ x = cx, y = cy })) -- over the image
+            tap(cx, cy)
+            UIManager:forceRePaint()
+            assert.is_false(isPreview(topWidget()))
+            assert.is_truthy(ui.highlight.highlight_dialog)
+            assert.are.equal(ui.highlight.highlight_dialog, topWidget())
+        end)
+
+        it("should keep the original image viewer, with its buttons, on a long-press", function()
+            local x, y = center(imageRect(ui))
+            gesture("hold", x, y)
+            UIManager:forceRePaint()
+            local viewer = topWidget()
+            assert.are.equal(ImageViewer, getmetatable(viewer))
+            assert.is_true(isPaper(W / 2, 10)) -- on paper, not on ink
+            gesture("hold_release", x, y)
+            -- a tap shows its buttons, its Close button closes it
+            tap(W / 2, H / 2)
+            UIManager:forceRePaint()
+            local close = viewer.button_table:getButtonById("close")
+            assert.are.equal(_("Close"), close.text)
+            tap(close.dimen.x + math.floor(close.dimen.w / 2), close.dimen.y + math.floor(close.dimen.h / 2))
+            UIManager:forceRePaint()
+            assert.are.equal(ui, topWidget())
+        end)
+
+        it("should step through an animated image's frames from the side thirds, and close from the middle", function()
+            ui.rolling:onGotoPage(8)
+            UIManager:forceRePaint()
+            tap(center(imageRect(ui)))
+            UIManager:forceRePaint()
+            assert.is_true(isPreview(topWidget()))
+            assert.is_true(isPaper(W / 2, H / 2)) -- the first frame, paper inside
+            tap(W - 20, H / 2)
+            UIManager:forceRePaint()
+            assert.is_true(isInk(W / 2, H / 2)) -- the second, ink inside
+            tap(20, H / 2)
+            UIManager:forceRePaint()
+            assert.is_true(isPaper(W / 2, H / 2))
+            tap(W / 2, H / 2)
+            UIManager:forceRePaint()
+            assert.are.equal(ui, topWidget())
+            assert.are.equal(8, ui:getCurrentPage())
+        end)
+
+        it("should zoom no further than the image viewer's limit, keeping the point tapped, and not at all at it", function()
+            local calcFreeMem = util.calcFreeMem
+            local ok, err = pcall(function()
+                local r = fitted(400, 100)
+                local stripe = math.floor(82 * W / 400)
+                -- little free memory: the limit is between the fitting size and twice it
+                util.calcFreeMem = function() return 2e6, 4e6 end
+                tap(center(imageRect(ui)))
+                UIManager:forceRePaint()
+                doubleTap(stripe, H / 2)
+                UIManager:forceRePaint()
+                assert.is_true(isPaper(W / 2 + 20, r.y - 10)) -- taller
+                assert.is_true(isInk(W / 2 + 20, H / 2 - r.h + 10)) -- but not twice as tall
+                assert.is_true(isInk(stripe, H / 2))
+                assert.is_true(isPaper(stripe - 20, H / 2))
+                tap(W / 2, H / 2)
+                UIManager:forceRePaint()
+                -- none: the double tap leaves it fitted, so that a swipe down closes it
+                util.calcFreeMem = function() return 1, 4e6 end
+                tap(center(imageRect(ui)))
+                UIManager:forceRePaint()
+                doubleTap(stripe, H / 2)
+                UIManager:forceRePaint()
+                assert.is_true(isInk(W / 2 + 20, r.y - 10))
+                assert.is_true(isInk(2, H / 2)) -- its left frame, where it was
+                gesture("swipe", W / 2, H / 4, { direction = "south", distance = H / 2, time = require("ui/time").now() })
+                UIManager:forceRePaint()
+                assert.are.equal(ui, topWidget())
+            end)
+            util.calcFreeMem = calcFreeMem
+            assert(ok, err)
         end)
 
         it("should leave taps to the page in select mode", function()
@@ -482,17 +693,37 @@ describe("Image preview", function()
         end)
     end)
 
-    it("should take the taps on a page-sized image, such as a cover, while swipes and page keys still turn the page", function()
+    it("should turn pages from the sides of an image over half the page, such as a cover, and open it from the middle", function()
         local ui = openReader("spec/front/unit/data/juliet.epub")
         local ok, err = pcall(function()
             assert.are.equal(1, ui:getCurrentPage()) -- the cover image, as tall as the page
-            tap(W * 0.7, H / 2) -- in the third that turns pages forward
+            tap(W * 0.7, H / 2) -- on it, in the third that turns pages forward
+            UIManager:forceRePaint()
+            assert.are.equal(ui, topWidget())
+            assert.are.equal(2, ui:getCurrentPage())
+            tap(W * 0.3, H / 2) -- the third that turns them back, from the title page
+            UIManager:forceRePaint()
+            assert.are.equal(1, ui:getCurrentPage())
+            tap(W * 0.3, H / 2) -- the same on the cover: no preview, and no page before it
+            UIManager:forceRePaint()
+            assert.are.equal(ui, topWidget())
+            assert.are.equal(1, ui:getCurrentPage())
+            -- the middle opens it, instead of the bars
+            tap(W / 2, H / 2)
             UIManager:forceRePaint()
             assert.is_true(isPreview(topWidget()))
+            assert.is_nil(ui.menu.bars)
             tap(W / 2, H / 2)
             UIManager:forceRePaint()
             assert.are.equal(ui, topWidget())
             assert.are.equal(1, ui:getCurrentPage())
+            -- the bars still show on a swipe up, and swipes and page keys turn the page
+            gesture("swipe", W / 2, H * 3 / 4, { direction = "north", distance = H / 4, time = require("ui/time").now() })
+            UIManager:forceRePaint()
+            assert.is_truthy(ui.menu.bars)
+            tap(W / 2, H / 2)
+            UIManager:forceRePaint()
+            assert.is_nil(ui.menu.bars)
             gesture("swipe", W * 3 / 4, H / 2, { direction = "west", distance = W / 2, time = require("ui/time").now() })
             UIManager:forceRePaint()
             assert.are.equal(2, ui:getCurrentPage())
