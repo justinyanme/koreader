@@ -14,13 +14,15 @@ cards, from the top:
 - when no dictionary has it: a card saying why (not in the local dictionaries, none installed or enabled, the
   selection too long), with 在线翻译 for a word that is not CJK;
 - the online translation (Translator), named as needing the network: for a selection of several words that is
-  not CJK and that no dictionary has, or after 在线翻译. It has its own loading, offline (打开 Wi-Fi) and failure
-  (重试) states;
+  not CJK and that no dictionary has, or after 在线翻译. It has its own loading, offline (打开 Wi-Fi), network
+  unreachable (connected without internet access: 重试) and failure (重试) states, and shows 查询中… before
+  checking the network, as the 百科 card does;
 - 百科释义, loaded on a tap, then its intro, which a tap opens as a paginated full-text article;
 - 加入生词本 (vocabulary builder), removing a word after the confirm layer, and 在本书中搜索.
 Lookups are exact over a list of candidates: a Chinese selection that is not a word is matched by the longest
 word it contains (up to 20 characters), and an English word also tries simple lemmas (plural, past tense, -ing).
-The fuzzy search setting is not used here. Chinese text is never sent to the translator.
+The fuzzy search setting is not used here. Chinese text is never sent to the translator; CJK punctuation alone
+does not make text Chinese (as for the popover's 查询/翻译).
 
 The back arrow (or the Back key) returns to the page of the selection, which stays a moment, as upstream.
 
@@ -131,10 +133,27 @@ local function lemmas(w)
     return out
 end
 
+--- Whether a selection has CJK words, and is looked up (查询) rather than translated (翻译): CJK punctuation alone
+-- (「Xerox PARC」 in a Chinese book) does not count, as for the selection popover's action.
+local function hasCJKWords(text)
+    for c in text:gmatch(util.UTF8_CHAR_PATTERN) do
+        if util.isCJKWordChar(c) then return true end
+    end
+    return false
+end
+
 --- Whether a selection is several words of text that is not CJK (such as an English phrase or sentence):
 -- the translator takes it when no dictionary has it.
 local function isPhrase(word)
-    return not util.hasCJKChar(word) and word:find("%S%s+%S") ~= nil
+    return not hasCJKWords(word) and word:find("%S%s+%S") ~= nil
+end
+
+--- Whether an online card can send its request now: "online"; "offline", not connected (Wi-Fi off, or not
+-- joined yet), which turning on Wi-Fi helps; or "unreachable", connected but without internet access, which
+-- turning on Wi-Fi does not (it is on: NetworkMgr would only ask to turn it on again), only a retry.
+local function networkState()
+    if NetworkMgr:isOnline() then return "online" end
+    return NetworkMgr:isConnected() and "unreachable" or "offline"
 end
 
 local ReaderDictSheet = ReaderDictionary:extend{}
@@ -158,7 +177,7 @@ function ReaderDictSheet.candidates(word, extra)
     end
     add(word)
     for _, w in ipairs(extra or {}) do add(w) end
-    if util.hasCJKChar(word) then
+    if hasCJKWords(word) then
         local chars = util.splitToChars(word)
         local n = #chars
         if n > MAX_MATCH_CHARS then return list end
@@ -426,8 +445,8 @@ LookupPage = FullscreenPage:extend{
     boxes = nil,
     link = nil,
     dict_close_callback = nil,
-    translation = nil, -- { loading | offline | failed | text }, once asked for
-    wiki = nil, -- { loading | offline | failed | results }, once asked for
+    translation = nil, -- { loading | offline | unreachable | failed | text }, once asked for
+    wiki = nil, -- { loading | offline | unreachable | failed | missing | results }, once asked for
 }
 
 function LookupPage:init()
@@ -446,7 +465,7 @@ function LookupPage:readResults()
         self.headword = self.word
         self.groups = {}
         if isPhrase(self.word) then -- no dictionary has the phrase: the translator takes it
-            self:setTranslationState()
+            self.translation = { loading = true }
         end
     else
         self.headword = self.results[1].word
@@ -668,7 +687,7 @@ function LookupPage:headwordCard()
     if not self.results then
         table.insert(group, VerticalSpan:new{ width = dp(8) })
         table.insert(group, self:loadingLine())
-    elseif not self.not_found and self.headword ~= self.word and util.hasCJKChar(self.word) then
+    elseif not self.not_found and self.headword ~= self.word and hasCJKWords(self.word) then
         local chars = util.splitToChars(self.word)
         local selected = #chars > 12 and table.concat(chars, "", 1, 12) .. "…" or self.word
         table.insert(group, VerticalSpan:new{ width = dp(8) })
@@ -684,7 +703,7 @@ end
 function LookupPage:emptyCard()
     local r = self.results[1]
     local title, reason
-    if util.hasCJKChar(self.word) and #util.splitToChars(self.word) > MAX_MATCH_CHARS then
+    if hasCJKWords(self.word) and #util.splitToChars(self.word) > MAX_MATCH_CHARS then
         title, reason = _("Selection too long to look up"), _("Try searching the book instead.")
     elseif r.dict ~= "" then -- none installed, or none enabled
         title, reason = r.dict, r.definition
@@ -693,7 +712,7 @@ function LookupPage:emptyCard()
         reason = r.definition ~= "" and r.definition or _("Try Wikipedia, or add more StarDict dictionaries in settings.")
     end
     local pill
-    if not util.hasCJKChar(self.word) and not self.translation then
+    if not hasCJKWords(self.word) and not self.translation then
         pill = { _("Translate online"), function() self:translate() end }
     end
     return self:cardFrame(self:stateBlock(title, reason, pill))
@@ -730,12 +749,20 @@ function LookupPage:offlineState(reason, retry)
     end })
 end
 
+--- The state of an online card connected without internet access: retrying is what helps.
+function LookupPage:unreachableState(retry)
+    return self:stateBlock(_("Network unreachable."), _("Check the network connection and try again."),
+        { _("Retry"), retry })
+end
+
 function LookupPage:translationState()
     local tr = self.translation
     if tr.loading then
         return self:loadingLine()
     elseif tr.offline then
         return self:offlineState(_("Online translation needs Wi-Fi. Turn it on and try again."), function() self:translate() end)
+    elseif tr.unreachable then
+        return self:unreachableState(function() self:translate() end)
     end
     return self:stateBlock(_("Translation failed."), _("Check the network connection and try again."),
         { _("Retry"), function() self:translate() end })
@@ -752,7 +779,7 @@ function LookupPage:wikiCard()
         local summary = util.trim(wiki.results[1].definition:gsub("%s*\n%s*", "\n"))
         table.insert(group, textBox(summary, bodyFace(), self.inner_w, INTRO_LINES))
     end
-    if not wiki or (wiki.results and not (wiki.loading or wiki.offline or wiki.failed or wiki.missing)) then
+    if not wiki or (wiki.results and not (wiki.loading or wiki.offline or wiki.unreachable or wiki.failed or wiki.missing)) then
         callback = function() self:loadWiki(wiki and wiki.results ~= nil) end
     else
         table.insert(group, VerticalSpan:new{ width = HEADING_GAP })
@@ -762,6 +789,8 @@ function LookupPage:wikiCard()
         elseif wiki.offline then
             table.insert(group, self:offlineState(_("Wikipedia is an online lookup. Turn on Wi-Fi and try again."),
                 function() self:loadWiki(wiki.full) end))
+        elseif wiki.unreachable then
+            table.insert(group, self:unreachableState(function() self:loadWiki(wiki.full) end))
         else
             local message = wiki.failed and (wiki.full and _("Failed to retrieve Wikipedia article.") or _("Failed searching Wikipedia."))
                 or (wiki.full and _("Wikipedia article not found.") or T(_("No Wikipedia article for \"%1\""), self.headword))
@@ -904,23 +933,24 @@ function LookupPage:update(focus)
     end
 end
 
---- The translation card waits for the request, or for the network.
-function LookupPage:setTranslationState()
-    self.translation = NetworkMgr:isOnline() and { loading = true } or { offline = true }
-end
-
 --- Online translation of the selection (after 在线翻译, 打开 Wi-Fi or 重试).
 function LookupPage:translate()
     if self.translation and self.translation.loading then return end -- one request at a time
-    self:setTranslationState()
+    self.translation = { loading = true }
     self:update("translation")
     self:requestTranslation()
 end
 
---- Sends the selection to the translator for the translation card, if it waits for it.
+--- Sends the selection to the translator for the translation card, if it waits for it, or says why it cannot.
 function LookupPage:requestTranslation()
     if not (self.translation and self.translation.loading) then return end
-    UIManager:forceRePaint() -- show 查询中… before the request
+    -- 查询中… first: checking the network may take a while, and a retry that fails again shows it ran
+    UIManager:forceRePaint()
+    local state = networkState()
+    if state ~= "online" then
+        self.translation = { offline = state == "offline", unreachable = state == "unreachable" }
+        return self:update("translation")
+    end
     local text = self.word
     Trapper:wrap(function()
         -- in a subprocess, as upstream: closing the page (our dismiss_callback) abandons it
@@ -948,13 +978,14 @@ function LookupPage:loadWiki(full)
     if self.wiki and self.wiki.loading then return end -- one request at a time
     local previous = self.wiki
     local results = full and previous.results or nil
-    if not NetworkMgr:isOnline() then
-        self.wiki = { offline = true, full = full, results = results }
-        return self:update("wiki")
-    end
     self.wiki = { loading = true, full = full, results = results }
     self:update("wiki")
-    UIManager:forceRePaint()
+    UIManager:forceRePaint() -- the request waits, before the network is checked: see requestTranslation()
+    local state = networkState()
+    if state ~= "online" then
+        self.wiki = { offline = state == "offline", unreachable = state == "unreachable", full = full, results = results }
+        return self:update("wiki")
+    end
     Trapper:wrap(function()
         local wikipedia = self.ui.wikipedia
         wikipedia:initLanguages(self.headword)

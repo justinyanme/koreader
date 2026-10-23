@@ -410,14 +410,17 @@ These follow their reference screenshots directly, using the parts above:
   加入生词本 card, and an 在本书中搜索 › row card. Words go to the local dictionaries first. A non-CJK phrase that no
   dictionary has gets an 在线翻译 card marked 需要联网 instead; a word that none has gets a card saying why (not in
   the local dictionaries, none installed), with an 在线翻译 pill for non-CJK text. Chinese never goes to the
-  translator. 查询中… sits under the headword while a slow lookup runs (`18-chinese-lookup-result.png`), and in
-  the translation card while it waits. A dictionary card too long for the page continues on the next one under
+  translator; CJK punctuation around Latin text (（Make the whole widget）) does not make it Chinese, as for the
+  popover's 翻译. 查询中… sits under the headword while a slow lookup runs (`18-chinese-lookup-result.png`), and in
+  the translation card while it waits, network check included. A dictionary card too long for the page continues on the next one under
   its name, and a sense taller than a page continues from its next line; nothing is cut (past 100 senses, the
   card says the popup has the rest). A tap on a dictionary card opens its full entry in KOReader's original
   popup over the cards, and closing the popup comes back to them. The 百科释义 card loads its summary on demand;
   its › fetches the exact article in the summary's language and opens its full text on a page with a centered
   title, 46dp side margins and the common bottom back/pager bar. Back restores the query cards and selection.
-  Offline, failed and missing requests keep their context and offer Wi-Fi or retry. The article uses the
+  Offline, failed and missing requests keep their context and offer Wi-Fi or retry: 打开 Wi-Fi only when the
+  device is not connected; connected without internet access, the online card says 网络无法连接 and offers 重试.
+  Going back while a translation loads abandons it, and an answer that comes in late is dropped. The article uses the
   existing Wikipedia text and image backend, with the reader's image preference and lazy thumbnail loading,
   without a WebView; original Wikipedia tools remain in the original menus. Short unknown words can also go
   into 生词本 with their book and context, regardless of the vocabulary builder's context setting.
