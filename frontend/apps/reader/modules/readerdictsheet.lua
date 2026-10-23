@@ -14,7 +14,8 @@ cards, from the top:
 - when no dictionary has it: a card saying why (not in the local dictionaries, none installed or enabled, the
   selection too long), with 在线翻译 for a word that is not CJK;
 - the online translation (Translator), named as needing the network: for a selection of several words that is
-  not CJK and that no dictionary has, or after 在线翻译. It has its own loading, offline (打开 Wi-Fi), network
+  not CJK and that no dictionary has, or after 在线翻译 (a pill for a word no dictionary has, a 在线翻译 › row
+  under the dictionaries for a phrase they have); a selection of more than 1500 characters is not sent. It has its own loading, offline (打开 Wi-Fi), network
   unreachable (connected without internet access: 重试) and failure (重试) states, and shows 查询中… before
   checking the network, as the 百科 card does;
 - 百科释义, loaded on a tap, then its intro, which a tap opens as a paginated full-text article;
@@ -73,6 +74,9 @@ local C_ = _.pgettext
 
 local MAX_MATCH_CHARS = 20 -- longer selections are only looked up as a whole
 local MAX_SENSES = 100 -- longer entries are cut, saying so; the upstream popup has the rest
+-- Longer text is not sent to the translator: its request is a GET with the text in the URL, which the translate
+-- server refuses past a few thousand bytes (Translator:loadPage()), so it would fail on every retry.
+local MAX_TRANSLATE_CHARS = 1500
 
 -- Part-of-speech abbreviations that start a sense line ("n. 旅居者").
 local POS = {}
@@ -445,7 +449,7 @@ LookupPage = FullscreenPage:extend{
     boxes = nil,
     link = nil,
     dict_close_callback = nil,
-    translation = nil, -- { loading | offline | unreachable | failed | text }, once asked for
+    translation = nil, -- { loading | offline | unreachable | failed | too_long | text }, once asked for
     wiki = nil, -- { loading | offline | unreachable | failed | missing | results }, once asked for
 }
 
@@ -465,7 +469,7 @@ function LookupPage:readResults()
         self.headword = self.word
         self.groups = {}
         if isPhrase(self.word) then -- no dictionary has the phrase: the translator takes it
-            self.translation = { loading = true }
+            self.translation = self:newTranslation()
         end
     else
         self.headword = self.results[1].word
@@ -543,6 +547,10 @@ function LookupPage:cards()
     local phrase = isPhrase(self.word)
     for __, g in ipairs(self.groups) do
         table.insert(cards, { kind = "dict", group = g, title = g.dict, units = g.units })
+    end
+    -- a phrase the dictionaries have: its online translation too, only on a tap (the translation card then)
+    if not self.not_found and phrase and not self.translation then
+        table.insert(cards, { kind = "translate" })
     end
     -- the translation takes a phrase that no dictionary has, unless none is there
     if self.not_found and (not phrase or self.results[1].dict ~= "") then
@@ -768,6 +776,8 @@ function LookupPage:translationState()
         return self:offlineState(_("Online translation needs Wi-Fi. Turn it on and try again."), function() self:translate() end)
     elseif tr.unreachable then
         return self:unreachableState(function() self:translate() end)
+    elseif tr.too_long then
+        return self:stateBlock(_("Selection too long to look up"))
     end
     return self:stateBlock(_("Translation failed."), _("Check the network connection and try again."),
         { _("Retry"), function() self:translate() end })
@@ -820,6 +830,12 @@ function LookupPage:vocabCard()
         function() self:onVocabulary() end)
 end
 
+--- A row asking for the online translation of a phrase the dictionaries have.
+function LookupPage:translateCard()
+    return self:cardFrame(self:heading(_("Online translation"), _("Needs a network connection"), true),
+        function() self:translate() end)
+end
+
 function LookupPage:searchCard()
     return self:cardFrame(self:heading(_("Search in this book"), nil, true),
         function() self:onSearchBook() end)
@@ -833,6 +849,7 @@ function LookupPage:buildCard(part)
     elseif card.kind == "empty" then return self:emptyCard()
     elseif card.kind == "wiki" then return self:wikiCard()
     elseif card.kind == "vocab" then return self:vocabCard()
+    elseif card.kind == "translate" then return self:translateCard()
     elseif card.kind == "search" then return self:searchCard()
     end
 end
@@ -939,9 +956,17 @@ function LookupPage:update(focus)
 end
 
 --- Online translation of the selection (after 在线翻译, 打开 Wi-Fi or 重试).
+--- The first state of a translation: waiting for its request, unless the text is too long to send.
+function LookupPage:newTranslation()
+    if #util.splitToChars(self.word) > MAX_TRANSLATE_CHARS then
+        return { too_long = true }
+    end
+    return { loading = true }
+end
+
 function LookupPage:translate()
     if self.translation and self.translation.loading then return end -- one request at a time
-    self.translation = { loading = true }
+    self.translation = self:newTranslation()
     self:update("translation")
     self:requestTranslation()
 end

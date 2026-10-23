@@ -598,16 +598,15 @@ describe("ReaderDictSheet module", function()
             -- a phrase dragged over three lines is saved, then translated online after the dictionaries
             longPress(SAMPSON, unpack(PHRASE))
             assert.are.equal(1, #ui.annotation.annotations)
-            local text = require("util").cleanupSelectedText(ui.annotation.annotations[1].text)
-            assert.is_truthy(text:find("^SAMPSON%s+My naked weapon"))
             local refreshes = refreshesOf(function()
                 tapWidget(button(ui.highlight.highlight_dialog, "Translate"))
             end)
             NetworkMgr.isOnline:revert()
             revertTranslator()
-            assert.are.equal(text, sdcv_words[1])
+            local phrase = "SAMPSON\nMy naked weapon is out: quarrel, I will back thee.\nGREGORY"
+            assert.are.equal(phrase, sdcv_words[1])
             assert.stub(load).was_called(1)
-            assert.stub(load).was_called_with(match.is_ref(Translator), text, match._, match._)
+            assert.stub(load).was_called_with(match.is_ref(Translator), phrase, match._, match._)
             local page = lookupPage()
             assert.is_true(hasText(cardOf(page, "Online translation"), "Needs a network connection"))
             assert.is_true(hasText(cardOf(page, "Online translation"), "我的武器出鞘了。"))
@@ -666,53 +665,130 @@ describe("ReaderDictSheet module", function()
             end)
         end
 
-        it("should abandon the translation's request when going back while it loads, leaving only the book", function()
+        it("should drop a translation answering as the page is left, changing and repainting nothing", function()
             stubSdcv(ui.dictionary)
             stub(NetworkMgr, "isOnline").returns(true)
-            -- the real subprocess of the request, whose answer would come long after
-            stub(Translator, "loadPage").invokes(function()
-                require("ffi/util").sleep(30)
-                return { { { "太晚了", "x" } } }
+            local dismissed = spy.new(function() end)
+            local page, updates
+            stubTranslator({ { { "太晚了", "x" } } }, function(trap)
+                -- as Trapper does: closing the page calls the request's dismiss callback
+                trap.dismiss_callback = dismissed
+                page, updates = trap, spy.on(trap, "update")
+                back(trap) -- and the answer comes in the same tick, as completed
             end)
-            local mock_time = require("mock_time")
-            mock_time:install()
-            UIManager:_checkTasks() -- the clock is now the mock's
-            local ok, err = pcall(function()
-                longPress(SAMPSON, unpack(PHRASE)) -- with ask: a temporary selection
-                tapWidget(button(ui.highlight.highlight_dialog, "Translate"))
-                local page = lookupPage()
-                -- the page waits over the book, with no message or trap widget of its own
-                mock_time:increase(1)
-                UIManager:_checkTasks()
-                UIManager:forceRePaint()
-                assert.are.equal(2, #UIManager._window_stack)
-                assert.is_true(hasText(cardOf(page, "Online translation"), "Looking up…"))
-                local refreshes = refreshesOf(function() back(page) end)
-                assert.are.equal(1, #UIManager._window_stack)
-                assert.are.equal(ui, topWidget())
-                assert.is_nil(ui.dictionary.dict_window)
-                assert.is_true(hasRefresh(refreshes, "ui", page.dimen))
-                assertNoFull(refreshes)
-                -- the abandoned request never shows; the selection stays a moment, then goes
-                assert.is_truthy(ui.highlight.selected_text)
-                refreshes = refreshesOf(function()
-                    for _ = 1, 4 do
-                        mock_time:increase(2)
-                        UIManager:_checkTasks()
-                    end
-                end)
-                assert.is_nil(ui.highlight.selected_text)
-                assert.are.equal(1, #UIManager._window_stack)
-                assert.is_false(hasText(page, "太晚了"))
-                for _, r in ipairs(refreshes) do
-                    assert.is_false(r.region.w == page.body_rect.w and r.region.h == page.body_rect.h)
-                end
-                assertNoFull(refreshes)
-            end)
-            mock_time:uninstall()
-            Translator.loadPage:revert()
+            longPress(SAMPSON, unpack(PHRASE)) -- with ask: a temporary selection
+            tapWidget(button(ui.highlight.highlight_dialog, "Translate"))
             NetworkMgr.isOnline:revert()
-            assert(ok, err)
+            revertTranslator()
+            assert.spy(dismissed).was_called(1)
+            assert.is_false(UIManager:isWidgetShown(page))
+            assert.are.same({ loading = true }, page.translation)
+            assert.spy(updates).was_not_called()
+            assert.are.equal(1, #UIManager._window_stack)
+            assert.are.equal(ui, topWidget())
+            assert.is_nil(ui.dictionary.dict_window)
+        end)
+
+        it("should stay offline when turning on Wi-Fi is declined, and leave nothing over the book", function()
+            stubSdcv(ui.dictionary)
+            local online = false -- Wi-Fi off
+            stub(NetworkMgr, "isOnline").invokes(function() return online end)
+            stub(NetworkMgr, "isConnected").invokes(function() return online end)
+            local online_callback
+            -- declined or cancelled: NetworkMgr never runs the callback (here: not before the page is gone)
+            local wifi = stub(NetworkMgr, "runWhenOnline").invokes(function(_, callback) online_callback = callback end)
+            local load = stubTranslator({ { { "不该出现", "x" } } })
+            longPress(SAMPSON, unpack(PHRASE))
+            tapWidget(button(ui.highlight.highlight_dialog, "Translate"))
+            local page = lookupPage()
+            local refreshes = refreshesOf(function()
+                tapWidget(button(cardOf(page, "Online translation"), "Turn on Wi-Fi"))
+            end)
+            assert.stub(wifi).was_called(1)
+            assert.stub(load).was_not_called()
+            local translation = cardOf(page, "Online translation")
+            assert.is_true(hasText(translation, "Online translation needs Wi-Fi. Turn it on and try again."))
+            assert.is_truthy(button(translation, "Turn on Wi-Fi"))
+            assert.is_false(hasText(page, "Looking up…"))
+            assertNoFull(refreshes)
+            back(page)
+            assert.are.equal(1, #UIManager._window_stack)
+            assert.are.equal(ui, topWidget())
+            assert.is_nil(ui.dictionary.dict_window)
+            -- Wi-Fi coming on after the page has gone sends nothing
+            online = true
+            online_callback()
+            UIManager:forceRePaint()
+            NetworkMgr.isOnline:revert()
+            NetworkMgr.isConnected:revert()
+            NetworkMgr.runWhenOnline:revert()
+            revertTranslator()
+            assert.stub(load).was_not_called()
+            assert.are.equal(1, #UIManager._window_stack)
+        end)
+
+        it("should offer the online translation of a phrase a dictionary has, sending it only on a tap", function()
+            DICT["look up"] = { Demo = "v. to search for a word in a dictionary" }
+            stubSdcv(ui.dictionary)
+            stub(NetworkMgr, "isOnline").returns(true)
+            local load = stubTranslator({ { { "查阅", "x" } } })
+            ui:handleEvent(Event:new("LookupWord", "look up", false, nil, ui.highlight))
+            UIManager:forceRePaint()
+            DICT["look up"] = nil
+            local page = lookupPage()
+            assert.stub(load).was_not_called()
+            local entry, row = button(page, "Demo"), button(page, "Online translation")
+            assert.is_true(hasText(entry, "to search for a word in a dictionary"))
+            assert.is_truthy(row)
+            assert.is_true(hasText(row, "Needs a network connection"))
+            assert.is_true(entry.dimen.y < row.dimen.y) -- under the dictionaries
+            local region = page.body_rect
+            local refreshes = refreshesOf(function() tapWidget(row) end)
+            assert.stub(load).was_called(1)
+            assert.stub(load).was_called_with(match.is_ref(Translator), "look up", match._, match._)
+            -- the translation card in its place, the dictionary's card kept
+            local translation = cardOf(page, "Online translation")
+            assert.is_true(hasText(translation, "查阅"))
+            assert.is_true(hasText(translation, "Needs a network connection"))
+            assert.is_nil(button(page, "Online translation"))
+            assert.is_true(hasText(button(page, "Demo"), "to search for a word in a dictionary"))
+            for _, r in ipairs(refreshes) do assert.are.same({ mode = "ui", region = region }, r) end
+            -- a word the dictionaries have gets no such row
+            back(page)
+            ui:handleEvent(Event:new("LookupWord", "sojourner", false, nil, ui.highlight))
+            UIManager:forceRePaint()
+            NetworkMgr.isOnline:revert()
+            revertTranslator()
+            assert.is_truthy(button(lookupPage(), "Demo"))
+            assert.is_nil(button(lookupPage(), "Online translation"))
+            assert.stub(load).was_called(1)
+        end)
+
+        it("should not send a selection of more than 1500 characters to the translator, saying it is too long", function()
+            stubSdcv(ui.dictionary)
+            stub(NetworkMgr, "isOnline").returns(true)
+            local load = stubTranslator({ { { "过长", "x" } } })
+            -- from the top of the page on past its foot: the page scrolls on by a third from its bottom right corner,
+            -- each time the finger comes back into it
+            local w, h = Screen:getWidth(), Screen:getHeight()
+            local drag = { { x = 300, y = 400 }, { x = 500, y = 700 } }
+            for _ = 1, 10 do
+                table.insert(drag, { x = w - 5, y = h - 5 })
+                table.insert(drag, { x = w - 150, y = h - 150 })
+            end
+            longPress({ x = 80, y = 30 }, unpack(drag))
+            local selected = require("util").cleanupSelectedText(ui.highlight.selected_text.text)
+            assert.is_true(#require("util").splitToChars(selected) > 1500, #selected)
+            tapWidget(button(ui.highlight.highlight_dialog, "Translate"))
+            NetworkMgr.isOnline:revert()
+            revertTranslator()
+            local page = lookupPage()
+            assert.stub(load).was_not_called()
+            local translation = cardOf(page, "Online translation")
+            assert.is_true(hasText(translation, "Selection too long to look up"))
+            assert.is_nil(button(translation, "Retry"))
+            assert.is_false(hasText(page, "Looking up…"))
+            assert.is_false(hasText(page, "Translation failed."))
         end)
 
         it("should translate Latin text that Chinese punctuation sets off, as its popover says Translate", function()

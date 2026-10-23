@@ -410,8 +410,10 @@ These follow their reference screenshots directly, using the parts above:
 - **Lookup** (`07-selection-and-lookup/19-chinese-lookup-settled.png`, `22-english-translation-result.png`): a
   stack of cards: the headword, one card per dictionary named on the card, the 百科释义 card with ›, a centered
   加入生词本 card, and an 在本书中搜索 › row card. Words go to the local dictionaries first. A non-CJK phrase that no
-  dictionary has gets an 在线翻译 card marked 需要联网 instead; a word that none has gets a card saying why (not in
-  the local dictionaries, none installed), with an 在线翻译 pill for non-CJK text. Chinese never goes to the
+  dictionary has gets an 在线翻译 card marked 需要联网 instead; one that a dictionary has gets an 在线翻译 › row
+  marked 需要联网 under the dictionary cards, which becomes that card on a tap (nothing is sent before); a word that
+  none has gets a card saying why (not in the local dictionaries, none installed), with an 在线翻译 pill for non-CJK
+  text. Text over 1500 characters is never sent: the translation card says 选中的文字太长. Chinese never goes to the
   translator; CJK punctuation around Latin text (（Make the whole widget）) does not make it Chinese, as for the
   popover's 翻译. 查询中… sits under the headword while a slow lookup runs (`18-chinese-lookup-result.png`), and in
   the translation card while it waits, network check included. A dictionary card too long for the page continues on
