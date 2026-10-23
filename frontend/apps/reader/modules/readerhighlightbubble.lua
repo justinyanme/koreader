@@ -15,6 +15,8 @@ Replaces ReaderHighlight (apps/replacements reader_highlight slot):
 - a tap on a highlight, or a long-press on a word of it, replaces "Highlight"
   with "Delete highlight" and adds "Delete note" when it has a thought;
   after a long-press, the look-up is for the word pressed;
+- tapping a thought mark opens local quote/content cards, then full-screen detail
+  with return to the quote, edit and source-aware deletion;
 - copying closes the popover and confirms with a toast;
 - a thought is written in a compact band above the keyboard, over a washed,
   inert page; Back discards the draft, Save persists it and shows a toast;
@@ -813,6 +815,7 @@ end
 
 function ReaderHighlightBubble:onCloseWidget()
     if self.note_sheet then self.note_sheet:onClose() end
+    if self.thought_page then self.thought_page:goBack() end
     self:closeBubble()
 end
 
@@ -1002,11 +1005,25 @@ function ReaderHighlightBubble:onTap(arg, ges)
     local marks = self.view.view_modules.note_marks
     for index, rect in pairs(marks and marks.targets or {}) do
         if ges.pos:intersectWith(rect) then
-            self:showHighlightBubble(index)
+            self:showThoughtCard(index)
             return true
         end
     end
     return ReaderHighlight.onTap(self, arg, ges)
+end
+
+--- A mark opens the local content cards; highlight text keeps its selection actions.
+function ReaderHighlightBubble:showThoughtCard(index)
+    local item = self.ui.annotation.annotations[index]
+    if not (item and item.note) then return end
+    self:dismiss()
+    if self.thought_page then self.thought_page:goBack() end
+    local page = require("apps/reader/modules/readerthoughtpage"):new{
+        ui = self.ui, item = item,
+        on_close = function() self.thought_page = nil end,
+    }
+    self.thought_page = page
+    UIManager:show(page, "ui", page.dimen)
 end
 
 --- Highlight popover: the selection popover's actions, with "Delete highlight" in the first place.
@@ -1081,7 +1098,7 @@ function ReaderHighlightBubble:setNote(index, text)
 end
 
 --- New thoughts stay drafts until Save; existing thoughts keep their value on Back.
-function ReaderHighlightBubble:showNoteSheet(index)
+function ReaderHighlightBubble:showNoteSheet(index, on_close)
     local item = index and self.ui.annotation.annotations[index] or util.tableDeepCopy(self.selected_text)
     if not item then return end
     local gap, back_w, icon_w = Screen:scaleBySize(20), Screen:scaleBySize(75), Screen:scaleBySize(36)
@@ -1127,6 +1144,7 @@ function ReaderHighlightBubble:showNoteSheet(index)
         on_close = function()
             self.note_sheet = nil
             self:dismiss()
+            if on_close then on_close() end
         end,
     }
     self.note_sheet = sheet
