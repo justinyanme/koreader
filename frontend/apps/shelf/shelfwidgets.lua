@@ -140,10 +140,11 @@ local function cover(book, w, h, image_bb, keep_image)
     local title_size = math.max(9, math.floor(w * 0.12 / px_per_dp))
     local author_size = math.max(8, math.floor(w * 0.065 / px_per_dp))
     local text_w = frame_w - 2 * dp(6)
+    -- the cover's own lettering: the roles' font files, which the interface font size leaves alone
     local content = VerticalGroup:new{
         TextBoxWidget:new{
             text = book.title,
-            face = Font:getFace("ui_headword", title_size),
+            face = Font:getFace(Font.fontmap.ui_headword, title_size),
             bold = true,
             alignment = "center",
             width = text_w,
@@ -157,7 +158,7 @@ local function cover(book, w, h, image_bb, keep_image)
         table.insert(content, VerticalSpan:new{ width = math.floor(w * 0.08) })
         table.insert(content, TextWidget:new{
             text = book.authors,
-            face = Font:getFace("ui_micro", author_size),
+            face = Font:getFace(Font.fontmap.ui_micro, author_size),
             max_width = text_w,
         })
     end

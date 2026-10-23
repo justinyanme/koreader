@@ -212,7 +212,7 @@ describe("Reorganized settings", function()
     end
 
     local expected_groups = {
-        { "reading", "Reading", { "Page turns and tap zones", "Full refresh rate", "Status bar", "After finishing a book" } },
+        { "reading", "Reading", { "Interface font size", "Page turns and tap zones", "Full refresh rate", "Status bar", "After finishing a book" } },
         { "screen", "Screen", { "Refresh and ghosting", "Sleep screen", "Night mode" } },
         { "network", "Network & sync", { "Wi-Fi", "Progress sync", "Wireless transfer and library" } },
         { "device", "Device", { "Physical buttons", "Gestures", "Power and sleep" } },
