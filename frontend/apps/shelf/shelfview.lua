@@ -321,9 +321,10 @@ function ShelfView:buildTitleRow()
         fgcolor = Palette.ink,
         max_width = math.floor((self.width - 2 * GUTTER) / 2),
     }
+    local tap_h = math.max(TITLE_TAP_H, title:getSize().h) -- the largest interface font size outgrows it
     self.title_button = ShelfWidgets.Tappable:new{
         callback = function() self:showFilterMenu() end,
-        LeftContainer:new{ dimen = Geom:new{ w = title:getSize().w, h = TITLE_TAP_H }, title },
+        LeftContainer:new{ dimen = Geom:new{ w = title:getSize().w, h = tap_h }, title },
     }
     local row = HorizontalGroup:new{ align = "center", HorizontalSpan:new{ width = GUTTER }, self.title_button }
     if self.extracting then
@@ -338,9 +339,9 @@ function ShelfView:buildTitleRow()
     end
     return VerticalGroup:new{
         align = "left",
-        VerticalSpan:new{ width = TITLE_MID - math.floor(TITLE_TAP_H / 2) },
+        VerticalSpan:new{ width = TITLE_MID - math.floor(tap_h / 2) },
         row,
-        VerticalSpan:new{ width = TITLE_ROW_H - TITLE_MID - math.ceil(TITLE_TAP_H / 2) },
+        VerticalSpan:new{ width = TITLE_ROW_H - TITLE_MID - math.ceil(tap_h / 2) },
     }
 end
 
