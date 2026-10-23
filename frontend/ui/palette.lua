@@ -19,7 +19,8 @@ return {
     ink = Blitbuffer.COLOR_BLACK,
     ink_2 = Blitbuffer.COLOR_GRAY_5, -- secondary text
     ink_3 = Blitbuffer.COLOR_GRAY_9, -- disabled, chevrons, fine print
-    rule = Blitbuffer.COLOR_GRAY_D, -- row dividers, disabled outlines
+    rule = Blitbuffer.COLOR_GRAY_D, -- row dividers, disabled outlines; ink on a page paled by a confirmation
+    confirm_rule = Blitbuffer.COLOR_GRAY_B, -- dividers of a confirmation, darker than the paled page around it
     mark = Blitbuffer.COLOR_LIGHT_GRAY, -- marker highlight fill
     -- typographic covers only
     cover_stock = Blitbuffer.COLOR_GRAY_D,

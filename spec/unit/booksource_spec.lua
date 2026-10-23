@@ -1,7 +1,7 @@
 -- 书源: the OPDS plugin's redesigned page, driven through its real entries against a fake Calibre-Web server.
 describe("书源 (OPDS as a remote shelf)", function()
-    local BookSource, BookSourceView, BottomSheet, EinkSettings, Event, FileManager, Geom, InputDialog, LuaSettings
-    local ReaderUI, Replacements, Screen, UIManager, ffiUtil, lfs, T, _
+    local BookSource, BookSourceView, BottomSheet, ConfirmLayer, EinkSettings, Event, FileManager, Geom, InputDialog
+    local Key, LuaSettings, ReaderUI, Replacements, Screen, UIManager, ffiUtil, lfs, T, _
     local home, tmp, settings_file, log_file, saved_settings, saved_thumb_dir
     local server -- the fake server's state, read by the stubbed socket.http.request (also in forked children)
     local opened -- files the reader was asked to open
@@ -390,11 +390,13 @@ describe("书源 (OPDS as a remote shelf)", function()
         require("document/canvascontext"):init(require("device"))
         BookSource = require("apps/opds/booksource")
         BottomSheet = require("ui/widget/bottomsheet")
+        ConfirmLayer = require("ui/widget/confirmlayer")
         EinkSettings = require("apps/settings/einksettings")
         Event = require("ui/event")
         FileManager = require("apps/filemanager/filemanager")
         Geom = require("ui/geometry")
         InputDialog = require("ui/widget/inputdialog")
+        Key = require("device/key")
         LuaSettings = require("luasettings")
         ReaderUI = require("apps/reader/readerui")
         Replacements = require("apps/replacements")
@@ -1118,11 +1120,134 @@ describe("书源 (OPDS as a remote shelf)", function()
             tap(view, "eink/more")
             tap(topWidget(), _("Delete"))
             local confirm = topWidget()
-            assert.is_true(has(confirm, _("Delete source")))
+            assert.are.equal(ConfirmLayer, getmetatable(confirm).__index)
             tap(confirm, _("Delete"))
             saved = savedSources()
             assert.are.equal(1, #saved)
             assert.are.equal("Gutenberg", saved[1].title)
+        end)
+
+        describe("the delete confirmation", function()
+            local view
+            local function gray(x, y) return Screen.bb:getPixel(x, y):getColor8().a end
+
+            -- a refresh type, or a function giving it with the region
+            local function modeOf(r)
+                if type(r.type) == "function" then
+                    local mode, region = r.type()
+                    return mode, region
+                end
+                return r.type, r.region
+            end
+
+            local function assertNoFlash(refreshes)
+                for _, r in ipairs(refreshes) do
+                    local mode = modeOf(r)
+                    assert.is_false(mode == "full" or (mode or ""):match("^flash") ~= nil)
+                end
+            end
+
+            local function openConfirm()
+                tap(view, "eink/more") -- the first row's
+                tap(topWidget(), _("Delete"))
+                local layer = topWidget()
+                assert.are.equal(ConfirmLayer, getmetatable(layer).__index)
+                UIManager:forceRePaint()
+                return layer
+            end
+
+            local function assertUnchanged()
+                assert.are.equal(view, topWidget())
+                assert.are.equal("manage", view:top().kind)
+                assert.are.equal(2, #savedSources())
+                assert.is_true(has(view, "NAS at home"))
+            end
+
+            before_each(function()
+                writeSources{ nas(), { title = "Gutenberg", url = "https://gutenberg.example/opds" } }
+                tap(openFM().shelf_view, "eink/source")
+                view = topWidget()
+                UIManager:forceRePaint()
+            end)
+
+            it("asks over the paled page, without a flash, with the action and Cancel as whole rows", function()
+                local w = Screen:getWidth()
+                local refreshes, restore = spyRefreshes()
+                local layer = openConfirm()
+                restore()
+                assertNoFlash(refreshes)
+                local whole
+                for _, r in ipairs(refreshes) do
+                    local mode, region = modeOf(r)
+                    if mode == "ui" and region and region.w == w and region.h == Screen:getHeight() then whole = true end
+                end
+                assert.is_true(whole)
+
+                local band = layer.band_rect
+                assert.is_true(has(layer, T(_("Delete “%1”? Books you downloaded stay on the device."), "NAS at home")))
+                local delete_row, cancel_row = tappableAround(layer, _("Delete")), tappableAround(layer, _("Cancel"))
+                assert.is_true(band.y < delete_row.dimen.y and delete_row.dimen.y < cancel_row.dimen.y)
+                for _, row in ipairs{ delete_row, cancel_row } do
+                    assert.are.equal(0, row.dimen.x)
+                    assert.are.equal(w, row.dimen.w)
+                    assert.is_true(row.dimen.h >= Screen:scaleBySize(44))
+                end
+                -- a 2dp ink rule on top of the band
+                assert.is_true(gray(math.floor(w / 2), band.y) < 0x80)
+                assert.is_true(gray(math.floor(w / 2), band.y + Screen:scaleBySize(2) - 1) < 0x80)
+                -- the page above is pale: its ink is no darker than the rule gray
+                local darkest = 0xFF
+                for y = 0, band.y - 1 do
+                    for x = 0, w - 1, 2 do
+                        darkest = math.min(darkest, gray(x, y))
+                    end
+                end
+                assert.is_true(darkest >= 0xD0 and darkest < 0xFF)
+            end)
+
+            it("cancels on a tap on the page, which never reaches the row under it; holds and swipes stop too", function()
+                local row_x, row_y = pointIn(tappableAround(view, "NAS at home"))
+                local layer = openConfirm()
+                touch(row_x, row_y, "hold")
+                UIManager:sendEvent(Event:new("Gesture", { ges = "swipe", direction = "west",
+                    pos = Geom:new{ x = row_x, y = row_y, w = 0, h = 0 } }))
+                assert.are.equal(layer, topWidget())
+                assert.are.equal("manage", view:top().kind)
+
+                touch(row_x, row_y)
+                assertUnchanged()
+            end)
+
+            it("cancels on the Back key and on the Cancel row", function()
+                openConfirm()
+                UIManager:sendEvent(Event:new("KeyPress", Key:new("Back", {})))
+                assertUnchanged()
+
+                local layer = openConfirm()
+                touch(pointIn(tappableAround(layer, _("Cancel"))))
+                assertUnchanged()
+            end)
+
+            it("deletes on the Delete row, and the page is back to ink without a flash", function()
+                local layer = openConfirm()
+                local refreshes, restore = spyRefreshes()
+                touch(pointIn(tappableAround(layer, _("Delete"))))
+                UIManager:forceRePaint()
+                restore()
+                assertNoFlash(refreshes)
+                assert.are.equal(view, topWidget())
+                local saved = savedSources()
+                assert.are.equal(1, #saved)
+                assert.are.equal("Gutenberg", saved[1].title)
+                local ink
+                for y = 0, Screen:scaleBySize(52) do
+                    for x = 0, Screen:getWidth() - 1 do
+                        if gray(x, y) < 0x80 then ink = true break end
+                    end
+                    if ink then break end
+                end
+                assert.is_true(ink)
+            end)
         end)
     end)
 
