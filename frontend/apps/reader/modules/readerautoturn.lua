@@ -82,18 +82,27 @@ function Guide:reset()
     local text = ui.document:getTextFromPositions({ x = 0, y = 0 }, { x = Screen:getWidth(), y = Screen:getHeight() }, true)
     local column_w = Screen:getWidth() / ui.document:getVisiblePageCount()
     for _, box in ipairs(text and text.sboxes or {}) do
-        -- Segments split by links/styles still belong to one reading line.
+        -- Superscripts and inline images can give one visual line different segment heights.
         local column = math.floor(box.x / column_w)
         local last = self.lines[#self.lines]
-        if last and last.top == box.y and last.column == column then
+        local bottom = box.y + box.h
+        local overlap = last and math.min(last.bottom, bottom) - math.max(last.top, box.y) or 0
+        if last and last.column == column and overlap > math.min(last.bottom - last.top, box.h) / 2 then
             local right = math.max(last.rect.x + last.rect.w, box.x + box.w)
             last.rect.x = math.min(last.rect.x, box.x)
             last.rect.w = right - last.rect.x
+            last.top = math.min(last.top, box.y)
+            last.bottom = math.max(last.bottom, bottom)
             table.insert(last.segments, box)
-        elseif box.y >= 0 and box.y + box.h < Screen:getHeight() then
-            table.insert(self.lines, { top = box.y, column = column, segments = { box }, rect = Geom:new{
+        else
+            table.insert(self.lines, { top = box.y, bottom = bottom, column = column, segments = { box }, rect = Geom:new{
                 x = box.x, y = box.y + box.h - 1, w = box.w, h = Size.border.default,
             } })
+        end
+    end
+    for i = #self.lines, 1, -1 do
+        if self.lines[i].top < 0 or self.lines[i].bottom >= Screen:getHeight() then
+            table.remove(self.lines, i)
         end
     end
 end
@@ -113,9 +122,17 @@ end
 function Guide:paintTo(bb, x, y)
     if self.rect then
         if self.needs_baselines then
-            -- Measure after the new page is painted, using the same glyph baseline as saved underlines.
+            local view = self.autoturn.ui.view
             for _, line in ipairs(self.lines) do
-                line.rect.y = self.autoturn.ui.view:underlineY(bb, line.segments)
+                local saved_y
+                for _, box in ipairs(line.segments) do
+                    local top = view.highlight.line_tops and view.highlight.line_tops[box.y .. ":" .. box.h]
+                    if top then saved_y = math.max(saved_y or top, top) end
+                end
+                -- Saved underlines are already painted here; only measure lines without them.
+                line.rect.y = saved_y or view:underlineY(bb, {{
+                    x = line.rect.x, y = line.top, w = line.rect.w, h = line.bottom - line.top,
+                }})
             end
             self.needs_baselines = false
         end
@@ -297,6 +314,7 @@ end
 
 function Settings:close()
     UIManager:close(self, "ui", self.panel:getRefreshRegion())
+    self.autoturn:_resetGuide() -- CloseWidget runs before the settings leave the window stack.
 end
 
 Settings.onClose = Settings.close

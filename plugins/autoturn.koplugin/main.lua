@@ -33,7 +33,8 @@ function AutoTurn:_resetGuide()
     self.guide:setLine(nil)
     if not self:isActive() or not self.guide_enabled or self.suspended then return end
     self.guide:reset()
-    self.guide:setLine(1)
+    local top = UIManager:getTopmostVisibleWidget()
+    self.guide:setLine((top == self.ui or top == self.settings) and 1 or nil)
     if not self.settings and #self.guide.lines > 0 then
         UIManager:scheduleIn(self.autoturn_sec / #self.guide.lines, self.guide_task)
     end
@@ -234,12 +235,15 @@ end
 function AutoTurn:onInputEvent()
     logger.dbg("AutoTurn: onInputEvent")
     self.last_action_time = UIManager:getElapsedTimeSinceBoot()
+end
+
+function AutoTurn:onPageUpdate()
+    self:onInputEvent()
     self:_resetGuide()
 end
 
-AutoTurn.onPageUpdate = AutoTurn.onInputEvent
-AutoTurn.onPosUpdate = AutoTurn.onInputEvent
-AutoTurn.onDocumentRerendered = AutoTurn.onInputEvent
+AutoTurn.onPosUpdate = AutoTurn.onPageUpdate
+AutoTurn.onDocumentRerendered = AutoTurn.onPageUpdate
 
 -- We do not want autoturn to turn pages during the suspend process.
 -- Unschedule it and restart after resume.
