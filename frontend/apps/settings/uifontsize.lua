@@ -9,7 +9,7 @@ A full-screen page (ui/widget/fullscreenpage): the title band, a heading and a n
 text is sized in the reader, then near the bottom the size track between − and + circle buttons,
 with the current size's name above its knob. A tap on the track picks the nearest size; − and + step
 one size, and are gray at the ends. A change applies at once: the page is rebuilt with the new faces
-and repainted above its bottom bar with "ui". Going back after a change sends "UIFontScaleChanged"
+and repainted above its bottom bar with "ui". Closing the page after a change sends "UIFontScaleChanged"
 to every window, so the settings and the shelf under the page are rebuilt with the new faces before
 they show again.
 ]]
@@ -57,29 +57,34 @@ local function sizeNames()
     }
 end
 
---- The size (1 to 5) nearest to the current scale.
-local function currentSize()
-    local scale = Font:getUIScale()
+--- The index (1 to `count`) whose `distance(i)` is the smallest.
+local function nearest(count, distance)
     local best, best_d
-    for i, s in ipairs(SCALES) do
-        local d = math.abs(s - scale)
+    for i = 1, count do
+        local d = distance(i)
         if not best_d or d < best_d then best, best_d = i, d end
     end
     return best
+end
+
+--- The step (1 to 5) nearest to the current scale.
+local function currentStep()
+    local scale = Font:getUIScale()
+    return nearest(#SCALES, function(i) return math.abs(SCALES[i] - scale) end)
 end
 
 -- The size track with its − and + buttons, across `width` (gutters included); the track's center is
 -- TRACK_Y above its bottom. The circles and the track take taps over at least 44dp.
 local SizeControl = InputContainer:extend{
     width = nil,
-    size = 1, -- 1-based
-    names = nil, -- the sizes' names
-    on_change = nil, -- function(new_size)
+    step = 1, -- 1-based
+    names = nil, -- the steps' names
+    on_change = nil, -- function(new_step)
 }
 
 function SizeControl:init()
     local count = #self.names
-    self.minus_enabled, self.plus_enabled = self.size > 1, self.size < count
+    self.minus_enabled, self.plus_enabled = self.step > 1, self.step < count
     local icon = dp(20)
     self.minus_icon = IconWidget:new{ icon = "eink/minus", width = icon, height = icon, alpha = true,
         dim = not self.minus_enabled or nil }
@@ -87,7 +92,8 @@ function SizeControl:init()
         dim = not self.plus_enabled or nil }
     self.track_x = GUTTER + BUTTON + GAP
     self.track_w = self.width - 2 * self.track_x
-    self.knob_x = self:stepX(self.size)
+    self.knob_x = self:stepX(self.step)
+    -- the track's ends read 小 and 大, as in the reference, whatever the last step is called
     local function endLabel(text, step)
         local on_ink = self:stepX(step) < self.knob_x
         return TextWidget:new{ text = text, face = Font:getFace("ui_caption"), bold = true,
@@ -95,9 +101,9 @@ function SizeControl:init()
     end
     self.small_label = endLabel(C_("Interface font size", "Small"), 1)
     self.large_label = endLabel(C_("Interface font size", "Large"), count)
-    self.name = TextWidget:new{ text = self.names[self.size], face = Font:getFace("ui_caption"), bold = true,
+    self.name_label = TextWidget:new{ text = self.names[self.step], face = Font:getFace("ui_caption"), bold = true,
         fgcolor = Palette.ink, max_width = self.width - 2 * GUTTER, padding = 0 }
-    local name_h = self.name:getSize().h
+    local name_h = self.name_label:getSize().h
     self.dimen = Geom:new{ w = self.width, h = TRACK_Y + LABEL_Y + math.ceil(name_h / 2) }
     self.minus_rect = Geom:new{ w = TOUCH, h = TOUCH }
     self.plus_rect = Geom:new{ w = TOUCH, h = TOUCH }
@@ -124,66 +130,64 @@ function SizeControl:paintTo(bb, x, y)
     local function circle(cx, enabled, icon, rect)
         local r = math.floor(BUTTON / 2)
         bb:paintBorder(cx - r, cy - r, BUTTON, BUTTON, bw, enabled and Palette.ink or Palette.rule, r, anti_alias)
-        local size = icon:getSize()
-        icon:paintTo(bb, cx - math.floor(size.w / 2), cy - math.floor(size.h / 2))
+        local icon_size = icon:getSize()
+        icon:paintTo(bb, cx - math.floor(icon_size.w / 2), cy - math.floor(icon_size.h / 2))
         rect.x, rect.y = cx - math.floor(TOUCH / 2), cy - math.floor(TOUCH / 2)
     end
     circle(x + GUTTER + math.floor(BUTTON / 2), self.minus_enabled, self.minus_icon, self.minus_rect)
     circle(x + self.width - GUTTER - math.floor(BUTTON / 2), self.plus_enabled, self.plus_icon, self.plus_rect)
-    -- the track: gray, ink from its round left end to the knob's center
+    -- the track: gray, ink from its round left end to the knob's center (none on the first step)
     local r = math.floor(TRACK_H / 2)
     local tx, ty, kx = x + self.track_x, cy - r, x + self.knob_x
     bb:paintRoundedRect(tx, ty, self.track_w, TRACK_H, Palette.mark, r)
-    bb:paintCircle(tx + r, ty + r, r, Palette.ink)
-    bb:paintRect(tx + r, ty, kx - tx - r, TRACK_H, Palette.ink)
+    if self.step > 1 then
+        bb:paintCircle(tx + r, ty + r, r, Palette.ink)
+        bb:paintRect(tx + r, ty, kx - tx - r, TRACK_H, Palette.ink)
+    end
     self.track_rect.x, self.track_rect.y = tx, cy - math.floor(TOUCH / 2)
     -- the end labels on the first and last steps, inside the track
     local inset = dp(8)
     for _, end_label in ipairs{ { self.small_label, 1 }, { self.large_label, #self.names } } do
-        local label, size = end_label[1], end_label[1]:getSize()
-        local lx = x + self:stepX(end_label[2]) - math.floor(size.w / 2)
-        lx = math.max(tx + inset, math.min(lx, tx + self.track_w - inset - size.w))
-        label:paintTo(bb, lx, cy - math.floor(size.h / 2))
+        local label = end_label[1]
+        local label_size = label:getSize()
+        local lx = x + self:stepX(end_label[2]) - math.floor(label_size.w / 2)
+        lx = math.max(tx + inset, math.min(lx, tx + self.track_w - inset - label_size.w))
+        label:paintTo(bb, lx, cy - math.floor(label_size.h / 2))
     end
-    -- the knob: a paper disc with an ink ring
+    -- the knob: a paper disc with an ink ring, 1.5dp as in the reference
     local knob_r = math.floor(KNOB / 2)
     bb:paintCircle(kx, cy, knob_r, Palette.ink)
     bb:paintCircle(kx, cy, knob_r - Size.border.button, Palette.paper)
-    -- the size's name above the knob, kept inside the gutters
-    local size = self.name:getSize()
-    local nx = math.max(x + GUTTER, math.min(kx - math.floor(size.w / 2), x + self.width - GUTTER - size.w))
-    self.name:paintTo(bb, nx, cy - LABEL_Y - math.floor(size.h / 2))
+    -- the step's name above the knob, kept inside the gutters
+    local name_size = self.name_label:getSize()
+    local nx = math.max(x + GUTTER, math.min(kx - math.floor(name_size.w / 2), x + self.width - GUTTER - name_size.w))
+    self.name_label:paintTo(bb, nx, cy - LABEL_Y - math.floor(name_size.h / 2))
 end
 
-function SizeControl:change(size)
-    if size ~= self.size and size >= 1 and size <= #self.names and self.on_change then
-        self.on_change(size)
+function SizeControl:change(step)
+    if step ~= self.step and step >= 1 and step <= #self.names and self.on_change then
+        self.on_change(step)
     end
 end
 
 function SizeControl:onTapMinus()
-    self:change(self.size - 1)
+    self:change(self.step - 1)
     return true
 end
 
 function SizeControl:onTapPlus()
-    self:change(self.size + 1)
+    self:change(self.step + 1)
     return true
 end
 
 function SizeControl:onTapTrack(_, ges)
-    local best, best_d
-    for i = 1, #self.names do
-        local d = math.abs(ges.pos.x - (self.dimen.x + self:stepX(i)))
-        if not best_d or d < best_d then best, best_d = i, d end
-    end
-    self:change(best)
+    self:change(nearest(#self.names, function(i) return math.abs(ges.pos.x - (self.dimen.x + self:stepX(i))) end))
     return true
 end
 
 -- The icons and labels are painted by hand, not children: free them on rebuild and on close.
 function SizeControl:free()
-    for _, w in ipairs{ self.minus_icon, self.plus_icon, self.small_label, self.large_label, self.name } do
+    for _, w in ipairs{ self.minus_icon, self.plus_icon, self.small_label, self.large_label, self.name_label } do
         w:free()
     end
 end
@@ -192,9 +196,9 @@ SizeControl.onCloseWidget = SizeControl.free
 
 local UIFontSize = FullscreenPage:extend{}
 
---- The current size's name, for the settings' row.
+--- The current step's name, for the settings' row.
 function UIFontSize.currentName()
-    return sizeNames()[currentSize()]
+    return sizeNames()[currentStep()]
 end
 
 function UIFontSize.show()
@@ -222,15 +226,14 @@ function UIFontSize:buildContent(rect)
         VerticalSpan:new{ width = dp(8) },
         indented(TextBoxWidget:new{ text = _("Tap the slider to set the interface font size"),
             face = Font:getFace("ui_title"), bold = true, width = w }),
-        VerticalSpan:new{ width = dp(2) },
         indented(TextBoxWidget:new{ text = _("The size of a book's text is set in the reader, and this setting does not change it."),
             face = Font:getFace("ui_label"), width = w }),
     }
     self.control = SizeControl:new{
         width = rect.w,
-        size = currentSize(),
+        step = currentStep(),
         names = sizeNames(),
-        on_change = function(size) self:setSize(size) end,
+        on_change = function(step) self:setStep(step) end,
     }
     local free_h = rect.h - intro:getSize().h - self.control:getSize().h
     return VerticalGroup:new{
@@ -241,17 +244,17 @@ function UIFontSize:buildContent(rect)
     }, 1
 end
 
-function UIFontSize:setSize(size)
-    Font:setUIScale(SCALES[size])
+function UIFontSize:setStep(step)
+    Font:setUIScale(SCALES[step])
     self:build()
     UIManager:setDirty(self, "ui", self.change_rect)
 end
 
---- Closes the page; after a change, the windows under it rebuild with the new faces before they are repainted.
-function UIFontSize:goBack()
-    if self.closed then return end
-    FullscreenPage.goBack(self)
+--- However the page closes, after a change the windows under it rebuild with the new faces before they are
+-- repainted.
+function UIFontSize:onCloseWidget()
     if Font:getUIScale() ~= self.opened_scale then
+        self.opened_scale = Font:getUIScale()
         UIManager:broadcastEvent(Event:new("UIFontScaleChanged"))
     end
 end

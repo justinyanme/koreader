@@ -154,12 +154,74 @@ describe("Interface font size", function()
         end
     end
 
+    -- the first widget in a tree for which pred(widget) holds (a sheet keeps its tiles in `content`)
+    local function findWidget(widget, pred, seen)
+        seen = seen or {}
+        if type(widget) ~= "table" or seen[widget] then return end
+        seen[widget] = true
+        if pred(widget) then return widget end
+        for __, child in ipairs(widget) do
+            local found = findWidget(child, pred, seen)
+            if found then return found end
+        end
+        for __, key in ipairs{ "content", "frame" } do
+            local found = rawget(widget, key) and findWidget(widget[key], pred, seen)
+            if found then return found end
+        end
+    end
+
+    -- the tappable widget (a row, a tab) holding a child for which pred(child) holds
+    local function tappable(widget, pred)
+        return findWidget(widget, function(w) return w.callback ~= nil and findWidget(w, pred) ~= nil end)
+    end
+
+    -- the shelf's bottom band tab drawn with the icon `icon`
+    local function tab(fm, icon)
+        return tappable(fm, function(w) return w.icon == "eink/" .. icon or w.icon == "eink/" .. icon .. ".bold" end)
+    end
+
+    -- The way a reader gets there: 我 → 设置 on the shelf, 更多 → 全部设置 in the reader.
     local function openSettings(ui)
-        ui:handleEvent(Event:new("ShowEinkSettings"))
-        UIManager:forceRePaint()
+        if ui.document then
+            ui.menu:openPanel("more")
+            UIManager:forceRePaint()
+            tap(findWidget(ui.menu.sheet, function(w) return w.label == _("All settings") and w.callback ~= nil end).dimen)
+        else
+            tap(tab(ui, "user").dimen)
+            tap(tappable(ui.me_view, function(w) return w.text == _("Settings") end).dimen)
+        end
         local page = topWidget()
         assert.is_true(isA(page, EinkSettings))
         return page
+    end
+
+    local LeftContainer, RightContainer, CenterContainer, TopContainer, BottomContainer
+    setup(function()
+        LeftContainer = require("ui/widget/container/leftcontainer")
+        RightContainer = require("ui/widget/container/rightcontainer")
+        CenterContainer = require("ui/widget/container/centercontainer")
+        TopContainer = require("ui/widget/container/topcontainer")
+        BottomContainer = require("ui/widget/container/bottomcontainer")
+    end)
+
+    -- Nothing in `widget` overflows the box it is laid out in: every aligning container holds its child.
+    local function assertFits(widget)
+        local boxes = { [LeftContainer] = true, [RightContainer] = true, [CenterContainer] = true,
+            [TopContainer] = true, [BottomContainer] = true }
+        local overflows = {}
+        findWidget(widget, function(w)
+            local class = getmetatable(w) and getmetatable(w).__index
+            if boxes[class] and w.dimen and w[1] and w[1].getSize then
+                local size = w[1]:getSize()
+                if size.h > w.dimen.h or size.w > w.dimen.w then
+                    local label = findWidget(w[1], function(c) return c.text ~= nil and c.face ~= nil end)
+                    table.insert(overflows, string.format("%s: %dx%d in %dx%d",
+                        label and label.text or "?", size.w, size.h, w.dimen.w, w.dimen.h))
+                end
+            end
+            return false
+        end)
+        assert.are.same({}, overflows)
     end
 
     -- From the settings, taps the row and returns the interface font size page.
@@ -170,7 +232,7 @@ describe("Interface font size", function()
         return page
     end
 
-    -- Taps the track of `page` on size `i`.
+    -- Taps the track of `page` on step `i`.
     local function tapSize(page, i)
         local control = page.control
         tapAt(control.dimen.x + control:stepX(i), control.track_rect.y + math.floor(control.track_rect.h / 2))
@@ -256,8 +318,8 @@ describe("Interface font size", function()
             assert.is_truthy(findText(page, _("Tap the slider to set the interface font size")))
             assert.is_truthy(findText(page, _("The size of a book's text is set in the reader, and this setting does not change it.")))
             -- the default size, second of five, both buttons in ink; one page: the capsule is gray
-            assert.are.equal(2, page.control.size)
-            assert.are.equal(_("Default"), page.control.name.text)
+            assert.are.equal(2, page.control.step)
+            assert.are.equal(_("Default"), page.control.name_label.text)
             assert.is_true(page.control.minus_enabled and page.control.plus_enabled)
             assert.is_false(page.bar.capsule.prev_enabled or page.bar.capsule.next_enabled)
             -- the track is ink up to the knob and gray after it, near the bottom bar
@@ -275,7 +337,7 @@ describe("Interface font size", function()
             local refreshes = refreshesOf(function() tap(page.control.plus_rect) end)
             assert.are.equal(1.1, Font:getUIScale())
             assert.are.equal(1.1, G_reader_settings:readSetting("ui_font_scale"))
-            assert.are.equal(names[3], page.control.name.text)
+            assert.are.equal(names[3], page.control.name_label.text)
             -- the page itself is rebuilt in the new size, and repainted above its bottom bar with "ui"
             local heading = findText(page, _("Tap the slider to set the interface font size"))
             assert.is_near(roleSize("ui_title", 1.1), heading.face.orig_size, 1e-9)
@@ -285,7 +347,7 @@ describe("Interface font size", function()
             -- the last size from the track; + is then gray and does nothing
             tapSize(page, 5)
             assert.are.equal(1.35, Font:getUIScale())
-            assert.are.equal(names[5], page.control.name.text)
+            assert.are.equal(names[5], page.control.name_label.text)
             assert.is_false(page.control.plus_enabled)
             refreshes = refreshesOf(function() tap(page.control.plus_rect) end)
             assert.are.same({}, refreshes)
@@ -301,7 +363,7 @@ describe("Interface font size", function()
             tap(page.control.minus_rect)
             tap(page.control.minus_rect)
             assert.are.equal(0.9, Font:getUIScale())
-            assert.are.equal(names[1], page.control.name.text)
+            assert.are.equal(names[1], page.control.name_label.text)
             assert.is_false(page.control.minus_enabled)
             refreshes = refreshesOf(function() tap(page.control.minus_rect) end)
             assert.are.same({}, refreshes)
@@ -317,37 +379,68 @@ describe("Interface font size", function()
                 tap(page.bar.back.dimen)
             end)
             assert.are.equal(settings, topWidget())
-            -- all "ui": the change, the page closing over the whole screen, and the shelf rebuilt under the settings
+            -- all "ui": the change, the shelf rebuilt under the settings, and the page closing over the whole screen
             assert.are.same({ ui = true }, modes(refreshes))
-            assert.are.same({ mode = "ui", region = page.dimen }, refreshes[2])
+            assert.are.same({ mode = "ui", region = page.change_rect }, refreshes[1])
+            assert.are.same({ mode = "ui", region = page.dimen }, refreshes[#refreshes])
             -- the row shows the new size, and the settings use it
             assert.are.equal(names[5], row(settings, _("Interface font size")).value)
             local name = findText(settings, _("Interface font size"))
             assert.is_near(roleSize("ui_body", 1.35), name.face.orig_size, 1e-9)
             local title = findText(settings, _("Settings"))
             assert.is_near(roleSize("ui_title", 1.35), title.face.orig_size, 1e-9)
-            -- the shelf under them was rebuilt in it too
+            assertFits(settings)
+            -- the shelf under them was rebuilt in it too, on the 我 tab they were opened from
             assert.are_not.equal(shelf_view, fm.shelf_view)
             refreshes = refreshesOf(function() tap(settings.bar.back.dimen) end)
             assert.are.equal(fm, topWidget())
             assert.are.same({ { mode = "ui", region = settings.dimen } }, refreshes)
-            -- the title, a role at a size of its own, follows; the cover's lettering keeps the cover's proportions
+            local settings_row = findText(fm.me_view, _("Settings"))
+            assert.is_near(roleSize("ui_body", 1.35), settings_row.face.orig_size, 1e-9)
+            assertFits(fm.me_view)
+            -- on 书架, the title, a role at a size of its own, follows; the cover's lettering keeps the cover's
+            -- proportions; the grid still fits above the bottom band
+            tap(tab(fm, "shelf").dimen)
             local shelf_title = findText(fm, _("Shelf"))
             assert.is_near(roleSize("ui_headword", 1.35, 22), shelf_title.face.orig_size, 1e-9)
+            assertFits(fm.shelf_view)
+            assert.is_true(fm.shelf_view[1]:getSize().h <= fm.content_dimen.h)
             local book = fm.shelf_view.shown[1]
             -- the cover's title is set on the cover's stock
             local function onCover(w) return type(w.bgcolor) == "cdata" and w.bgcolor == Palette.cover_stock end
-            local cover_title, caption
-            for __, w in ipairs(findTexts(fm, book.title)) do
-                if onCover(w) then cover_title = w else caption = w end
+            local function bookTexts()
+                local cover_title, caption
+                for __, w in ipairs(findTexts(fm, book.title)) do
+                    if onCover(w) then cover_title = w else caption = w end
+                end
+                return cover_title, caption
             end
+            local cover_title, caption = bookTexts()
             assert.is_near(roleSize("ui_label", 1.35), caption.face.orig_size, 1e-9)
             local cover_size = cover_title.face.orig_size
-            Font:setUIScale(1)
-            fm:reinit()
-            for __, w in ipairs(findTexts(fm, book.title)) do
-                if onCover(w) then assert.are.equal(cover_size, w.face.orig_size) end
-            end
+            -- back to the default size: the captions shrink back, the cover's lettering stays
+            settings = openSettings(fm)
+            page = openFontSize(settings)
+            tapSize(page, 2)
+            tap(page.bar.back.dimen)
+            tap(settings.bar.back.dimen)
+            tap(tab(fm, "shelf").dimen)
+            cover_title, caption = bookTexts()
+            assert.is_near(roleSize("ui_label", 1), caption.face.orig_size, 1e-9)
+            assert.are.equal(cover_size, cover_title.face.orig_size)
+        end)
+
+        it("rebuilds the windows under it however it closes", function()
+            local settings = openSettings(fm)
+            local page = openFontSize(settings)
+            local shelf_view = fm.shelf_view
+            tapSize(page, 4)
+            UIManager:close(page)
+            UIManager:forceRePaint()
+            assert.are.equal(settings, topWidget())
+            assert.are.equal(names[4], row(settings, _("Interface font size")).value)
+            assert.is_near(roleSize("ui_body", 1.2), findText(settings, _("Interface font size")).face.orig_size, 1e-9)
+            assert.are_not.equal(shelf_view, fm.shelf_view)
         end)
 
         it("goes back with the Back key, and rebuilds nothing when the size did not change", function()
@@ -385,6 +478,7 @@ describe("Interface font size", function()
             -- the texts fit the page: the intro ends above the size's name, which is above the track
             local note = findText(page, _("The size of a book's text is set in the reader, and this setting does not change it."))
             assert.is_true(note.dimen.y + note.dimen.h < page.control.dimen.y)
+            assertFits(page)
             tap(page.bar.back.dimen)
             -- every settings row keeps its height, and its name fits in it
             for p = 1, #settings.pages do
@@ -472,11 +566,20 @@ describe("Interface font size", function()
             if footer_face then
                 assert.are.equal(footer_face.size, ui.view.footer.footer_text.face.size)
             end
-            -- what the new UI builds next uses the new size
+            -- what the new UI builds next uses the new size, and fits: the settings, the contents page
             local settings = openSettings(ui)
             assert.are.equal(names[5], row(settings, _("Interface font size")).value)
             assert.is_near(roleSize("ui_body", 1.35), findText(settings, _("Interface font size")).face.orig_size, 1e-9)
+            assertFits(settings)
             settings:closeMenu(true)
+            ui:handleEvent(Event:new("ShowToc"))
+            UIManager:forceRePaint()
+            local contents = topWidget()
+            assert.is_true(isA(contents, require("apps/reader/modules/readertocpage")))
+            assertFits(contents)
+            assert.is_true(contents[1]:getSize().h <= Screen:getHeight())
+            contents:goBack()
+            UIManager:forceRePaint()
             closeBook(ui)
         end)
 
