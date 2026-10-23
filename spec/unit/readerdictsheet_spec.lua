@@ -3,6 +3,10 @@ describe("ReaderDictSheet module", function()
     local DictQuickLookup, NetworkMgr, Replacements, Translator, Trapper, UIManager, Event, Geom, Screen
     local sample_epub = "spec/front/unit/data/juliet.epub"
     local sample_pdf = "spec/front/unit/data/sample.pdf"
+    local vocab_settings = { enabled = false, with_context = true }
+
+    local epub_prev_context = "thou\n hadst been poor John. Draw thy tool! here comes\n two of the house of the "
+    local epub_next_context = ".\nSAMPSON\nMy naked weapon is out: quarrel, I will back thee.\nGREGORY\nHow! turn thy back"
 
     -- Demo StarDict entries, as sdcv returns them, by dictionary
     local DICT = {
@@ -37,6 +41,7 @@ describe("ReaderDictSheet module", function()
 
     setup(function()
         require("commonrequire")
+        G_reader_settings:saveSetting("vocabulary_builder", vocab_settings)
         disable_plugins()
         load_plugin("vocabbuilder.koplugin")
         DocumentRegistry = require("document/documentregistry")
@@ -56,14 +61,21 @@ describe("ReaderDictSheet module", function()
         Screen = require("device").screen
         ReaderHighlightBubble.register()
         ReaderDictSheet.register()
+        Replacements.reader_search = require("apps/reader/modules/readerfulltextsearch")
     end)
 
     teardown(function()
         Replacements.reader_highlight = nil
         Replacements.reader_dictionary = nil
+        Replacements.reader_search = nil
+        G_reader_settings:delSetting("vocabulary_builder")
         DocSettings:open(sample_epub):purge()
         DocSettings:open(sample_pdf):purge()
     end)
+
+    -- Phrase lookup starts from a temporary selection with the explicit legacy Ask action.
+    before_each(function() G_reader_settings:saveSetting("default_highlight_action", "ask") end)
+    after_each(function() G_reader_settings:delSetting("default_highlight_action") end)
 
     local function topWidget()
         return UIManager._window_stack[#UIManager._window_stack].widget
@@ -263,6 +275,7 @@ describe("ReaderDictSheet module", function()
     describe("with an EPUB", function()
         local ui
         before_each(function()
+            vocab_settings.with_context = true
             DocSettings:open(sample_epub):purge()
             ui = ReaderUI:new{
                 dimen = Screen:getSize(),
@@ -325,7 +338,7 @@ describe("ReaderDictSheet module", function()
             assert.is_nil(button(page, "Dictionary"))
             assert.is_nil(find(page, function(w) return w.text == "Look up" end))
             -- the card for 维基百科 and the actions on the book's word follow
-            assert.is_truthy(button(page, "Wikipedia"))
+            assert.is_truthy(button(page, "Encyclopedia definition"))
             assert.is_truthy(button(page, "Add to vocabulary builder"))
             assert.is_truthy(button(page, "Search in this book"))
         end)
@@ -425,7 +438,7 @@ describe("ReaderDictSheet module", function()
             assert.is_false(hasText(page, "Looking up…"))
             -- no "not in the dictionaries" card, and no vocabulary for a phrase; Wikipedia, as for any selection
             assert.is_false(hasTextLike(page, "in local dictionaries"))
-            assert.is_truthy(button(page, "Wikipedia"))
+            assert.is_truthy(button(page, "Encyclopedia definition"))
             assert.is_nil(button(page, "Add to vocabulary builder"))
             assert.is_truthy(button(page, "Search in this book"))
             assertNoFull(refreshes)
@@ -634,8 +647,8 @@ describe("ReaderDictSheet module", function()
             local page = lookupPage()
             assert.is_true(hasText(page, ('No "%s" in local dictionaries'):format(page.word)))
             assert.is_true(hasText(page, "Try Wikipedia, or add more StarDict dictionaries in settings."))
-            assert.is_nil(button(page, "Add to vocabulary builder"))
-            assert.is_truthy(button(page, "Wikipedia"))
+            assert.is_truthy(button(page, "Add to vocabulary builder"))
+            assert.is_truthy(button(page, "Encyclopedia definition"))
             assert.stub(load).was_not_called()
             tapWidget(button(page, "Translate online"))
             NetworkMgr.isOnline:revert()
@@ -774,8 +787,9 @@ describe("ReaderDictSheet module", function()
             assert.is_true(pages_with_senses > 1)
         end)
 
-        it("should add the word with its context to the vocabulary builder, and remove it after the confirm layer", function()
+        it("should save the exact EPUB context even when saving context is disabled, and confirm removal", function()
             stubSdcv(ui.dictionary, true)
+            vocab_settings.with_context = false
             local Toast = require("ui/widget/toast")
             local vocab = ui.vocabbuilder
             -- as selectAndLookUp(), the word out of the vocabulary builder first
@@ -791,10 +805,27 @@ describe("ReaderDictSheet module", function()
             tapWidget(button(page, "Add to vocabulary builder"))
             assert.is_true(vocab:hasWord(word))
             local item = package.loaded["db"]:hasWord(word)
-            assert.is_truthy(item.prev_context or item.next_context)
+            assert.are.equal("Montagues", word)
+            assert.are.equal("Romeo and Juliet", item.book_title)
+            assert.are.equal(epub_prev_context, item.prev_context)
+            assert.are.equal(epub_next_context, item.next_context)
             assert.is_true(hasText(page, "In vocabulary builder"))
             assert.are.equal("Added to vocabulary builder", topWidget().text)
             UIManager:close(topWidget()) -- the toast
+            assert.is_false(vocab_settings.with_context)
+            -- The full entry's add action can encounter a word that was already saved by the card.
+            tapWidget(button(page, "Demo"))
+            local entry = topWidget()
+            tapWidget(button(entry, "Add to vocabulary builder"))
+            local duplicate = topWidget()
+            assert.are.equal("Vocabulary exists: Montagues", duplicate.title)
+            assert.are.equal("Romeo and Juliet", duplicate.book_title)
+            assert.are.equal(epub_prev_context, duplicate.prev_context)
+            assert.are.equal(epub_next_context, duplicate.next_context)
+            duplicate:onClose()
+            entry:onClose()
+            UIManager:forceRePaint()
+            assert.same(item, package.loaded["db"]:hasWord(word))
             -- a second tap asks first; cancelling keeps the word
             tapWidget(button(page, "In vocabulary builder"))
             local layer = topWidget()
@@ -809,6 +840,33 @@ describe("ReaderDictSheet module", function()
             assert.are.equal(Toast, getmetatable(topWidget()))
             assert.are.equal("Removed from vocabulary builder", topWidget().text)
             UIManager:close(topWidget())
+        end)
+
+        it("should save an unknown word with its book and selected context for later review", function()
+            stubSdcv(ui.dictionary)
+            selectAndLookUp()
+            local page = lookupPage()
+            local word = page.word
+            ui.vocabbuilder:removeWord(word)
+            local add = seek(page, "Add to vocabulary builder")
+            assert.is_truthy(add)
+            tapWidget(add)
+            UIManager:close(topWidget()) -- toast
+            back(page)
+            ui:handleEvent(Event:new("ShowVocabBuilder"))
+            UIManager:forceRePaint()
+            local vocab = topWidget()
+            local item
+            for _, entry in ipairs(vocab.item_table) do
+                if entry.word == word then item = entry break end
+            end
+            assert.is_truthy(item)
+            assert.are.equal("Montagues", word)
+            assert.are.equal("Romeo and Juliet", item.book_title)
+            assert.are.equal(epub_prev_context, item.prev_context)
+            assert.are.equal(epub_next_context, item.next_context)
+            UIManager:close(vocab)
+            ui.vocabbuilder:removeWord(word)
         end)
 
         it("should hide the vocabulary card without the plugin or from within the vocabulary builder", function()
@@ -827,6 +885,56 @@ describe("ReaderDictSheet module", function()
             assert.is_nil(seek(lookupPage(), "Add to vocabulary builder"))
         end)
 
+        it("should request a Chinese headword in zh and remove blank paragraphs from its summary", function()
+            local Wikipedia = require("ui/wikipedia")
+            stubSdcv(ui.dictionary)
+            stub(NetworkMgr, "isOnline").returns(true)
+            ui.doc_props.language = "zh-CN"
+            local requested_word, requested_language
+            stub(Wikipedia, "searchAndGetIntros").invokes(function(_, word, lang)
+                requested_word, requested_language = word, lang
+                return { [1] = { title = "经典", extract = "经典可以指：\r\n\r\n \t\n典范著作\n\n权威作品\n\n" } }
+            end)
+            ui:handleEvent(Event:new("LookupWord", "经典"))
+            UIManager:forceRePaint()
+            local page = lookupPage()
+            tapWidget(seek(page, "Encyclopedia definition"))
+            Wikipedia.searchAndGetIntros:revert()
+            NetworkMgr.isOnline:revert()
+            assert.are.equal("经典", requested_word)
+            assert.are.equal("zh", requested_language)
+            assert.is_true(hasText(page, "经典可以指：\n典范著作\n权威作品"))
+        end)
+
+        for _, full in ipairs{ false, true } do
+            it("should stay in the reader when lookup closes during Wikipedia loading (full=" .. tostring(full) .. ")", function()
+                local Wikipedia = require("ui/wikipedia")
+                stubSdcv(ui.dictionary, true)
+                stub(NetworkMgr, "isOnline").returns(true)
+                local page
+                local function response()
+                    if not full then page:onClose() end
+                    return { [1] = { title = "Juliet", extract = "Summary." } }
+                end
+                stub(Wikipedia, "searchAndGetIntros").invokes(response)
+                stub(Wikipedia, "getFullPage").invokes(function()
+                    page:onClose()
+                    return { [1] = { title = "Juliet", extract = "Full article." } }
+                end)
+                selectAndLookUp()
+                page = lookupPage()
+                tapWidget(seek(page, "Encyclopedia definition"))
+                if full then tapWidget(button(page, "Encyclopedia definition")) end
+                assert.stub(Wikipedia.getFullPage).was_called(full and 1 or 0)
+                Wikipedia.searchAndGetIntros:revert()
+                Wikipedia.getFullPage:revert()
+                NetworkMgr.isOnline:revert()
+                assert.is_true(page.closed)
+                assert.is_nil(ui.dictionary.dict_window)
+                assert.are.equal(ui, topWidget())
+            end)
+        end
+
         it("should go back to the card when the Wikipedia request is cancelled", function()
             local Wikipedia = require("ui/wikipedia")
             stubSdcv(ui.dictionary)
@@ -835,11 +943,11 @@ describe("ReaderDictSheet module", function()
             ui:handleEvent(Event:new("LookupWord", "sojourner"))
             UIManager:forceRePaint()
             local page = lookupPage()
-            tapWidget(button(page, "Wikipedia"))
+            tapWidget(button(page, "Encyclopedia definition"))
             NetworkMgr.isOnline:revert()
             Wikipedia.searchAndGetIntros:revert()
             assert.is_nil(page.wiki)
-            assert.is_truthy(button(page, "Wikipedia"))
+            assert.is_truthy(button(page, "Encyclopedia definition"))
             assert.is_true(hasText(page, "旅居者；暂住者"))
             assert.is_false(hasText(page, "Failed searching Wikipedia."))
         end)
@@ -851,7 +959,7 @@ describe("ReaderDictSheet module", function()
             UIManager:forceRePaint()
             local page = lookupPage()
             local region = page.body_rect
-            local refreshes = refreshesOf(function() tapWidget(button(page, "Wikipedia")) end)
+            local refreshes = refreshesOf(function() tapWidget(button(page, "Encyclopedia definition")) end)
             NetworkMgr.isOnline:revert()
             assert.is_true(hasText(page, "Needs a network connection"))
             assert.is_true(hasText(page, "Wikipedia is an online lookup. Turn on Wi-Fi and try again."))
@@ -860,77 +968,196 @@ describe("ReaderDictSheet module", function()
             assert.is_true(hasText(page, "旅居者；暂住者"))
         end)
 
-        it("should show the Wikipedia intro when online, and the full article from its card", function()
-          local mock_time = require("mock_time")
-          mock_time:install()
-          UIManager:_checkTasks() -- the clock is now the mock's
-          local ok, err = pcall(function()
+        it("should open the complete Wikipedia article, page through it and return to the same lookup and book", function()
             local Wikipedia = require("ui/wikipedia")
-            local Blitbuffer = require("ffi/blitbuffer")
-            stubSdcv(ui.dictionary)
+            stubSdcv(ui.dictionary, true)
             stub(NetworkMgr, "isOnline").returns(true)
-            -- a thumbnail, as with wikipedia_show_image, loaded by the popup that shows it
-            local loads = 0
-            local image = { width = 40, height = 40, title = "Sojourner" }
-            image.load_bb_func = function(_, highres)
-                loads = loads + 1
-                image[highres and "hi_bb" or "bb"] = Blitbuffer.new(40, 40, Blitbuffer.TYPE_BB8)
-            end
-            image.load_bb_func()
-            stub(Wikipedia, "searchAndGetIntros").returns({ [7] = { title = "Sojourner", extract = "A sojourner is a traveller.", index = 0, images = { image } } })
-            ui:handleEvent(Event:new("LookupWord", "sojourner"))
-            UIManager:forceRePaint()
+            stub(Wikipedia, "searchAndGetIntros").returns({ [7] = {
+                title = "Juliet", extract = "The summary only.", index = 0,
+            } })
+            local full = "The full article.\n" .. string.rep("A paragraph beyond the summary.\n", 80) .. "Article ends here."
+            local Blitbuffer = require("ffi/blitbuffer")
+            local picture = { width = 40, height = 40, title = "Juliet illustration" }
+            stub(Wikipedia, "getFullPage").invokes(function(_, title, lang)
+                assert.are.equal("Juliet", title)
+                assert.are.equal("en", lang)
+                picture.bb = Blitbuffer.new(40, 40, Blitbuffer.TYPE_BB8)
+                return { [7] = { title = title, extract = full, images = { picture } } }
+            end)
+            selectAndLookUp()
             local page = lookupPage()
-            local refreshes = refreshesOf(function() tapWidget(button(page, "Wikipedia")) end)
-            NetworkMgr.isOnline:revert()
-            Wikipedia.searchAndGetIntros:revert()
-            assert.is_true(hasText(page, "A sojourner is a traveller."))
-            assertNoFull(refreshes)
-            for _, r in ipairs(refreshes) do
-                assert.are.same(page.body_rect, r.region)
-            end
-            for round = 1, 2 do
-                tapWidget(button(page, "Wikipedia EN"))
-                local popup = topWidget()
-                assert.is_true(popup.is_wiki)
-                assert.are.equal("Sojourner", popup.results[1].word)
-                if round == 2 then
-                    -- the popup loads its image again, instead of drawing the one the first popup freed
-                    assert.is_nil(image.bb)
-                    mock_time:increase(1)
-                    UIManager:_checkTasks()
-                    assert.is_true(loads >= 2)
-                    assert.is_truthy(image.bb)
+            local anchor = ui.document:getXPointer()
+            tapWidget(seek(page, "Encyclopedia definition"))
+            assert.is_true(hasText(page, "The summary only."))
+            local card_page = page.page
+            ui.wikipedia.wiki_last_language = "fr" -- full article keeps the summary's language
+            local refreshes = refreshesOf(function()
+                for __ = 1, 2 do
+                    tapWidget(button(page, "Encyclopedia definition"))
+                    local article = topWidget()
+                    assert.is_true(hasText(article, "Juliet"))
+                    assert.is_true(hasText(article, full))
+                    assert.is_truthy(find(article, function(w)
+                        return w.line_num_to_image and w.line_num_to_image[1] == picture
+                    end))
+                    assert.is_true(article.page_count > 1)
+                    while article.bar.capsule.next_enabled do nextPage(article) end
+                    assert.are.equal(article.page_count, article.page)
+                    back(article)
+                    assert.are.equal(page, topWidget())
+                    assert.is_nil(picture.bb)
+                    assert.is_nil(picture.hi_bb)
                 end
-                -- closing the article frees its image and comes back to the cards
-                popup:onClose()
-                UIManager:forceRePaint()
-                assert.is_nil(image.bb)
-                assert.is_nil(image.hi_bb)
-                assert.are.equal(page, lookupPage())
-                assert.are.equal(page, ui.dictionary.dict_window)
-                assert.is_true(hasText(page, "A sojourner is a traveller."))
-            end
-          end)
-          mock_time:uninstall()
-          assert(ok, err)
+            end)
+            ui.wikipedia.wiki_last_language = nil
+            Wikipedia.getFullPage:revert()
+            Wikipedia.searchAndGetIntros:revert()
+            NetworkMgr.isOnline:revert()
+            assertNoFull(refreshes)
+            assert.are.equal(page, topWidget())
+            assert.are.equal(card_page, page.page)
+            assert.is_nil(picture.bb)
+            assert.is_nil(picture.hi_bb)
+            assert.is_true(hasText(page, "The summary only."))
+            assert.is_truthy(ui.highlight.selected_text)
+            back(page)
+            assert.are.equal(ui, topWidget())
+            assert.are.equal(anchor, ui.document:getXPointer())
         end)
 
-        it("should search the book for the headword", function()
-            stubSdcv(ui.dictionary)
-            stub(ui.search, "searchCallback")
-            ui:handleEvent(Event:new("LookupWord", "sojourner"))
-            UIManager:forceRePaint()
-            assert.is_nil(seek(lookupPage(), "Search in this book")) -- not started from the book
-            back(lookupPage())
-            local closed = spy.new(function() end)
-            ui:handleEvent(Event:new("LookupWord", "sojourner", false, nil, ui.highlight, nil, closed))
-            UIManager:forceRePaint()
-            tapWidget(seek(lookupPage(), "Search in this book"))
-            assert.stub(ui.search.searchCallback).was_called_with(match.is_ref(ui.search), nil, "sojourner")
+        it("should discard pending article images on paging and closing, and load them on a later visit", function()
+            local Wikipedia = require("ui/wikipedia")
+            local Blitbuffer = require("ffi/blitbuffer")
+            local mock_time = require("mock_time")
+            mock_time:install()
+            UIManager:_checkTasks()
+            local picture = { width = 40, height = 40, title = "Juliet illustration" }
+            local loads = 0
+            picture.load_bb_func = function()
+                loads = loads + 1
+                picture.bb = Blitbuffer.new(40, 40, Blitbuffer.TYPE_BB8)
+            end
+            stubSdcv(ui.dictionary, true)
+            stub(NetworkMgr, "isOnline").returns(true)
+            stub(Wikipedia, "searchAndGetIntros").returns({ [1] = { title = "Juliet", extract = "Summary." } })
+            stub(Wikipedia, "getFullPage").returns({ [1] = {
+                title = "Juliet", extract = string.rep("Article paragraph.\n", 80), images = { picture },
+            } })
+            local ok, err = pcall(function()
+                selectAndLookUp()
+                local page = lookupPage()
+                tapWidget(seek(page, "Encyclopedia definition"))
+                tapWidget(button(page, "Encyclopedia definition"))
+                nextPage(topWidget()) -- before the first image's timer runs
+                mock_time:increase(1)
+                UIManager:_checkTasks()
+                assert.are.equal(0, loads)
+                back(topWidget())
+                tapWidget(button(page, "Encyclopedia definition"))
+                back(topWidget()) -- close before the timer runs
+                mock_time:increase(1)
+                UIManager:_checkTasks()
+                assert.are.equal(0, loads)
+                assert.is_nil(picture.bb)
+                tapWidget(button(page, "Encyclopedia definition"))
+                mock_time:increase(1)
+                UIManager:_checkTasks()
+                assert.are.equal(1, loads)
+                assert.is_truthy(picture.bb)
+                back(topWidget())
+                assert.is_nil(picture.bb)
+                assert.are.equal(page, topWidget())
+            end)
+            Wikipedia.getFullPage:revert()
+            Wikipedia.searchAndGetIntros:revert()
+            NetworkMgr.isOnline:revert()
+            mock_time:uninstall()
+            assert(ok, err)
+        end)
+
+        for _, full in ipairs{ false, true } do
+            it("should keep lookup context through Wikipedia offline, failure, no match, cancellation and retry (full=" .. tostring(full) .. ")", function()
+                local Wikipedia = require("ui/wikipedia")
+                stubSdcv(ui.dictionary, true)
+                local online = false
+                stub(NetworkMgr, "isOnline").invokes(function() return online end)
+                local state = "success"
+                local function response()
+                    if state == "failed" then error("network unavailable") end
+                    if state == "missing" then return {} end
+                    if state == "cancelled" then error(Wikipedia.dismissed_error_code) end
+                    return { [7] = { title = "Juliet", extract = "Juliet article text.", index = 0 } }
+                end
+                stub(Wikipedia, "searchAndGetIntros").invokes(response)
+                stub(Wikipedia, "getFullPage").invokes(response)
+                stub(NetworkMgr, "runWhenOnline").invokes(function(_, callback) online = true callback() end)
+                selectAndLookUp()
+                local page = lookupPage()
+                if full then
+                    online = true
+                    tapWidget(seek(page, "Encyclopedia definition"))
+                    online = false
+                end
+                local anchor = ui.document:getXPointer()
+                local refreshes = refreshesOf(function()
+                    tapWidget(seek(page, "Encyclopedia definition"))
+                    assert.is_truthy(seek(page, "Turn on Wi-Fi"))
+                    state = "failed"
+                    tapWidget(button(page, "Turn on Wi-Fi"))
+                    assert.is_true(hasText(page, full and "Failed to retrieve Wikipedia article." or "Failed searching Wikipedia."))
+                    state = "missing"
+                    tapWidget(button(page, "Retry"))
+                    assert.is_true(hasTextLike(page, full and "Wikipedia article not found" or "No Wikipedia article"))
+                    state = "cancelled"
+                    tapWidget(button(page, "Retry"))
+                    assert.is_false(hasText(page, "Searching Wikipedia…"))
+                    assert.is_false(hasText(page, "Retrieving Wikipedia article…"))
+                    state = "success"
+                    tapWidget(button(page, "Retry"))
+                    if full then
+                        assert.is_true(hasText(topWidget(), "Juliet article text."))
+                        back(topWidget())
+                    end
+                end)
+                NetworkMgr.runWhenOnline:revert()
+                NetworkMgr.isOnline:revert()
+                Wikipedia.searchAndGetIntros:revert()
+                Wikipedia.getFullPage:revert()
+                assertNoFull(refreshes)
+                assert.are.equal(page, topWidget())
+                assert.is_true(hasText(page, "Juliet article text."))
+                assert.is_truthy(ui.highlight.selected_text)
+                assert.are.equal(anchor, ui.document:getXPointer())
+            end)
+        end
+
+        it("should search the selected text in the new search page and navigate a hit with the search bar", function()
+            ui.dictionary.enabled_dict_names = { "Demo" }
+            stub(ui.dictionary, "rawSdcv").returns(false, { { { dict = "Demo", word = "another lemma", definition = "n. sense" } } })
+            stub(Trapper, "dismissableRunInSubprocess").invokes(function(_, task) return true, task() end)
+            selectAndLookUp()
+            local page = lookupPage()
+            local selected = page.word
+            local refreshes = refreshesOf(function() tapWidget(seek(page, "Search in this book")) end)
+            Trapper.dismissableRunInSubprocess:revert()
+            assertNoFull(refreshes)
+            local search = topWidget()
+            assert.are.equal(selected, search.input:getText())
+            assert.is_true(#search.results > 0)
             assert.is_nil(ui.dictionary.dict_window)
-            assert.spy(closed).was_called(1)
-            ui.search.searchCallback:revert()
+            assert.is_nil(ui.highlight.selected_text)
+            local hit = find(search, function(w) return w.hit_index and w.callback and w.dimen end)
+            assert.is_truthy(hit)
+            tapWidget(hit)
+            assert.are.equal(ui, topWidget())
+            assert.are.equal(selected, ui.search:barQuery())
+            local bar = ui.search.bar:getRect()
+            tap(bar.x + 20, bar.y + 10)
+            UIManager:forceRePaint()
+            assert.are.equal(selected, topWidget().input:getText())
+            back(topWidget())
+            tapWidget({ dimen = ui.search.bar:getCloseRect() })
+            assert.is_nil(ui.search:barQuery())
         end)
 
         it("should open a dictionary's full entry in the upstream popup from its card, and come back to the cards", function()
@@ -1022,7 +1249,7 @@ describe("ReaderDictSheet module", function()
             UIManager:forceRePaint()
             DICT.manysenses = nil
             local page = lookupPage()
-            local wiki = seek(page, "Wikipedia")
+            local wiki = seek(page, "Encyclopedia definition")
             local TextBoxWidget = require("ui/widget/textboxwidget")
             local built = 0
             local new = TextBoxWidget.new
@@ -1057,6 +1284,68 @@ describe("ReaderDictSheet module", function()
     end)
 
     describe("with a PDF", function()
+        it("should save exact PDF context with context disabled, return from Wikipedia and search the selection", function()
+            local Wikipedia = require("ui/wikipedia")
+            DocSettings:open(sample_pdf):purge()
+            local ui = ReaderUI:new{
+                dimen = Screen:getSize(),
+                document = DocumentRegistry:openDocument(sample_pdf),
+            }
+            UIManager:show(ui)
+            local ok, err = pcall(function()
+                ui:handleEvent(Event:new("SetScrollMode", false))
+                ui.paging:onGotoPage(10)
+                UIManager:forceRePaint()
+                stubSdcv(ui.dictionary, true)
+                stub(NetworkMgr, "isOnline").returns(true)
+                stub(Wikipedia, "searchAndGetIntros").returns({ [1] = { title = "London", extract = "A city." } })
+                stub(Wikipedia, "getFullPage").returns({ [1] = { title = "London", extract = "London full article." } })
+                stub(Trapper, "dismissableRunInSubprocess").invokes(function(_, task) return true, task() end)
+                ui.highlight:onHold(nil, { pos = Geom:new{ x = 430, y = 210 } })
+                ui.highlight:onHoldRelease()
+                UIManager:forceRePaint()
+                tapWidget(button(ui.highlight.highlight_dialog, "Translate"))
+                local page = lookupPage()
+                local selected = page.word
+                vocab_settings.with_context = false
+                ui.vocabbuilder:removeWord(selected)
+                tapWidget(seek(page, "Add to vocabulary builder"))
+                local item = package.loaded["db"]:hasWord(selected)
+                assert.are.equal("to", selected)
+                assert.are.equal("sample", item.book_title)
+                assert.are.equal("into foreign countries, and accordingly they embarked for Hol land, after having left labourers sufficient", item.prev_context)
+                assert.are.equal("take care of the London vineyard. Their labours were crowned with success in Amsterdam, but", item.next_context)
+                assert.is_false(vocab_settings.with_context)
+                UIManager:close(topWidget())
+                ui.vocabbuilder:removeWord(selected)
+                tapWidget(seek(page, "Encyclopedia definition"))
+                tapWidget(button(page, "Encyclopedia definition"))
+                assert.is_true(hasText(topWidget(), "London full article."))
+                -- A physical Back returns to the lookup, without clearing the PDF selection.
+                topWidget():onBack()
+                UIManager:forceRePaint()
+                assert.are.equal(page, topWidget())
+                assert.is_truthy(ui.highlight.selected_text)
+                assert.are.equal(10, ui.paging.current_page)
+                tapWidget(seek(page, "Search in this book"))
+                assert.are.equal(selected, topWidget().input:getText())
+                assert.is_true(#topWidget().results > 0)
+                back(topWidget())
+                assert.are.equal(ui, topWidget())
+                assert.are.equal(10, ui.paging.current_page)
+            end)
+            for _, method in ipairs{ "searchAndGetIntros", "getFullPage" } do
+                if Wikipedia[method].revert then Wikipedia[method]:revert() end
+            end
+            vocab_settings.with_context = true
+            if NetworkMgr.isOnline.revert then NetworkMgr.isOnline:revert() end
+            if Trapper.dismissableRunInSubprocess.revert then Trapper.dismissableRunInSubprocess:revert() end
+            if ui.dictionary.rawSdcv.revert then ui.dictionary.rawSdcv:revert() end
+            ui:onClose()
+            UIManager:quit()
+            assert(ok, err)
+        end)
+
         it("should translate a phrase selected on the page, and go back to that page", function()
             DocSettings:open(sample_pdf):purge()
             local ui = ReaderUI:new{
