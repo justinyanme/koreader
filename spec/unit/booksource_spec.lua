@@ -442,6 +442,42 @@ describe("书源 (OPDS as a remote shelf)", function()
             waitFor(function() return view:top().result.state == "ok" end, "the home feed")
             assert.are.equal("home", view:top().kind)
         end)
+
+        it("taps on screen: the row enters the source, its ⋯ only opens the actions", function()
+            writeSources{ nas(), { title = "Gutenberg", url = "https://gutenberg.example/opds" } }
+            local fm = openFM()
+            tap(fm.shelf_view, "eink/source")
+            local view = topWidget()
+            local Geom = require("ui/geometry")
+            local Screen = require("device").screen
+            -- the innermost tappable around the first text or icon equal to `label`
+            local function find(node, label, tappable)
+                if type(node) ~= "table" then return end
+                if node.callback then tappable = node end
+                if (node.text == label and node.face) or node.icon == label then return tappable end
+                for _, child in ipairs(node) do
+                    local found = find(child, label, tappable)
+                    if found then return found end
+                end
+            end
+            local function screenTap(target)
+                local d = target.dimen
+                UIManager:sendEvent(Event:new("Gesture", { ges = "tap",
+                    pos = Geom:new{ x = d.x + math.floor(d.w / 4), y = d.y + math.floor(d.h / 2), w = 0, h = 0 } }))
+            end
+            view:paintTo(Screen.bb, 0, 0)
+            screenTap(find(view, "eink/more"))
+            assert.are.equal(BottomSheet, getmetatable(topWidget()).__index)
+            assert.is_true(has(topWidget(), _("Edit")))
+            topWidget():onClose()
+            flush()
+
+            view:paintTo(Screen.bb, 0, 0)
+            screenTap(find(view, "NAS at home"))
+            assert.are.equal(view, topWidget())
+            waitFor(function() return view:top().result.state == "ok" end, "the home feed")
+            assert.are.equal("home", view:top().kind)
+        end)
     end)
 
     describe("home", function()

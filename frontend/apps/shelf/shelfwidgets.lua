@@ -154,12 +154,20 @@ function Tappable:init()
     end
 end
 
-function Tappable:onTap()
+-- An outer Tappable that matches hands its Tap/Hold down to its children first:
+-- one nested inside (a row's ⋯) answers only when the finger is on it.
+local function missed(self, ges)
+    return ges and ges.pos and self.dimen and not self.dimen:contains(ges.pos)
+end
+
+function Tappable:onTap(_, ges)
+    if missed(self, ges) then return end
     if self.callback then self.callback() end
     return true
 end
 
-function Tappable:onHold()
+function Tappable:onHold(_, ges)
+    if missed(self, ges) or not self.hold_callback then return end
     self.hold_callback()
     return true
 end
