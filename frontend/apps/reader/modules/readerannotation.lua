@@ -1,9 +1,11 @@
 local DocSettings = require("docsettings")
+local Event = require("ui/event")
 local LuaSettings = require("luasettings")
 local Notification = require("ui/widget/notification")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
+local util = require("util")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -523,6 +525,25 @@ function ReaderAnnotation:addItem(item)
     item.pageref = self:getPageRef(item.page, item.pageno)
     local index = self:getInsertionIndex(item)
     table.insert(self.annotations, index, item)
+    return index
+end
+
+-- A direct thought is saved only on submission; its drawer keeps the range compatible with old readers.
+function ReaderAnnotation:addNote(selection, text)
+    local item = {
+        pos0 = selection.pos0, pos1 = selection.pos1,
+        page = self.ui.rolling and selection.pos0 or selection.pos0.page,
+        text = util.cleanupSelectedText(selection.text), note = text, origin = "note",
+        drawer = self.view.highlight.saved_drawer, color = self.view.highlight.saved_color,
+        pboxes = selection.pboxes, ext = selection.ext,
+    }
+    item.chapter = self.ui.toc:getTocTitleByPage(item.page)
+    if self.ui.rolling then
+        item.epubcfi = self.document:getEPubCFIRangeFromXPointers(item.pos0, item.pos1)
+    end
+    local index = self:addItem(item)
+    self.ui:handleEvent(Event:new("AnnotationsModified", { item, nb_notes_added = 1, index_modified = index }))
+    self.view.footer:maybeUpdateFooter()
     return index
 end
 

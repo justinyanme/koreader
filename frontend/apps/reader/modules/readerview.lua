@@ -562,7 +562,8 @@ function ReaderView:drawPageSavedHighlight(bb, x, y)
             for index, item in ipairs(items) do
                 local boxes = self.document:getPageBoxesFromPositions(page, item.pos0, item.pos1)
                 if boxes then
-                    local drawer = item.drawer
+                    local annotation = self.ui.annotation.annotations[item.parent or (index + idx_offset)]
+                    local drawer = annotation.origin == "note" and "note" or item.drawer
                     local color = self.ui.highlight:getHighlightColor(item.color)
                     if not colorful and color and not Blitbuffer.isColor8(color) then
                         colorful = true
@@ -637,7 +638,7 @@ function ReaderView:drawXPointerSavedHighlight(bb, x, y)
                 if end_pos >= cur_view_top then
                     local boxes = self.document:getScreenBoxesFromPositions(item.pos0, item.pos1, true) -- get_segments=true
                     if boxes then
-                        local drawer = item.drawer
+                        local drawer = item.origin == "note" and "note" or item.drawer
                         local color = self.ui.highlight:getHighlightColor(item.color)
                         if not colorful and color and not Blitbuffer.isColor8(color) then
                             colorful = true
@@ -788,6 +789,7 @@ end
 
 -- line_top: the top of a straight line or wave (fork, see ReaderView:underlineY())
 function ReaderView:drawHighlightRect(bb, _x, _y, rect, drawer, color, draw_note_mark, line_top)
+    if drawer == "note" then return end -- direct thoughts have only the thought marker
     if self.highlight.lines and (drawer == "underscore" or drawer == "wave") then -- fork: drawn last
         table.insert(self.highlight.lines, { rect = rect, drawer = drawer, color = color, draw_note_mark = draw_note_mark })
         return
