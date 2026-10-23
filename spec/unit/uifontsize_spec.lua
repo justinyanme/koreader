@@ -300,19 +300,20 @@ describe("Interface font size", function()
             fm:onClose()
         end)
 
-        it("is the first row of the Reading group, shows the current size, and opens its page", function()
+        it("is the last of the reading preferences, shows the current size under its name, and opens its page", function()
             local settings = openSettings(fm)
-            local first
+            local last
             for i, entry in ipairs(settings.home) do
-                if entry.header and entry.group_id == "reading" then
-                    first = settings.home[i + 1]
+                if entry.header then
+                    last = settings.home[i - 1]
                     break
                 end
             end
-            assert.are.equal(_("Interface font size"), first.text)
+            assert.are.equal("preferences", last.group_id)
+            assert.are.equal(_("Interface font size"), last.text)
             local spec = row(settings, _("Interface font size"))
             assert.are.equal("chevron", spec.kind)
-            assert.are.equal(_("Default"), spec.value)
+            assert.are.equal(_("Default"), spec.subtitle)
             local page
             local refreshes = refreshesOf(function() page = openFontSize(settings) end)
             assert.are.same({ { mode = "ui", region = page.dimen } }, refreshes)
@@ -386,9 +387,9 @@ describe("Interface font size", function()
             assert.are.same({ mode = "ui", region = page.change_rect }, refreshes[1])
             assert.are.same({ mode = "ui", region = page.dimen }, refreshes[#refreshes])
             -- the row shows the new size, and the settings use it
-            assert.are.equal(names[5], row(settings, _("Interface font size")).value)
+            assert.are.equal(names[5], row(settings, _("Interface font size")).subtitle)
             local name = findText(settings, _("Interface font size"))
-            assert.is_near(roleSize("ui_body", 1.35), name.face.orig_size, 1e-9)
+            assert.is_near(roleSize("ui_title", 1.35), name.face.orig_size, 1e-9)
             local title = findText(settings, _("Settings"))
             assert.is_near(roleSize("ui_title", 1.35), title.face.orig_size, 1e-9)
             assertFits(settings)
@@ -440,8 +441,8 @@ describe("Interface font size", function()
             UIManager:close(page)
             UIManager:forceRePaint()
             assert.are.equal(settings, topWidget())
-            assert.are.equal(names[4], row(settings, _("Interface font size")).value)
-            assert.is_near(roleSize("ui_body", 1.2), findText(settings, _("Interface font size")).face.orig_size, 1e-9)
+            assert.are.equal(names[4], row(settings, _("Interface font size")).subtitle)
+            assert.is_near(roleSize("ui_title", 1.2), findText(settings, _("Interface font size")).face.orig_size, 1e-9)
             assert.are_not.equal(shelf_view, fm.shelf_view)
         end)
 
@@ -458,7 +459,7 @@ describe("Interface font size", function()
             press("Back")
             assert.are.equal(settings, topWidget())
             assert.are.equal(shelf_view, fm.shelf_view)
-            assert.are.equal(_("Default"), row(settings, _("Interface font size")).value)
+            assert.are.equal(_("Default"), row(settings, _("Interface font size")).subtitle)
             -- a change that is changed back is no change either
             page = openFontSize(settings)
             tap(page.control.plus_rect)
@@ -523,7 +524,7 @@ describe("Interface font size", function()
             assert.are.equal(1, G_reader_settings:readSetting("ui_font_scale"))
             -- so the row reads 默认, and − goes to 小
             settings = openSettings(fm)
-            assert.are.equal(_("Default"), row(settings, _("Interface font size")).value)
+            assert.are.equal(_("Default"), row(settings, _("Interface font size")).subtitle)
             page = openFontSize(settings)
             tap(page.control.minus_rect)
             assert.are.equal(0.9, Font:getUIScale())
@@ -620,8 +621,8 @@ describe("Interface font size", function()
             end
             -- what the new UI builds next uses the new size, and fits: the settings, the contents page
             local settings = openSettings(ui)
-            assert.are.equal(names[5], row(settings, _("Interface font size")).value)
-            assert.is_near(roleSize("ui_body", 1.35), findText(settings, _("Interface font size")).face.orig_size, 1e-9)
+            assert.are.equal(names[5], row(settings, _("Interface font size")).subtitle)
+            assert.is_near(roleSize("ui_title", 1.35), findText(settings, _("Interface font size")).face.orig_size, 1e-9)
             assertFits(settings)
             settings:closeMenu(true)
             -- the toolbar's panels (its bars hold icons only): more, brightness from more's first row,

@@ -1,6 +1,7 @@
 --[[--
-Settings of the e-ink redesign (see the prototype's settings subpage): groups
-laid out in ui/elements/eink_settings_order.lua, ending with the original menu.
+Settings of the e-ink redesign (WeChat Read's 13-reading-preferences/02-settings.png):
+the reading preferences first, as two-line rows, then groups laid out in
+ui/elements/eink_settings_order.lua, ending with the original menu.
 
 A full-screen page (ui/widget/fullscreenpage), opened by the "ShowEinkSettings"
 event in the reader (ReaderToolbar) and the file manager (ShelfFileManager): the
@@ -8,7 +9,9 @@ centered title on top, the back arrow and the page capsule at the bottom. Rows a
 backed by the original menu's items: a group row opens its items, and their entries
 open as pages of uniform rows (name, current value, then a chevron, a toggle or a
 check mark). A row may instead open a page of the new settings' own (the interface font
-size). The back arrow goes back up a level, and closes the page from the top.
+size). The preferences, which have no group header, show their name in bold over a
+subtitle (or the current value). The back arrow goes back up a level, and closes the
+page from the top.
 The page keeps TouchMenu's state names (item_table, item_table_stack, page) and
 methods (updateItems, closeMenu, backToUpperMenu), so the items' callbacks work
 unchanged.
@@ -16,6 +19,8 @@ unchanged.
 Opening and closing the page and going into and back from a page of entries refresh
 it whole with "ui"; turning a list page refreshes the list and the bottom bar ("ui").
 Toggling refreshes the toggle ("fast"), and other rows only when they changed ("ui").
+A change that re-lays the open book out waits until the page closes (runAfterClose()),
+so it neither refreshes the hidden book nor holds the toggle up.
 ]]
 
 local CenterContainer = require("ui/widget/container/centercontainer")
@@ -48,6 +53,7 @@ local function dp(n) return Screen:scaleBySize(n) end
 local GUTTER = dp(24)
 local ROW_H = dp(56)
 local HEADER_H = dp(36)
+local TWO_LINE_ROW_H = dp(92) -- a preference: its name over a subtitle, as in the reference
 
 local function text(str, face, color, max_width, bold)
     return TextWidget:new{ text = str, face = Font:getFace(face), fgcolor = color or Palette.ink, max_width = max_width, bold = bold }
@@ -214,7 +220,7 @@ function EinkSettings:rowItems(row)
         table.insert(items, dofile(row.file))
     end
     if row.build then
-        table.insert(items, row.build())
+        table.insert(items, row.build(self.ui))
     end
     for _, id in ipairs(row.items or {}) do
         local item = self.by_id[id]
@@ -230,13 +236,18 @@ function EinkSettings:rowItems(row)
     return items
 end
 
--- Home entries: group headers, then one menu-item-like entry per row.
+-- Home entries: group headers, then one menu-item-like entry per row. Rows of a group without a header are two
+-- lines tall.
 function EinkSettings:buildHome()
     local home = {}
     for _, group in ipairs(self.groups) do
-        table.insert(home, { header = true, text = group.text, group_id = group.id })
+        if group.text then
+            table.insert(home, { header = true, text = group.text, group_id = group.id })
+        end
         for _, row in ipairs(group.rows) do
-            table.insert(home, self:homeEntry(row, group.id))
+            local entry = self:homeEntry(row, group.id)
+            entry.two_line, entry.subtitle = not group.text, row.subtitle
+            table.insert(home, entry)
         end
     end
     return home
@@ -262,6 +273,7 @@ function EinkSettings:homeEntry(row, group_id)
         entry.value_func = function() return reason end
     elseif row.toggle then
         entry.checked_func, entry.callback = item.checked_func, item.callback
+        entry.enabled_func, entry.help_text = item.enabled_func, item.help_text
     else
         local own = #items == 1 and (item.sub_item_table or item.sub_item_table_func)
         entry.id = own and item.id or nil -- the row stands for this item
@@ -325,7 +337,8 @@ function EinkSettings:goToHomeEntry(index)
     end
 end
 
---- Row specs of the shown table: { item, name, value, kind = "header"|"toggle"|"check"|"chevron"|"none", enabled, checked }.
+--- Row specs of the shown table: { item, name, value, kind = "header"|"toggle"|"check"|"chevron"|"none", enabled, checked },
+-- and `subtitle` for a two-line row, which shows its value there.
 function EinkSettings:rowSpecs()
     local specs = {}
     local is_home = self.item_table == self.home
@@ -339,6 +352,9 @@ function EinkSettings:rowSpecs()
                 if is_home then
                     spec.name = item.text
                     spec.value = item.value_func and item.value_func()
+                    if item.two_line then
+                        spec.subtitle, spec.value = item.subtitle or spec.value or "", nil
+                    end
                 else
                     spec.name, spec.value = splitText(itemText(item))
                     if not spec.value and item.sub_item_table then
@@ -357,9 +373,10 @@ function EinkSettings:rowSpecs()
                     spec.kind = "none"
                 end
             end
-            spec.h = spec.kind == "header" and HEADER_H or ROW_H
+            spec.h = spec.kind == "header" and HEADER_H or spec.subtitle and TWO_LINE_ROW_H or ROW_H
             spec.is_header = spec.kind == "header"
-            spec.sig = table.concat({ spec.kind, spec.name or "", spec.value or "", tostring(spec.enabled), tostring(spec.checked) }, "\0")
+            spec.sig = table.concat({ spec.kind, spec.name or "", spec.value or "", spec.subtitle or "", tostring(spec.enabled),
+                tostring(spec.checked) }, "\0")
             table.insert(specs, spec)
         end
     end
@@ -403,11 +420,16 @@ function EinkSettings:buildRow(spec)
     end
     local right_w = right:getSize().w
     local name_w = w - right_w - (right_w > 0 and dp(12) or 0)
-    local name = text(spec.name, "ui_body", fg, name_w)
+    local name = text(spec.name, spec.subtitle and "ui_title" or "ui_body", fg, name_w)
     spec.truncated = name:isTruncated()
-    local inner_h = ROW_H - Size.border.default
+    if spec.subtitle then
+        local subtitle = text(spec.subtitle, "ui_label", fg, name_w)
+        spec.truncated = spec.truncated or subtitle:isTruncated()
+        name = VerticalGroup:new{ align = "left", name, VerticalSpan:new{ width = dp(6) }, subtitle }
+    end
+    local inner_h = spec.h - Size.border.default
     return Row:new{
-        width = self.dimen.w, height = ROW_H,
+        width = self.dimen.w, height = spec.h,
         on_tap = spec.enabled and function() self:select(spec.item) end or nil,
         on_hold = function() self:hold(spec) end,
         VerticalGroup:new{
@@ -447,7 +469,7 @@ function EinkSettings:buildContent()
         if spec.toggle then
             local size = spec.toggle:getSize()
             spec.toggle_rect = Geom:new{ x = GUTTER + self.content_w - size.w,
-                y = spec.rect.y + math.floor((ROW_H - Size.border.default - size.h) / 2), w = size.w, h = size.h }
+                y = spec.rect.y + math.floor((spec.h - Size.border.default - size.h) / 2), w = size.w, h = size.h }
         end
     end
     self.shown = shown
@@ -527,6 +549,21 @@ function EinkSettings:hold(spec)
     local help_text = item.help_text_func and item.help_text_func(self) or item.help_text
     if help_text or spec.truncated then
         UIManager:show(InfoMessage:new{ text = help_text or itemText(item), show_icon = help_text ~= nil })
+    end
+end
+
+--- Runs `fn` once the page has closed and the window under it shows again, once per `key` however many times it is
+-- asked: for a change to the book under the page, such as laying it out again.
+function EinkSettings:runAfterClose(key, fn)
+    self.after_close = self.after_close or {}
+    self.after_close[key] = fn
+end
+
+function EinkSettings:onCloseWidget()
+    local after_close = self.after_close
+    self.after_close = nil
+    for __, fn in pairs(after_close or {}) do
+        fn()
     end
 end
 

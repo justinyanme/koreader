@@ -1,14 +1,19 @@
 --[[--
 Groups of the reorganized settings (apps/settings/einksettings.lua), next to the
-original menus' reader_menu_order.lua and filemanager_menu_order.lua.
+original menus' reader_menu_order.lua and filemanager_menu_order.lua. A group's `text`
+is its header. The reading preferences come first without one, as in WeChat Read
+(13-reading-preferences/02-settings.png): the rows of a group without a header are two
+lines tall.
 
 Each row is backed by items of the original menus, by id:
     id      row id, the target of the "ShowEinkSettings" event (as are group ids)
     items   original menu item ids; one item opens its own entries, several are listed together
     file    an element table the original menu embeds without an id (instead of items)
-    build   function returning a menu item of the new settings' own (instead of items)
+    build   function(ui) returning a menu item of the new settings' own (instead of items); `ui` is the reader or
+            the file manager the settings show over
     open    function(settings) showing a page of the new settings' own over them (instead of items)
     toggle  the single item is a checkbox, shown as a toggle on the row
+    subtitle the second line of a row of the preferences; without one, they show the row's value there
     choice  the entries up to the first separator are one single choice, shown with a check mark
     value   function(item) returning the row's current value; by default the "Name: value" text or checked radio entry
             (no item with `open`)
@@ -24,10 +29,21 @@ local _ = require("gettext")
 local C_ = _.pgettext
 
 return {
-    { id = "reading", text = C_("Settings group", "Reading"), rows = {
+    { id = "preferences", rows = {
+        { id = "left_tap_forward", text = _("Tap left side for next page"), toggle = true,
+          subtitle = _("When on, taps on the left side also turn to the next page"),
+          build = function() return require("apps/reader/modules/readertoolbar").genLeftTapForwardMenuItem() end },
+        { id = "first_line_indent", text = _("Indent first lines of body text"), toggle = true,
+          subtitle = _("When on, the body text of books is indented on first lines"),
+          build = function(ui) return require("apps/reader/modules/readertypesetpanel").genGlobalIndentMenuItem(ui) end },
+        { id = "show_time", text = _("Show time while reading"), toggle = true,
+          subtitle = _("When on, the current system time shows while reading"),
+          build = function(ui) return require("apps/reader/modules/readertoolbar").genTimeMenuItem(ui) end },
         { id = "ui_font_size", text = _("Interface font size"),
           open = function() require("apps/settings/uifontsize").show() end,
           value = function() return require("apps/settings/uifontsize").currentName() end },
+    } },
+    { id = "reading", text = C_("Settings group", "Reading"), rows = {
         { id = "tap_zones", text = _("Page turns and tap zones"), items = { "page_turns" }, preview = "tap_zones" },
         { id = "full_refresh", text = C_("Settings", "Full refresh rate"), choice = true,
           file = Device:hasEinkScreen() and "frontend/ui/elements/refresh_menu_table.lua" or nil },

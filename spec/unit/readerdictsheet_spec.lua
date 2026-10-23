@@ -316,6 +316,43 @@ describe("ReaderDictSheet module", function()
             return selectAndLookUp(Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
         end
 
+        local clock = 0 -- gesture times, a second apart: past any rate limit
+        local function gesture(kind, pos)
+            clock = clock + 1
+            UIManager:sendEvent(Event:new("Gesture", {
+                ges = kind, pos = Geom:new{ x = pos.x, y = pos.y, w = 0, h = 0 }, time = require("ui/time").s(clock),
+            }))
+        end
+
+        -- A long-press at `from`, dragged through the other positions if any, then released.
+        local function longPress(from, ...)
+            local last = from
+            gesture("hold", from)
+            for _, pos in ipairs{ ... } do
+                gesture("hold_pan", pos)
+                last = pos
+            end
+            UIManager:forceRePaint()
+            gesture("hold_release", last)
+            UIManager:forceRePaint()
+        end
+
+        local SAMPSON = { x = 100, y = 160 } -- a speaker's name alone on its line
+        -- from SAMPSON down to the next lines: without a selection preference, this drag saves a highlight
+        local PHRASE = { { x = 300, y = 200 }, { x = 300, y = 230 }, { x = 300, y = 260 } }
+
+        -- A long-press near the page foot dragged into its bottom right corner (the page scrolls on) and back out:
+        -- a selection across two pages.
+        local function selectAcrossPages()
+            local w, h = Screen:getWidth(), Screen:getHeight()
+            longPress({ x = 100, y = 740 }, { x = 300, y = 745 }, { x = w - 5, y = h - 5 }, { x = w - 150, y = h - 150 })
+        end
+
+        -- The card (a rounded frame) holding `text`, such as its heading.
+        local function cardOf(page, text)
+            return find(page, function(w) return w.radius == Screen:scaleBySize(14) and hasText(w, text) end)
+        end
+
         it("should open a full-screen stack of cards, one per dictionary named on it, without source chips", function()
             stubSdcv(ui.dictionary, true)
             local refreshes, text = selectAndLookUp()
@@ -479,8 +516,9 @@ describe("ReaderDictSheet module", function()
 
         it("should show the offline state of the translation, and translate once Wi-Fi is on", function()
             stubSdcv(ui.dictionary)
-            local online = false
+            local online = false -- Wi-Fi off
             stub(NetworkMgr, "isOnline").invokes(function() return online end)
+            stub(NetworkMgr, "isConnected").invokes(function() return online end)
             stub(NetworkMgr, "runWhenOnline").invokes(function(_, callback) online = true callback() end)
             local load = stubTranslator({ { { "离线之后", "x" } } })
             selectPhrase()
@@ -491,6 +529,7 @@ describe("ReaderDictSheet module", function()
             local region = page.body_rect
             local refreshes = refreshesOf(function() tapWidget(button(page, "Turn on Wi-Fi")) end)
             NetworkMgr.isOnline:revert()
+            NetworkMgr.isConnected:revert()
             NetworkMgr.runWhenOnline:revert()
             revertTranslator()
             assert.is_true(hasText(page, "离线之后"))
@@ -541,6 +580,297 @@ describe("ReaderDictSheet module", function()
             assert.spy(closed).was_called(1)
             assert.is_nil(lookupPage())
             assert.is_nil(ui.dictionary.dict_window)
+        end)
+
+        it("should keep a long-pressed word local and translate a dragged phrase, without a selection preference", function()
+            G_reader_settings:delSetting("default_highlight_action")
+            stubSdcv(ui.dictionary)
+            stub(NetworkMgr, "isOnline").returns(true)
+            local load = stubTranslator({ { { "我的武器出鞘了。", "x" } } })
+            local xp = ui.rolling:getBookLocation()
+            -- a word stays a temporary selection, and goes to the local dictionaries only
+            longPress(SAMPSON)
+            tapWidget(button(ui.highlight.highlight_dialog, "Translate"))
+            assert.are.equal("SAMPSON", sdcv_words[1])
+            assert.stub(load).was_not_called()
+            assert.is_truthy(button(lookupPage(), "Translate online"))
+            back(lookupPage())
+            -- a phrase dragged over three lines is saved, then translated online after the dictionaries
+            longPress(SAMPSON, unpack(PHRASE))
+            assert.are.equal(1, #ui.annotation.annotations)
+            local refreshes = refreshesOf(function()
+                tapWidget(button(ui.highlight.highlight_dialog, "Translate"))
+            end)
+            NetworkMgr.isOnline:revert()
+            revertTranslator()
+            local phrase = "SAMPSON\nMy naked weapon is out: quarrel, I will back thee.\nGREGORY"
+            assert.are.equal(phrase, sdcv_words[1])
+            assert.stub(load).was_called(1)
+            assert.stub(load).was_called_with(match.is_ref(Translator), phrase, match._, match._)
+            local page = lookupPage()
+            assert.is_true(hasText(cardOf(page, "Online translation"), "Needs a network connection"))
+            assert.is_true(hasText(cardOf(page, "Online translation"), "我的武器出鞘了。"))
+            assertNoFull(refreshes)
+            -- back to the book where it was, under the phrase's one highlight, with nothing left over it
+            refreshes = refreshesOf(function() back(page) end)
+            assert.are.equal(1, #UIManager._window_stack)
+            assert.are.equal(ui, topWidget())
+            assert.is_nil(ui.dictionary.dict_window)
+            assert.is_nil(ui.highlight.highlight_dialog)
+            assert.are.same(xp, ui.rolling:getBookLocation())
+            assert.are.equal(1, #ui.annotation.annotations)
+            assert.is_true(hasRefresh(refreshes, "ui", page.dimen))
+            assertNoFull(refreshes)
+        end)
+
+        for _, preference in ipairs{ "none", "ask" } do
+            it("should come back to the first page of a phrase selected across pages after translating it ("
+                    .. preference .. ")", function()
+                if preference == "none" then G_reader_settings:delSetting("default_highlight_action") end
+                local mock_time = require("mock_time")
+                mock_time:install()
+                UIManager:_checkTasks() -- the clock is now the mock's
+                local ok, err = pcall(function()
+                    stubSdcv(ui.dictionary)
+                    stub(NetworkMgr, "isOnline").returns(true)
+                    local load = stubTranslator({ { { "跨页的译文", "x" } } })
+                    local first, xp = ui.view.state.page, ui.rolling:getBookLocation()
+                    selectAcrossPages()
+                    -- a saved highlight's popover comes once the page has turned back, a few ticks later
+                    for _ = 1, 3 do UIManager:_checkTasks() end
+                    UIManager:forceRePaint()
+                    tapWidget(button(ui.highlight.highlight_dialog, "Translate"))
+                    NetworkMgr.isOnline:revert()
+                    revertTranslator()
+                    local text = load.calls[1].vals[2]
+                    assert.is_truthy(text:find("^SAMPSON")) -- from the page foot…
+                    assert.is_truthy(text:find("ABRAHAM$")) -- …into the text the corner scrolled to
+                    local page = lookupPage()
+                    assert.is_true(hasText(page, "跨页的译文"))
+                    back(page)
+                    mock_time:increase(G_defaults:readSetting("DELAY_CLEAR_HIGHLIGHT_S") + 0.1)
+                    UIManager:_checkTasks()
+                    UIManager:forceRePaint()
+                    -- the first page again, as before the selection, in page mode
+                    assert.are.equal(1, #UIManager._window_stack)
+                    assert.are.equal("page", ui.view.view_mode)
+                    assert.are.equal(first, ui.view.state.page)
+                    assert.are.same(xp, ui.rolling:getBookLocation())
+                    assert.is_nil(ui.highlight.hold_pos)
+                    -- saved without a preference; a temporary selection with ask, gone now
+                    assert.are.equal(preference == "none" and 1 or 0, #ui.annotation.annotations)
+                end)
+                mock_time:uninstall()
+                assert(ok, err)
+            end)
+        end
+
+        it("should drop a translation answering as the page is left, changing and repainting nothing", function()
+            stubSdcv(ui.dictionary)
+            stub(NetworkMgr, "isOnline").returns(true)
+            local dismissed = spy.new(function() end)
+            local page, updates
+            stubTranslator({ { { "太晚了", "x" } } }, function(trap)
+                -- as Trapper does: closing the page calls the request's dismiss callback
+                trap.dismiss_callback = dismissed
+                page, updates = trap, spy.on(trap, "update")
+                back(trap) -- and the answer comes in the same tick, as completed
+            end)
+            longPress(SAMPSON, unpack(PHRASE)) -- with ask: a temporary selection
+            tapWidget(button(ui.highlight.highlight_dialog, "Translate"))
+            NetworkMgr.isOnline:revert()
+            revertTranslator()
+            assert.spy(dismissed).was_called(1)
+            assert.is_false(UIManager:isWidgetShown(page))
+            assert.are.same({ loading = true }, page.translation)
+            assert.spy(updates).was_not_called()
+            assert.are.equal(1, #UIManager._window_stack)
+            assert.are.equal(ui, topWidget())
+            assert.is_nil(ui.dictionary.dict_window)
+        end)
+
+        it("should stay offline when turning on Wi-Fi is declined, and leave nothing over the book", function()
+            stubSdcv(ui.dictionary)
+            local online = false -- Wi-Fi off
+            stub(NetworkMgr, "isOnline").invokes(function() return online end)
+            stub(NetworkMgr, "isConnected").invokes(function() return online end)
+            local online_callback
+            -- declined or cancelled: NetworkMgr never runs the callback (here: not before the page is gone)
+            local wifi = stub(NetworkMgr, "runWhenOnline").invokes(function(_, callback) online_callback = callback end)
+            local load = stubTranslator({ { { "不该出现", "x" } } })
+            longPress(SAMPSON, unpack(PHRASE))
+            tapWidget(button(ui.highlight.highlight_dialog, "Translate"))
+            local page = lookupPage()
+            local refreshes = refreshesOf(function()
+                tapWidget(button(cardOf(page, "Online translation"), "Turn on Wi-Fi"))
+            end)
+            assert.stub(wifi).was_called(1)
+            assert.stub(load).was_not_called()
+            local translation = cardOf(page, "Online translation")
+            assert.is_true(hasText(translation, "Online translation needs Wi-Fi. Turn it on and try again."))
+            assert.is_truthy(button(translation, "Turn on Wi-Fi"))
+            assert.is_false(hasText(page, "Looking up…"))
+            assertNoFull(refreshes)
+            back(page)
+            assert.are.equal(1, #UIManager._window_stack)
+            assert.are.equal(ui, topWidget())
+            assert.is_nil(ui.dictionary.dict_window)
+            -- Wi-Fi coming on after the page has gone sends nothing
+            online = true
+            online_callback()
+            UIManager:forceRePaint()
+            NetworkMgr.isOnline:revert()
+            NetworkMgr.isConnected:revert()
+            NetworkMgr.runWhenOnline:revert()
+            revertTranslator()
+            assert.stub(load).was_not_called()
+            assert.are.equal(1, #UIManager._window_stack)
+        end)
+
+        it("should offer the online translation of a phrase a dictionary has, sending it only on a tap", function()
+            DICT["look up"] = { Demo = "v. to search for a word in a dictionary" }
+            stubSdcv(ui.dictionary)
+            stub(NetworkMgr, "isOnline").returns(true)
+            local load = stubTranslator({ { { "查阅", "x" } } })
+            ui:handleEvent(Event:new("LookupWord", "look up", false, nil, ui.highlight))
+            UIManager:forceRePaint()
+            DICT["look up"] = nil
+            local page = lookupPage()
+            assert.stub(load).was_not_called()
+            local entry, row = button(page, "Demo"), button(page, "Online translation")
+            assert.is_true(hasText(entry, "to search for a word in a dictionary"))
+            assert.is_truthy(row)
+            assert.is_true(hasText(row, "Needs a network connection"))
+            assert.is_true(entry.dimen.y < row.dimen.y) -- under the dictionaries
+            local region = page.body_rect
+            local refreshes = refreshesOf(function() tapWidget(row) end)
+            assert.stub(load).was_called(1)
+            assert.stub(load).was_called_with(match.is_ref(Translator), "look up", match._, match._)
+            -- the translation card in its place, the dictionary's card kept
+            local translation = cardOf(page, "Online translation")
+            assert.is_true(hasText(translation, "查阅"))
+            assert.is_true(hasText(translation, "Needs a network connection"))
+            assert.is_nil(button(page, "Online translation"))
+            assert.is_true(hasText(button(page, "Demo"), "to search for a word in a dictionary"))
+            for _, r in ipairs(refreshes) do assert.are.same({ mode = "ui", region = region }, r) end
+            -- a word the dictionaries have gets no such row
+            back(page)
+            ui:handleEvent(Event:new("LookupWord", "sojourner", false, nil, ui.highlight))
+            UIManager:forceRePaint()
+            NetworkMgr.isOnline:revert()
+            revertTranslator()
+            assert.is_truthy(button(lookupPage(), "Demo"))
+            assert.is_nil(button(lookupPage(), "Online translation"))
+            assert.stub(load).was_called(1)
+        end)
+
+        it("should not send a selection of more than 1500 characters to the translator, saying it is too long", function()
+            stubSdcv(ui.dictionary)
+            stub(NetworkMgr, "isOnline").returns(true)
+            local load = stubTranslator({ { { "过长", "x" } } })
+            -- from the top of the page on past its foot: the page scrolls on by a third from its bottom right corner,
+            -- each time the finger comes back into it
+            local w, h = Screen:getWidth(), Screen:getHeight()
+            local drag = { { x = 300, y = 400 }, { x = 500, y = 700 } }
+            for _ = 1, 10 do
+                table.insert(drag, { x = w - 5, y = h - 5 })
+                table.insert(drag, { x = w - 150, y = h - 150 })
+            end
+            longPress({ x = 80, y = 30 }, unpack(drag))
+            local selected = require("util").cleanupSelectedText(ui.highlight.selected_text.text)
+            assert.is_true(#require("util").splitToChars(selected) > 1500, #selected)
+            tapWidget(button(ui.highlight.highlight_dialog, "Translate"))
+            NetworkMgr.isOnline:revert()
+            revertTranslator()
+            local page = lookupPage()
+            assert.stub(load).was_not_called()
+            local translation = cardOf(page, "Online translation")
+            assert.is_true(hasText(translation, "Selection too long to look up"))
+            assert.is_nil(button(translation, "Retry"))
+            assert.is_false(hasText(page, "Looking up…"))
+            assert.is_false(hasText(page, "Translation failed."))
+        end)
+
+        it("should translate Latin text that Chinese punctuation sets off, as its popover says Translate", function()
+            stubSdcv(ui.dictionary)
+            stub(NetworkMgr, "isOnline").returns(true)
+            local load = stubTranslator(function(text) return { { { "译：" .. text, "x" } } } end)
+            -- a phrase, even past the 20 characters a Chinese selection is matched by
+            for _, phrase in ipairs{ "「Xerox PARC」", "「the mouse and the graphical user interface」" } do
+                assert.is_false(ui.highlight:isLookedUp(phrase))
+                ui:handleEvent(Event:new("LookupWord", phrase, false, nil, ui.highlight))
+                UIManager:forceRePaint()
+                local page = lookupPage()
+                assert.are.equal(phrase, load.calls[#load.calls].vals[2])
+                assert.is_true(hasText(cardOf(page, "Online translation"), "译：" .. phrase))
+                assert.is_false(hasText(page, "Selection too long to look up"))
+                back(page)
+            end
+            -- a word: the dictionaries first, then online on demand
+            ui:handleEvent(Event:new("LookupWord", "PARC，", false, nil, ui.highlight))
+            UIManager:forceRePaint()
+            assert.are.equal(2, #load.calls)
+            tapWidget(button(lookupPage(), "Translate online"))
+            NetworkMgr.isOnline:revert()
+            revertTranslator()
+            assert.are.equal("PARC，", load.calls[3].vals[2])
+            assert.is_true(hasText(lookupPage(), "译：PARC，"))
+        end)
+
+        it("should not ask for Wi-Fi when connected without internet access, and load both online cards on retry", function()
+            local Wikipedia = require("ui/wikipedia")
+            stubSdcv(ui.dictionary)
+            local online, connected = false, false
+            stub(NetworkMgr, "isOnline").invokes(function() return online end)
+            stub(NetworkMgr, "isConnected").invokes(function() return connected end)
+            local wifi = stub(NetworkMgr, "runWhenOnline")
+            local load = stubTranslator({ { { "联网之后", "x" } } })
+            stub(Wikipedia, "searchAndGetIntros").returns({ [3] = { title = "Weapon", extract = "A weapon article.", index = 0 } })
+            longPress(SAMPSON, unpack(PHRASE))
+            tapWidget(button(ui.highlight.highlight_dialog, "Translate"))
+            local page = lookupPage()
+            assert.is_truthy(button(cardOf(page, "Online translation"), "Turn on Wi-Fi"))
+            -- Wi-Fi turned on from the system, the internet out of reach: 打开 Wi-Fi only checks again
+            connected = true
+            tapWidget(button(cardOf(page, "Online translation"), "Turn on Wi-Fi"))
+            assert.stub(load).was_not_called()
+            local translation = cardOf(page, "Online translation")
+            assert.is_true(hasText(translation, "Needs a network connection")) -- still said
+            assert.is_true(hasText(translation, "Network unreachable."))
+            assert.is_true(hasText(translation, "Check the network connection and try again."))
+            assert.is_nil(button(page, "Turn on Wi-Fi"))
+            -- Wikipedia's card says the same, after its request showed it ran
+            local region = page.body_rect
+            local refreshes = refreshesOf(function() tapWidget(seek(page, "Encyclopedia definition")) end)
+            assert.is_true(#refreshes > 0)
+            for _, r in ipairs(refreshes) do assert.are.same({ mode = "ui", region = region }, r) end
+            assert.is_true(hasText(cardOf(page, "Encyclopedia definition"), "Network unreachable."))
+            assert.is_nil(button(page, "Turn on Wi-Fi"))
+            -- a retry that fails again shows 查询中… first
+            local shown = {}
+            local update = page.update
+            page.update = function(p, focus)
+                update(p, focus)
+                table.insert(shown, hasText(cardOf(p, "Online translation"), "Looking up…"))
+            end
+            tapWidget(button(cardOf(page, "Online translation"), "Retry"))
+            page.update = update
+            assert.are.same({ true, false }, shown)
+            assert.is_true(hasText(cardOf(page, "Online translation"), "Network unreachable."))
+            -- once the internet is back: the translation's Retry, then Wikipedia's
+            online = true
+            tapWidget(button(cardOf(page, "Online translation"), "Retry"))
+            assert.is_true(hasText(cardOf(page, "Online translation"), "联网之后"))
+            tapWidget(button(cardOf(page, "Encyclopedia definition"), "Retry"))
+            NetworkMgr.isOnline:revert()
+            NetworkMgr.isConnected:revert()
+            NetworkMgr.runWhenOnline:revert()
+            Wikipedia.searchAndGetIntros:revert()
+            revertTranslator()
+            assert.is_true(hasText(cardOf(page, "Encyclopedia definition"), "A weapon article."))
+            assert.is_false(hasText(page, "Network unreachable."))
+            assert.stub(wifi).was_not_called()
+            assert.are.equal(2, #UIManager._window_stack)
         end)
 
         it("should show 查询中… while a slow lookup runs, then its results on the same page", function()
@@ -955,16 +1285,19 @@ describe("ReaderDictSheet module", function()
         it("should show the offline state of Wikipedia, repainting only the page's body", function()
             stubSdcv(ui.dictionary)
             stub(NetworkMgr, "isOnline").returns(false)
+            stub(NetworkMgr, "isConnected").returns(false) -- Wi-Fi off
             ui:handleEvent(Event:new("LookupWord", "sojourner"))
             UIManager:forceRePaint()
             local page = lookupPage()
             local region = page.body_rect
             local refreshes = refreshesOf(function() tapWidget(button(page, "Encyclopedia definition")) end)
             NetworkMgr.isOnline:revert()
+            NetworkMgr.isConnected:revert()
             assert.is_true(hasText(page, "Needs a network connection"))
             assert.is_true(hasText(page, "Wikipedia is an online lookup. Turn on Wi-Fi and try again."))
             assert.is_truthy(button(page, "Turn on Wi-Fi"))
-            assert.are.same({ { mode = "ui", region = region } }, refreshes)
+            -- its request showing it ran, then the offline state
+            assert.are.same({ { mode = "ui", region = region }, { mode = "ui", region = region } }, refreshes)
             assert.is_true(hasText(page, "旅居者；暂住者"))
         end)
 
@@ -1079,8 +1412,9 @@ describe("ReaderDictSheet module", function()
             it("should keep lookup context through Wikipedia offline, failure, no match, cancellation and retry (full=" .. tostring(full) .. ")", function()
                 local Wikipedia = require("ui/wikipedia")
                 stubSdcv(ui.dictionary, true)
-                local online = false
+                local online = false -- Wi-Fi off
                 stub(NetworkMgr, "isOnline").invokes(function() return online end)
+                stub(NetworkMgr, "isConnected").invokes(function() return online end)
                 local state = "success"
                 local function response()
                     if state == "failed" then error("network unavailable") end
@@ -1121,6 +1455,7 @@ describe("ReaderDictSheet module", function()
                 end)
                 NetworkMgr.runWhenOnline:revert()
                 NetworkMgr.isOnline:revert()
+                NetworkMgr.isConnected:revert()
                 Wikipedia.searchAndGetIntros:revert()
                 Wikipedia.getFullPage:revert()
                 assertNoFull(refreshes)
@@ -1245,6 +1580,7 @@ describe("ReaderDictSheet module", function()
             DICT.manysenses = { Demo = entry, Other = entry }
             stubSdcv(ui.dictionary)
             stub(NetworkMgr, "isOnline").returns(false)
+            stub(NetworkMgr, "isConnected").returns(false) -- Wi-Fi off
             ui:handleEvent(Event:new("LookupWord", "manysenses"))
             UIManager:forceRePaint()
             DICT.manysenses = nil
@@ -1262,6 +1598,7 @@ describe("ReaderDictSheet module", function()
             end)
             TextBoxWidget.new = new
             NetworkMgr.isOnline:revert()
+            NetworkMgr.isConnected:revert()
             assert(ok, err)
             assert.is_true(hasText(page, "Wikipedia is an online lookup. Turn on Wi-Fi and try again."))
             assert.is_true(built < 40, built .. " text boxes built")
