@@ -472,6 +472,16 @@ function ImageWidget:getOriginalDiagonal()
     return math.sqrt(self._img_w^2 + self._img_h^2)
 end
 
+-- Where paintTo() blits the image within our box, relative to it: centered
+-- if smaller than the box, otherwise the part shown at the current offsets.
+function ImageWidget:getShownRect()
+    local size = self:getSize() -- renders it
+    local x0, y0 = math.max(0, -self._offset_x), math.max(0, -self._offset_y)
+    local x1 = math.min(size.w, self._bb:getWidth() - self._offset_x)
+    local y1 = math.min(size.h, self._bb:getHeight() - self._offset_y)
+    return Geom:new{ x = x0, y = y0, w = math.max(0, x1 - x0), h = math.max(0, y1 - y0) }
+end
+
 function ImageWidget:getPanByCenterRatio(x, y)
     -- returns center ratio (without limits check) we would get with this panBy
     local center_x_ratio = (x + self._offset_x + self.width/2) / self._bb_w
