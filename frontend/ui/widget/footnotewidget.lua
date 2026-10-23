@@ -1,7 +1,6 @@
 local BD = require("ui/bidi")
 local Blitbuffer = require("ffi/blitbuffer")
 local BottomContainer = require("ui/widget/container/bottomcontainer")
-local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Event = require("ui/event")
 local FrameContainer = require("ui/widget/container/framecontainer")
@@ -10,7 +9,6 @@ local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
-local LineWidget = require("ui/widget/linewidget")
 local ScrollHtmlWidget = require("ui/widget/scrollhtmlwidget")
 local Size = require("ui/size")
 local UIManager = require("ui/uimanager")
@@ -143,6 +141,8 @@ function FootnoteWidget:init()
     -- Set widget size
     self.width = Screen:getWidth()
     self.height = math.floor(Screen:getHeight() * 1/3) -- will be decreased when content is smaller
+    local border_size = 1 -- N04 specifies a one-pixel outline, independent of DPI.
+    local content_width = self.width - 2 * border_size
 
     if Device:isTouchDevice() then
         local range = Geom:new{
@@ -307,7 +307,7 @@ function FootnoteWidget:init()
         -- too small: switch it with right padding
         text_scroll_span, padding_right = padding_right, text_scroll_span
     end
-    local htmlwidget_width = self.width - padding_right
+    local htmlwidget_width = content_width - padding_right
 
     -- Top and bottom padding: we'd rather not use document margins:
     -- they can be large, which makes sense at screen edges, but
@@ -316,7 +316,7 @@ function FootnoteWidget:init()
     -- breaking algorithms, which will visually add to the bottom padding.
     local padding_top = Size.padding.large
     local padding_bottom = Size.padding.large
-    local htmlwidget_height = self.height - padding_top - padding_bottom
+    local htmlwidget_height = self.height - 2 * border_size - padding_top - padding_bottom
 
     -- We always get balanced XHTML from crengine for HTML snippets, so we
     -- pass is_xhtml=true to avoid side effects from MuPDF's HTML5 parser.
@@ -333,15 +333,19 @@ function FootnoteWidget:init()
         highlight_text_selection = true,
     }
 
-    -- We only want a top border, so use a LineWidget for that
-    local top_border_size = Size.line.thick
+    -- Short notes must stop painting before the card's bottom outline.
+    local single_page_height = self.htmlwidget:getSinglePageHeight() -- nil if multi-pages
+    if single_page_height then
+        -- MuPDF returns a negative bounding box for empty content.
+        single_page_height = math.max(1, single_page_height)
+        self.htmlwidget.htmlbox_widget.dimen.h = single_page_height
+        self.htmlwidget.v_scroll_bar.height = single_page_height
+        self.htmlwidget[1]:resetLayout()
+        self.htmlwidget.dimen.h = single_page_height
+        self.height = single_page_height + 2 * border_size + padding_top + padding_bottom
+    end
+
     local vgroup = VerticalGroup:new{
-        LineWidget:new{
-            dimen = Geom:new{
-                w = self.width,
-                h = top_border_size,
-            }
-        },
         VerticalSpan:new{ width = padding_top },
         HorizontalGroup:new{
             self.htmlwidget,
@@ -350,31 +354,10 @@ function FootnoteWidget:init()
         VerticalSpan:new{ width = padding_bottom },
     }
 
-    -- If htmlwidget contains only one page (small footnote content),
-    -- display only the valuable area: push the blank area down the screen
-    -- (we can do that because no scroll bar will be displayed)
-    local single_page_height = self.htmlwidget:getSinglePageHeight() -- nil if multi-pages
-    if single_page_height then
-        local added_bottom_pad = 0
-        -- See if needed:
-        -- Add a bit to bottom padding, as getSinglePageHeight() cut can be rough
-        -- added_bottom_pad = math.floor(font_size * 0.2)
-        local reduced_height = single_page_height + top_border_size + padding_top + padding_bottom + added_bottom_pad
-        vgroup = CenterContainer:new{
-            dimen = Geom:new{
-                h = reduced_height,
-                w = self.width,
-            },
-            ignore = "height",
-            vgroup,
-        }
-        self.height = reduced_height -- for close_callback
-    end
-
-    -- Needed only to set a white background
     self.container = FrameContainer:new{
         background = Blitbuffer.COLOR_WHITE,
-        bordersize = 0,
+        bordersize = border_size,
+        radius = Screen:scaleBySize(14),
         margin = 0,
         padding = 0,
         vgroup,
@@ -394,7 +377,7 @@ end
 
 function FootnoteWidget:onCloseWidget()
     UIManager:setDirty(self.dialog, function()
-        return "partial", self.container.dimen
+        return "ui", self.container.dimen
     end)
 end
 
