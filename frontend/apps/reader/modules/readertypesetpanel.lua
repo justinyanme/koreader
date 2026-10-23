@@ -195,6 +195,30 @@ function FontCard:onTapSelect()
     return true
 end
 
+local function selectFont(font, face)
+    font:onSetFont(face)
+    font:addToRecentlySelectedList(face)
+end
+
+local function fontGridDimensions(width)
+    local gap = Screen:scaleBySize(6)
+    local columns = math.max(2, math.min(5, math.floor((width + gap) / Screen:scaleBySize(100))))
+    return columns, math.floor((width - (columns - 1) * gap) / columns), gap
+end
+
+local function makeFontCard(font, width, face, fontDetails, refresh)
+    local name, file, index = fontDetails(face)
+    return FontCard:new{
+        width = width, name = name, font_face = face,
+        face = file and Font:getFace(file, 14 * Font.ui_scale, index), face_index = index,
+        selected = font.font_face == face,
+        callback = function()
+            selectFont(font, face)
+            refresh()
+        end,
+    }
+end
+
 -- Line icon of a paragraph card: four 1.5dp lines 5dp apart, as two paragraphs; with `indent`, the first line of each
 -- is indented.
 local ParagraphIcon = Widget:extend{
@@ -630,6 +654,8 @@ function ReaderTypesetPanel:fontChoices(all)
         for _, pattern in ipairs{ "clock", "emoji", "symbol", "dancing", "coming soon", "cutive", "script", "dingbat" } do
             if not all and name:find(pattern, 1, true) then return end
         end
+        local __, file, index = fontDetails(face)
+        if FontList:hasChinese(file, index) == nil then return end
         seen[face] = true
         table.insert(faces, face)
     end
@@ -642,10 +668,13 @@ function ReaderTypesetPanel:fontChoices(all)
     for _, face in ipairs(available) do
         if not seen[face] then
             local __, file, index = fontDetails(face)
-            local group = FontList:hasChinese(file, index) and 1
-                or FontList:isSystemFont(file) and 4
-                or (file and file:sub(1, #FontList.fontdir + 1) == FontList.fontdir .. "/") and 3 or 2
-            table.insert(groups[group], face)
+            local has_chinese = FontList:hasChinese(file, index)
+            if has_chinese ~= nil then
+                local group = has_chinese and 1
+                    or FontList:isSystemFont(file) and 4
+                    or (file and file:sub(1, #FontList.fontdir + 1) == FontList.fontdir .. "/") and 3 or 2
+                table.insert(groups[group], face)
+            end
         end
     end
     for _, group in ipairs(groups) do
@@ -655,9 +684,7 @@ function ReaderTypesetPanel:fontChoices(all)
 end
 
 function ReaderTypesetPanel:fontCards(width)
-    local gap = Screen:scaleBySize(6)
-    local columns = math.max(2, math.min(5, math.floor((width + gap) / Screen:scaleBySize(100))))
-    local card_w = math.floor((width - (columns - 1) * gap) / columns)
+    local columns, card_w, gap = fontGridDimensions(width)
     local faces, fontDetails = self:fontChoices()
     local current = self.ui.font.font_face
     local count = math.min(#faces + 1, columns * 3)
@@ -679,19 +706,8 @@ function ReaderTypesetPanel:fontCards(width)
                 callback = function() self:showFontMenu() end,
             })
         else
-            local face = faces[i]
-            local name, file, index = fontDetails(face)
-            table.insert(row, FontCard:new{
-                width = card_w, name = name,
-                face = file and Font:getFace(file, 14 * Font.ui_scale, index),
-                face_index = index,
-                selected = current == face,
-                callback = function()
-                    self.ui.font:onSetFont(face)
-                    self.ui.font:addToRecentlySelectedList(face)
-                    self:refreshPanel()
-                end,
-            })
+            table.insert(row, makeFontCard(self.ui.font, card_w, faces[i], fontDetails,
+                function() self:refreshPanel() end))
         end
     end
     local current_name = fontDetails(current)
@@ -864,21 +880,26 @@ function FontPage:init()
 end
 
 function FontPage:buildTitle()
+    local labels = VerticalGroup:new{
+        TextWidget:new{ text = self.title, face = Font:getFace("ui_title"), bold = true, padding = 0 },
+        TextWidget:new{
+            text = T(_("Current selection · %1"), self.fontDetails(self.config.ui.font.font_face)),
+            face = Font:getFace("ui_label"), padding = 0, max_width = self.title_rect.w - Screen:scaleBySize(44),
+        },
+    }
+    -- The current-selection line changes with the body; the fixed title above it stays unrefreshed.
+    self.body_rect.y = math.floor((self.title_rect.h - labels:getSize().h) / 2) + labels[1]:getSize().h
+    self.body_rect.h = self.dimen.h - self.body_rect.y
     return CenterContainer:new{
         dimen = Geom:new{ w = self.title_rect.w, h = self.title_rect.h },
-        VerticalGroup:new{
-            TextWidget:new{ text = self.title, face = Font:getFace("ui_title"), bold = true, padding = 0 },
-            TextWidget:new{
-                text = T(_("Current selection · %1"), self.fontDetails(self.config.ui.font.font_face)),
-                face = Font:getFace("ui_label"), padding = 0, max_width = self.title_rect.w - Screen:scaleBySize(44),
-            },
-        },
+        labels,
     }
 end
 
 function FontPage:buildContent(rect)
-    local gap, gutter = Screen:scaleBySize(6), Screen:scaleBySize(21)
+    local gutter = Screen:scaleBySize(21)
     local width = rect.w - 2 * gutter
+    local columns, card_w, gap = fontGridDimensions(width)
     local labels = { C_("Font category", "All"), _("Chinese"), _("Western") }
     for i, label in ipairs(labels) do
         labels[i] = T(_("%1 (%2)"), label, #self.categories[i])
@@ -894,8 +915,6 @@ function FontPage:buildContent(rect)
     }
     table.insert(column, self.tabs)
     table.insert(column, VerticalSpan:new{ width = Screen:scaleBySize(15) })
-    local columns = math.max(2, math.min(5, math.floor((width + gap) / Screen:scaleBySize(100))))
-    local card_w = math.floor((width - (columns - 1) * gap) / columns)
     local rows = math.max(1, math.floor((rect.h - self.tabs:getSize().h - Screen:scaleBySize(15) + gap) / (Screen:scaleBySize(44) + gap)))
     local per_page = columns * rows
     local faces = self.categories[self.category]
@@ -910,29 +929,21 @@ function FontPage:buildContent(rect)
         else
             table.insert(row, HorizontalSpan:new{ width = gap })
         end
-        local face = faces[i]
-        local name, file, index = self.fontDetails(face)
-        table.insert(row, FontCard:new{
-            width = card_w, name = name, font_face = face,
-            face = file and Font:getFace(file, 14 * Font.ui_scale, index), face_index = index,
-            selected = self.config.ui.font.font_face == face,
-            callback = function()
-                self.config.ui.font:onSetFont(face)
-                self.config.ui.font:addToRecentlySelectedList(face)
+        table.insert(row, makeFontCard(self.config.ui.font, card_w, faces[i], self.fontDetails,
+            function()
                 self:build()
-                UIManager:setDirty(self, "ui", self.dimen)
-            end,
-        })
+                UIManager:setDirty(self, "ui", self.body_rect)
+            end))
     end
     return HorizontalGroup:new{ HorizontalSpan:new{ width = gutter }, column }, pages
 end
 
 function FontPage:onCloseWidget()
     self.config.font_page = nil
+    self.config:refreshPanel()
 end
 
 function ReaderTypesetPanel:showFontMenu()
-    self:closeWithToolbar()
     self:closeMenu()
     self.font_page = FontPage:new{ config = self }
     UIManager:show(self.font_page, "ui", self.font_page.dimen)
