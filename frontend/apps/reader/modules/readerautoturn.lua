@@ -101,7 +101,7 @@ function Guide:reset()
         end
     end
     for i = #self.lines, 1, -1 do
-        if self.lines[i].top < 0 or self.lines[i].bottom >= Screen:getHeight() then
+        if self.lines[i].top < 0 or self.lines[i].bottom > Screen:getHeight() then
             table.remove(self.lines, i)
         end
     end
@@ -133,6 +133,7 @@ function Guide:paintTo(bb, x, y)
                 line.rect.y = saved_y or view:underlineY(bb, {{
                     x = line.rect.x, y = line.top, w = line.rect.w, h = line.bottom - line.top,
                 }})
+                line.rect.y = math.min(line.rect.y, Screen:getHeight() - line.rect.h)
             end
             self.needs_baselines = false
         end

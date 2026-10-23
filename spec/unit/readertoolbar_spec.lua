@@ -2440,6 +2440,40 @@ describe("ReaderToolbar module", function()
             assert.are.equal(guide.lines[2].rect, guide.rect)
         end)
 
+        it("should skip clipped scroll lines but retain a line exactly at the bottom edge", function()
+            G_reader_settings:saveSetting("autoturn_reading_guide", true)
+            local ui = openReader(sample_epub)
+            ui:handleEvent(Event:new("GotoPage", 5))
+            UIManager:forceRePaint()
+            local sample = ui.document:getTextFromPositions({ x = 0, y = 0 },
+                { x = Screen:getWidth(), y = Screen:getHeight() }, true)
+            ui:handleEvent(Event:new("SetViewMode", "scroll"))
+            UIManager:forceRePaint()
+            local text = stub(ui.document, "getTextFromPositions", function()
+                local range = require("util").tableDeepCopy(sample)
+                local box = range.sboxes[1]
+                range.sboxes = {}
+                for _, y in ipairs{ -1, Screen:getHeight() - box.h, Screen:getHeight() - 1 } do
+                    local segment = box:copy()
+                    segment.y = y
+                    table.insert(range.sboxes, segment)
+                end
+                return range
+            end)
+            finally(function() text:revert() end)
+            ui:handleEvent(Event:new("ShowMenu"))
+            UIManager:forceRePaint()
+            tapWidget(findIcon(ui.menu.bars.bottom, "eink/progress"))
+            UIManager:forceRePaint()
+            tapWidget(button(ui.menu.panel, "Start autoturn"))
+            UIManager:forceRePaint()
+            local guide = ui.view.view_modules.autoturn_guide
+            assert.are.equal(1, #guide.lines)
+            assert.are.equal(Screen:getHeight(), guide.lines[1].bottom)
+            assert.is_truthy(guide.rect)
+            assert.is_true(guide.rect.y + guide.rect.h <= Screen:getHeight())
+        end)
+
         it("should leave an image-only cover without guide ink or a guide task", function()
             G_reader_settings:saveSetting("autoturn_reading_guide", true)
             local image = require("ffi/util").realpath("resources/koreader.png")
