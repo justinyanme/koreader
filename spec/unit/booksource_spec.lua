@@ -1,7 +1,7 @@
 -- 书源: the OPDS plugin's redesigned page, driven through its real entries against a fake Calibre-Web server.
 describe("书源 (OPDS as a remote shelf)", function()
-    local BookSource, BookSourceView, BottomSheet, EinkSettings, Event, FileManager, InputDialog, LuaSettings
-    local ReaderUI, Replacements, UIManager, ffiUtil, lfs, T, _
+    local BookSource, BookSourceView, BottomSheet, EinkSettings, Event, FileManager, Geom, InputDialog, LuaSettings
+    local ReaderUI, Replacements, Screen, UIManager, ffiUtil, lfs, T, _
     local home, tmp, settings_file, log_file, saved_settings, saved_thumb_dir
     local server -- the fake server's state, read by the stubbed socket.http.request (also in forked children)
     local opened -- files the reader was asked to open
@@ -90,6 +90,12 @@ describe("书源 (OPDS as a remote shelf)", function()
                 return 200, atom, xmlFeed("Calibre-Web", "", {
                     navEntry("Alphabetical Books", "/opds/books", "http://opds-spec.org/sort/new"),
                     navEntry("Recently added Books", "/opds/new"),
+                })
+            elseif mode == "marked_and_new" then
+                -- a book list the feed marks, and an entry known only by its address
+                return 200, atom, xmlFeed("Calibre-Web", "", {
+                    navEntry("Recently added Books", "/opds/new"),
+                    navEntry("Alphabetical Books", "/opds/books", nil, "acquisition"),
                 })
             elseif mode == "categories" then
                 return 200, atom, xmlFeed("Calibre-Web", "", { navEntry("Authors", "/opds/author") })
@@ -252,6 +258,31 @@ describe("书源 (OPDS as a remote shelf)", function()
         end
     end
 
+    -- the innermost Tappable around the first text or icon equal to `label`, once painted: for taps on screen
+    local function tappableAround(widget, label)
+        local function find(node, tappable)
+            if type(node) ~= "table" then return end
+            if node.callback then tappable = node end
+            if (node.text == label and node.face) or node.icon == label then return tappable end
+            for _, child in ipairs(node) do
+                local found = find(child, tappable)
+                if found then return found end
+            end
+        end
+        return assert(find(widget), "nothing to tap: " .. label)
+    end
+
+    -- a point a quarter into `target`'s width, halfway down
+    local function pointIn(target)
+        local d = target.dimen
+        return d.x + math.floor(d.w / 4), d.y + math.floor(d.h / 2)
+    end
+
+    -- a finger on the screen at x, y: a tap, or `ges`
+    local function touch(x, y, ges)
+        UIManager:sendEvent(Event:new("Gesture", { ges = ges or "tap", pos = Geom:new{ x = x, y = y, w = 0, h = 0 } }))
+    end
+
     -- the top widget, under any toast
     -- whether the grid tile titled `title` carries the gray "downloaded" check
     local function marked(view, title)
@@ -362,10 +393,12 @@ describe("书源 (OPDS as a remote shelf)", function()
         EinkSettings = require("apps/settings/einksettings")
         Event = require("ui/event")
         FileManager = require("apps/filemanager/filemanager")
+        Geom = require("ui/geometry")
         InputDialog = require("ui/widget/inputdialog")
         LuaSettings = require("luasettings")
         ReaderUI = require("apps/reader/readerui")
         Replacements = require("apps/replacements")
+        Screen = require("device").screen
         UIManager = require("ui/uimanager")
         ffiUtil = require("ffi/util")
         lfs = require("libs/libkoreader-lfs")
@@ -476,35 +509,44 @@ describe("书源 (OPDS as a remote shelf)", function()
             local fm = openFM()
             tap(fm.shelf_view, "eink/source")
             local view = topWidget()
-            local Geom = require("ui/geometry")
-            local Screen = require("device").screen
-            -- the innermost tappable around the first text or icon equal to `label`
-            local function find(node, label, tappable)
-                if type(node) ~= "table" then return end
-                if node.callback then tappable = node end
-                if (node.text == label and node.face) or node.icon == label then return tappable end
-                for _, child in ipairs(node) do
-                    local found = find(child, label, tappable)
-                    if found then return found end
-                end
-            end
-            local function screenTap(target)
-                local d = target.dimen
-                UIManager:sendEvent(Event:new("Gesture", { ges = "tap",
-                    pos = Geom:new{ x = d.x + math.floor(d.w / 4), y = d.y + math.floor(d.h / 2), w = 0, h = 0 } }))
-            end
             view:paintTo(Screen.bb, 0, 0)
-            screenTap(find(view, "eink/more"))
+            touch(pointIn(tappableAround(view, "eink/more")))
             assert.are.equal(BottomSheet, getmetatable(topWidget()).__index)
             assert.is_true(has(topWidget(), _("Edit")))
             topWidget():onClose()
             flush()
 
             view:paintTo(Screen.bb, 0, 0)
-            screenTap(find(view, "NAS at home"))
+            touch(pointIn(tappableAround(view, "NAS at home")))
             assert.are.equal(view, topWidget())
             waitFor(function() return view:top().result.state == "ok" end, "the home feed")
             assert.are.equal("home", view:top().kind)
+        end)
+
+        it("leaves a long-press on a nested tappable without a hold action to the one around it", function()
+            local HorizontalGroup = require("ui/widget/horizontalgroup")
+            local Tappable = require("apps/shelf/shelfwidgets").Tappable
+            local Widget = require("ui/widget/widget")
+            local calls = {}
+            local outer = Tappable:new{
+                callback = function() table.insert(calls, "outer tap") end,
+                hold_callback = function() table.insert(calls, "outer hold") end,
+                HorizontalGroup:new{
+                    Widget:new{ dimen = Geom:new{ w = 100, h = 40 } },
+                    Tappable:new{
+                        callback = function() table.insert(calls, "inner tap") end,
+                        Widget:new{ dimen = Geom:new{ w = 40, h = 40 } },
+                    },
+                },
+            }
+            outer:paintTo(Screen.bb, 0, 0)
+            local function gesture(ges, x)
+                outer:handleEvent(Event:new("Gesture", { ges = ges, pos = Geom:new{ x = x, y = 20, w = 0, h = 0 } }))
+            end
+            gesture("hold", 120)
+            gesture("tap", 120)
+            gesture("tap", 20)
+            assert.are.same({ "outer hold", "inner tap", "outer tap" }, calls)
         end)
     end)
 
@@ -529,7 +571,7 @@ describe("书源 (OPDS as a remote shelf)", function()
             for _, r in ipairs(refreshes) do assert.are.equal("ui", r.type) end
         end)
 
-        it("prefers the sort/new link, falls back to the first book list, then to the categories", function()
+        it("prefers the sort/new link, then the first book list, then an entry at …/new, then the categories", function()
             server.mode = "sort_new"
             local view = openSources(openFM())
             assert.are.equal(ROOT .. "/books", view:top().result.url)
@@ -539,6 +581,11 @@ describe("书源 (OPDS as a remote shelf)", function()
             view = openSources(FileManager.instance)
             assert.are.equal(ROOT .. "/books", view:top().result.url)
             assert.are.same({ "Book 1", "Book 2", "Book 3" }, bookTitles(view))
+            view:close(true)
+
+            server.mode = "marked_and_new"
+            view = openSources(FileManager.instance)
+            assert.are.equal(ROOT .. "/books", view:top().result.url)
             view:close(true)
 
             server.mode = "categories"
@@ -708,6 +755,17 @@ describe("书源 (OPDS as a remote shelf)", function()
             waitFor(function() return view:top().result.state == "ok" end, "results")
             assert.is_true(has(view, "Nothing found for “nothing”"))
         end)
+
+        it("clears the search from the grown edge of its ×, not opening the field around it", function()
+            local view = openSources(openFM())
+            view:search("Book 1")
+            waitFor(function() return view:top().result.state == "ok" end, "results")
+            view:paintTo(Screen.bb, 0, 0)
+            local clear = tappableAround(view, "eink/close").dimen
+            touch(clear.x + math.floor(clear.w / 2), clear.y - 1) -- above the drawn ×: in its 44dp target
+            assert.are.equal(view, topWidget())
+            assert.are.equal(ROOT .. "/new", view:top().result.url)
+        end)
     end)
 
     describe("downloading", function()
@@ -742,6 +800,23 @@ describe("书源 (OPDS as a remote shelf)", function()
             tap(view, "Book 1")
             assert.are.same({ file }, opened)
             assert.are.same({}, requestsTo(ROOT .. "/download/"))
+        end)
+
+        it("keeps the page answering taps while a download runs on a tile not shown", function()
+            local view = openSources(openFM())
+            view:turnPage(2) -- Book 9 may be on page 2 on small screens
+            if not view:cellOf({ key = "urn:uuid:book-9" }) then view:turnPage(1) end
+            tap(view, "Book 9")
+            tap(view, "eink/grid")
+            tap(topWidget(), "Authors")
+            waitFor(function() return view:top().result.state == "ok" end, "authors")
+            view:paintTo(Screen.bb, 0, 0)
+            local x, y = pointIn(tappableAround(view, "Author 5"))
+            -- its progress and its end land while the tile is off screen: nothing is painted for them
+            waitFor(function() return view.downloads["urn:uuid:book-9"] == nil end, "the download")
+            touch(x, y)
+            assert.are.equal("Author 5", view:top().title)
+            waitFor(function() return view:top().result.state == "ok" end, "a book list")
         end)
 
         it("keeps the server's file name when the source asks for it", function()

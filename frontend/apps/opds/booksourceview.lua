@@ -7,8 +7,9 @@ below it, 简介 text, and the source list (管理书源). Going back uses the
 loaded pages; nothing is fetched again.
 
 Tapping a cover downloads its preferred format in a subprocess, with progress on
-the tile; tapping it again cancels. A finished download closes the page and
-opens the book. Holding a cover opens its sheet (other formats, re-download).
+the tile; tapping it again cancels. A finished download marks the tile, so
+several can run at once; tapping a marked cover opens the book. Holding a cover
+opens its sheet (other formats, re-download).
 
 Refreshes: opening and closing the page, pushing and popping pages, turning
 pages and sheets are "ui" on their own rect; download progress is "fast" on the
@@ -91,6 +92,7 @@ end
 local function tallTarget(tappable)
     tappable.ges_events.Tap = { GestureRange:new{ ges = "tap", range = function()
         local d = tappable.dimen
+        if not d then return end
         local grow = math.max(0, dp(44) - d.h)
         return Geom:new{ x = d.x, y = d.y - math.floor(grow / 2), w = d.w, h = d.h + grow }
     end } }
@@ -995,7 +997,8 @@ function BookSourceView:cellOf(book)
 end
 
 function BookSourceView:refreshTile(book, refresh_type)
-    if self.closed then return end
+    -- off the shown page: rebuilding without a repaint would leave the page's tappables without a place
+    if self.closed or not self:cellOf(book) then return end
     self:build()
     local cell = self:cellOf(book)
     if cell then
