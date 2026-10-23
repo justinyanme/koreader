@@ -457,6 +457,9 @@ end
 
 --- The notes page shown follows the notes as they change (not consumed: other modules want it too).
 function ReaderToolbar:onAnnotationsModified()
+    if self.panel then
+        self.panel:handleEvent(Event:new("AnnotationsModified"))
+    end
     if self.drawer and self.drawer.refresh then
         self.drawer:refresh()
     end
