@@ -1005,7 +1005,7 @@ describe("书源 (OPDS as a remote shelf)", function()
             local tick
             waitFor(function()
                 for _, r in ipairs(refreshes) do
-                    if r.type == "fast" then tick = r end
+                    if r.widget == view and r.type == "fast" then tick = r end
                 end
                 return tick ~= nil
             end, "a progress tick")
