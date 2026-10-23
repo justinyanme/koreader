@@ -178,9 +178,26 @@ describe("ReaderTypesetPanel module", function()
         return ui.config.panel
     end
 
-    -- Taps the pill of the panel's title row: the more layout options.
-    local function openLayoutOptions(panel)
-        tapWidget(find(panel, function(w) return w.callback and hasText(w, _("More layout options")) end))
+    -- the pill at the right of the panel's title row, naming the paragraph mode
+    local function paragraphPill(panel)
+        return find(panel, function(w) return w.callback and type(w.text) == "string" end)
+    end
+
+    -- Taps the pill of the panel's title row: the paragraph panel.
+    local function openParagraph(panel)
+        tapWidget(paragraphPill(panel))
+        UIManager:forceRePaint()
+    end
+
+    -- the row of a panel that `label` names
+    local function row(panel, label)
+        return find(panel, function(w) return w.callback and w.label and w.label.text == label end)
+    end
+
+    -- From the panel, taps its pill, then the paragraph panel's last row: the more layout settings.
+    local function openLayoutOptions(ui)
+        openParagraph(ui.config.panel)
+        tapWidget(row(ui.config.panel, _("More layout options")))
         UIManager:forceRePaint()
     end
 
@@ -361,11 +378,13 @@ describe("ReaderTypesetPanel module", function()
             ui.menu:hideToolbar()
         end)
 
-        it("should open the more layout options from its title row's pill, with only a back arrow below", function()
-            local main = openPanel(ui)
+        it("should open the more layout settings from the paragraph panel's last row, with only a back arrow below", function()
+            openPanel(ui)
             local bars = ui.menu.bars
-            local main_band = main:getRefreshRegion():combine(bars.bottom_rect)
-            local refreshes = refreshesOf(function() openLayoutOptions(main) end)
+            openParagraph(ui.config.panel)
+            local paragraph = ui.config.panel
+            local paragraph_band = paragraph:getRefreshRegion():combine(bars.bottom_rect)
+            local refreshes = refreshesOf(function() tapWidget(row(paragraph, _("More layout options"))) end)
             local more = ui.config.panel
             assert.are.equal("more", ui.config.page)
             assert.are.equal(more, ui.menu.panel)
@@ -378,9 +397,16 @@ describe("ReaderTypesetPanel module", function()
             assert.are.equal(0, backArrow(bars).dimen.x) -- at the bottom left, as on full-screen pages
             assert.is_nil(find(bars.bottom, function(w) return w.icon == "eink/progress" end))
             assert.are.same({
-                { mode = "ui", region = main_band:combine(more:getRefreshRegion():combine(bars.bottom_rect)) },
+                { mode = "ui", region = paragraph_band:combine(more:getRefreshRegion():combine(bars.bottom_rect)) },
             }, refreshes)
 
+            -- back to the paragraph panel it was opened from, then to the panel
+            tapWidget(backArrow(bars))
+            UIManager:forceRePaint()
+            assert.are.equal("paragraph", ui.config.page)
+            assert.are.equal(ui.config.panel, ui.menu.panel)
+            assert.is_false(bars.show_top)
+            assert.is_truthy(backArrow(bars))
             tapWidget(backArrow(bars))
             UIManager:forceRePaint()
             assert.are.equal("main", ui.config.page)
@@ -398,9 +424,9 @@ describe("ReaderTypesetPanel module", function()
                 { "more", _("Paragraph spacing") },
                 { "more", _("Style tweaks") },
             } do
-                local main = openPanel(ui)
+                openPanel(ui)
                 if case[1] == "more" then
-                    openLayoutOptions(main)
+                    openLayoutOptions(ui)
                 end
                 local link = find(ui.config.panel, function(w) return w.callback and w.dimen and (w.name == case[2] or (w.label and w.label.text == case[2])) end)
                 assert.is_truthy(link, case[2])
@@ -426,7 +452,8 @@ describe("ReaderTypesetPanel module", function()
         end)
 
         it("should leave the original bottom bar's link with the panel and the bars closed", function()
-            openLayoutOptions(openPanel(ui))
+            openPanel(ui)
+            openLayoutOptions(ui)
             tapWidget(find(ui.config.panel, function(w) return w.callback and w.label and w.label.text == _("All layout options (original)") end))
             UIManager:forceRePaint()
             assert.is_nil(ui.config.panel)
@@ -523,14 +550,18 @@ describe("ReaderTypesetPanel module", function()
             ui.menu:hideToolbar()
         end)
 
-        it("should go back one layer at a time on Back: more layout options, the panel, the bars", function()
+        it("should go back one layer at a time on Back: more layout settings, paragraphs, the panel, the bars", function()
             runTasks() -- a re-render left by the last font size change
             UIManager:forceRePaint()
             local page = ui:getCurrentPage()
-            local main = openPanel(ui)
+            openPanel(ui)
             local bars = ui.menu.bars
-            openLayoutOptions(main)
+            openLayoutOptions(ui)
             assert.are.equal("more", ui.config.page)
+            back()
+            assert.are.equal("paragraph", ui.config.page)
+            assert.are.equal(ui.config.panel, ui.menu.panel)
+            assert.is_false(bars.show_top)
             back()
             assert.are.equal("main", ui.config.page)
             assert.are.equal(ui.config.panel, ui.menu.panel)
@@ -636,7 +667,7 @@ describe("ReaderTypesetPanel module", function()
             assert.are.equal(4, #t)
             assert.is_true(hasText(panel, _("Font settings")))
             -- the title row, as tall as the pill at its right
-            local title = find(panel, function(w) return w.callback and hasText(w, _("More layout options")) end)
+            local title = paragraphPill(panel)
             for i, case in ipairs{
                 { C_("Typeset track", "Small"), C_("Typeset track", "Large"), "19", 5 },
                 { C_("Typeset track", "Light"), C_("Typeset track", "Bold"), "3", 3 }, -- the engine's 0 ("Regular")
@@ -804,6 +835,322 @@ describe("ReaderTypesetPanel module", function()
             assert.is_nil(ui.doc_settings:readSetting("typeset_margin_step"))
             openPanel(ui)
             assert.are.equal(7, trackOf(ui, 4).position)
+        end)
+    end)
+
+    describe("paragraph panel", function()
+        local TINT = require("ui/palette").tint:getColor8().a
+        -- Two paragraphs of a speech in the sample, the first one with a line break.
+        local SPEECH = "/body[1]/DocFragment[5]/body[1]/div[1]/div[1]/div[1]/blockquote[26]"
+        local FIRST, SECOND = SPEECH .. "/p[1]/text()[1].0", SPEECH .. "/p[2]/em[1]/text()[1].0"
+        local BROKEN_LINE = SPEECH .. "/p[1]/text()[2].1"
+        local ui
+
+        setup(function()
+            ui = openReader(sample_epub)
+        end)
+        teardown(function()
+            if ui.menu.bars then ui.menu:hideToolbar(true) end
+            runTasks()
+            closeReader(ui)
+        end)
+
+        -- How the page lays the speech out: the first-line indent of the second paragraph, from where the first one's
+        -- line after its line break starts, and how far below the first paragraph's top the second one starts.
+        local function layout()
+            runTasks() -- the re-render follows BatchedUpdateDone
+            UIManager:forceRePaint() -- crengine re-lays out the part of the book it draws (partial rerendering)
+            ui:handleEvent(Event:new("GotoXPointer", FIRST))
+            UIManager:forceRePaint()
+            local y1 = ui.document:getScreenPositionFromXPointer(FIRST)
+            local __, x1 = ui.document:getScreenPositionFromXPointer(BROKEN_LINE)
+            local y2, x2 = ui.document:getScreenPositionFromXPointer(SECOND)
+            return x2 - x1, y2 - y1
+        end
+
+        local function card(panel, label)
+            return find(panel, function(w) return w.callback and w.label == label end)
+        end
+        local function flushCard(panel) return card(panel, _("First line flush")) end
+        local function indentCard(panel) return card(panel, _("First line indented")) end
+        local function spacingRow(panel) return find(panel, function(w) return w.toggle and w.callback end) end
+
+        -- the painted fill of a card, inside its right edge: ink for the chosen mode, tint for the other
+        local function fill(c)
+            return gray(c.dimen.x + c.dimen.w - Screen:scaleBySize(4), c.dimen.y + Screen:scaleBySize(30))
+        end
+        local function fills(panel)
+            return { fill(flushCard(panel)), fill(indentCard(panel)) }
+        end
+        -- whether the spacing toggle shows on: its knob at the right, unlike its middle
+        local function toggleShowsOn(r)
+            local t = r.toggle
+            local y = t.dimen.y + math.floor(t.dimen.h / 2)
+            return gray(t.dimen.x + t.dimen.w - math.floor(t.dimen.h / 2), y) ~= gray(t.dimen.x + math.floor(t.dimen.w / 2), y)
+        end
+
+        local function tapAndPaint(widget, x_ratio)
+            tapWidget(widget, x_ratio)
+            runTasks()
+            UIManager:forceRePaint()
+        end
+
+        it("should name the book's own paragraphs on the pill, and open the two cards from it with only a back arrow below", function()
+            local main = openPanel(ui)
+            local bars = ui.menu.bars
+            assert.are.equal(_("Paragraphs"), paragraphPill(main).text)
+            local main_band = main:getRefreshRegion():combine(bars.bottom_rect)
+            local refreshes = refreshesOf(function() openParagraph(main) end)
+            local paragraph = ui.config.panel
+            assert.are.equal("paragraph", ui.config.page)
+            assert.are.equal(paragraph, ui.menu.panel)
+            assert.are.equal(bars, topWidget())
+            assert.is_false(bars.show_top)
+            assert.is_truthy(backArrow(bars))
+            assert.is_nil(find(bars.bottom, function(w) return w.callback and hasText(w, _("Progress")) end))
+            assert.are.same({
+                { mode = "ui", region = main_band:combine(paragraph:getRefreshRegion():combine(bars.bottom_rect)) },
+            }, refreshes)
+            -- two cards side by side, the spacing row at the foot of the second; none chosen: the book's own styles
+            local flush, indent = flushCard(paragraph), indentCard(paragraph)
+            assert.are.equal(flush.dimen.y, indent.dimen.y)
+            assert.is_true(flush.dimen.x + flush.dimen.w < indent.dimen.x)
+            assert.are.same({ TINT, TINT }, fills(paragraph))
+            local spacing = spacingRow(paragraph)
+            assert.is_true(spacing.dimen.y > indent.dimen.y)
+            assert.are.equal(indent.dimen.y + indent.dimen.h, spacing.dimen.y + spacing.dimen.h)
+            assert.is_false(toggleShowsOn(spacing))
+            assert.is_true(row(paragraph, _("More layout options")).dimen.y > indent.dimen.y + indent.dimen.h)
+            -- opening it changes nothing
+            ui:saveSettings()
+            assert.is_nil(ui.doc_settings:readSetting("style_tweaks"))
+
+            tapWidget(backArrow(bars))
+            UIManager:forceRePaint()
+            assert.are.equal("main", ui.config.page)
+            ui.menu:hideToolbar()
+        end)
+
+        it("should set first line flush or indented for this book from the cards, re-laying the page out under the open panel", function()
+            local __, own_gap = layout()
+            openPanel(ui)
+            openParagraph(ui.config.panel)
+            local paragraph = ui.config.panel
+            local bars = ui.menu.bars
+            local refreshes = refreshesOf(function()
+                tapWidget(flushCard(paragraph), 0.25)
+                runTasks()
+            end)
+            local modes = {}
+            for _, r in ipairs(refreshes) do
+                modes[r.mode] = true
+                if r.mode == "ui" then
+                    assert.are.same(paragraph:getRefreshRegion(), r.region)
+                end
+            end
+            assert.is_nil(modes.full)
+            assert.is_true(modes.partial) -- the re-laid out page, as for a page turn
+            assert.is_true(modes.ui) -- the panel
+            assert.are.equal(paragraph, ui.config.panel)
+            assert.are.equal("paragraph", ui.config.page)
+            assert.are.equal(bars, topWidget())
+            assert.are.same({ INK, TINT }, fills(paragraph))
+            local flush_indent, flush_gap = layout()
+            assert.are.equal(0, flush_indent)
+            assert.are.equal(own_gap, flush_gap)
+
+            tapAndPaint(indentCard(paragraph))
+            assert.are.same({ TINT, INK }, fills(paragraph))
+            -- two characters wide, as Chinese text is indented
+            local indent = layout()
+            assert.is_true(math.abs(indent - 2 * ui.document:getFontSize()) <= 1, indent)
+            -- the pill names it, back on the panel
+            back()
+            assert.are.equal(_("First line indented"), paragraphPill(ui.config.panel).text)
+            ui.menu:hideToolbar()
+        end)
+
+        it("should switch paragraph spacing from the foot of the indent card, apart from the mode", function()
+            local indent, gap = layout()
+            openPanel(ui)
+            openParagraph(ui.config.panel)
+            local paragraph = ui.config.panel
+            local before = fills(paragraph)
+            -- a tap on its label switches it too
+            local refreshes = refreshesOf(function()
+                tapWidget(spacingRow(paragraph), 0.1)
+                runTasks()
+            end)
+            local modes = {}
+            for _, r in ipairs(refreshes) do
+                modes[r.mode] = true
+                if r.mode == "ui" then
+                    assert.are.same(spacingRow(paragraph).toggle.dimen, r.region) -- only the toggle, on its gray card
+                end
+            end
+            assert.is_nil(modes.full)
+            assert.is_true(modes.ui) -- the toggle
+            assert.is_true(modes.partial) -- the re-laid out page
+            assert.is_true(toggleShowsOn(spacingRow(paragraph)))
+            assert.are.same(before, fills(paragraph))
+            local spaced_indent, spaced_gap = layout()
+            assert.are.equal(indent, spaced_indent)
+            assert.is_true(spaced_gap > gap)
+
+            -- it stays on with the other mode
+            tapAndPaint(flushCard(paragraph), 0.25)
+            assert.are.same({ INK, TINT }, fills(paragraph))
+            assert.are.equal(0, (layout())) -- from the indent of the last test
+            assert.is_true(toggleShowsOn(spacingRow(paragraph)))
+            assert.are.equal(spaced_gap, select(2, layout()))
+            tapAndPaint(spacingRow(paragraph).toggle)
+            assert.is_false(toggleShowsOn(spacingRow(paragraph)))
+            assert.are.equal(gap, select(2, layout()))
+            ui.menu:hideToolbar()
+        end)
+
+        it("should keep the paragraph settings after reopening the book, for this book only", function()
+            openPanel(ui)
+            openParagraph(ui.config.panel)
+            tapAndPaint(indentCard(ui.config.panel))
+            tapAndPaint(spacingRow(ui.config.panel), 0.1)
+            ui.menu:hideToolbar()
+            local indent, gap = layout()
+            closeReader(ui)
+            ui = openReader(sample_epub, nil, true)
+            assert.are.same({ indent, gap }, { layout() })
+            local main = openPanel(ui)
+            assert.are.equal(_("First line indented"), paragraphPill(main).text)
+            openParagraph(main)
+            assert.are.same({ TINT, INK }, fills(ui.config.panel))
+            assert.is_true(toggleShowsOn(spacingRow(ui.config.panel)))
+            ui.menu:hideToolbar()
+            for id in pairs(G_reader_settings:readSetting("style_tweaks") or {}) do
+                assert.is_nil(id:match("^paragraph"), id)
+            end
+        end)
+
+        it("should follow a global paragraph default, and override it for this book only", function()
+            closeReader(ui)
+            local global = G_reader_settings:readSetting("style_tweaks")
+            G_reader_settings:saveSetting("style_tweaks", { paragraph_indent = true, paragraph_whitespace = true })
+            ui = openReader(sample_epub)
+            local main = openPanel(ui)
+            assert.are.equal(_("First line indented"), paragraphPill(main).text)
+            openParagraph(main)
+            assert.are.same({ TINT, INK }, fills(ui.config.panel))
+            assert.is_true(toggleShowsOn(spacingRow(ui.config.panel)))
+            tapAndPaint(flushCard(ui.config.panel), 0.25)
+            tapAndPaint(spacingRow(ui.config.panel), 0.1)
+            assert.are.same({ INK, TINT }, fills(ui.config.panel))
+            assert.is_false(toggleShowsOn(spacingRow(ui.config.panel)))
+            ui:saveSettings()
+            assert.are.same({ paragraph_indent = true, paragraph_whitespace = true }, G_reader_settings:readSetting("style_tweaks"))
+            assert.are.same({ paragraph_indent = false, paragraph_no_indent = true, paragraph_whitespace = false },
+                ui.doc_settings:readSetting("style_tweaks"))
+            ui.menu:hideToolbar()
+            closeReader(ui)
+            G_reader_settings:saveSetting("style_tweaks", global)
+            ui = openReader(sample_epub)
+        end)
+
+        it("should not claim a mode for a mix of paragraph styles, and leave other style tweaks alone", function()
+            closeReader(ui)
+            ui = openReader(sample_epub, { style_tweaks = {
+                -- only the first paragraph of a block indented
+                paragraph_indent = true, paragraph_following_no_indent = true,
+                paragraph_whitespace_half = true, margin_body_0 = true,
+            } })
+            local main = openPanel(ui)
+            assert.are.equal(_("Paragraphs"), paragraphPill(main).text)
+            openParagraph(main)
+            local paragraph = ui.config.panel
+            assert.are.same({ TINT, TINT }, fills(paragraph))
+            assert.is_true(toggleShowsOn(spacingRow(paragraph))) -- half a line of spacing is spacing too
+            tapAndPaint(indentCard(paragraph))
+            assert.are.same({ TINT, INK }, fills(paragraph))
+            tapAndPaint(spacingRow(paragraph), 0.1)
+            assert.is_false(toggleShowsOn(spacingRow(paragraph)))
+            ui:saveSettings()
+            -- the 2em indent in place of the mix, the other tweak kept
+            assert.are.same({ paragraph_indent_2em = true, margin_body_0 = true }, ui.doc_settings:readSetting("style_tweaks"))
+            ui.menu:hideToolbar()
+        end)
+
+        it("should say so with a toast and change nothing when style tweaks are off for this book", function()
+            closeReader(ui)
+            ui = openReader(sample_epub, { style_tweaks_enabled = false, style_tweaks = { paragraph_no_indent = true } })
+            local indent, gap = layout()
+            local main = openPanel(ui)
+            assert.are.equal(_("Paragraphs"), paragraphPill(main).text) -- not applied
+            openParagraph(main)
+            local paragraph = ui.config.panel
+            assert.are.same({ TINT, TINT }, fills(paragraph))
+            local shown
+            for __, target in ipairs{ indentCard(paragraph), spacingRow(paragraph) } do
+                -- the toast of the first tap doesn't take the second one: it only closes
+                tapAndPaint(target, 0.1)
+                local toast = topWidget()
+                assert.are_not.equal(shown, toast)
+                assert.is_true(toast.toast)
+                assert.are.equal(_("Style tweaks are disabled for this book."), toast.text)
+                assert.are.equal("ui", toast.close_refresh_type) -- over the gray card
+                assert.are.same({ TINT, TINT }, fills(ui.config.panel))
+                assert.is_false(toggleShowsOn(spacingRow(ui.config.panel)))
+                shown = toast
+            end
+            UIManager:close(shown)
+            assert.are.same({ indent, gap }, { layout() })
+            ui:saveSettings()
+            assert.are.same({ paragraph_no_indent = true }, ui.doc_settings:readSetting("style_tweaks"))
+            ui.menu:hideToolbar()
+        end)
+
+        it("should keep a global no-spacing default in effect after paragraph spacing goes on and off", function()
+            closeReader(ui)
+            local global = G_reader_settings:readSetting("style_tweaks")
+            G_reader_settings:saveSetting("style_tweaks", { paragraph_no_whitespace = true })
+            ui = openReader(sample_epub)
+            local __, gap = layout()
+            openPanel(ui)
+            openParagraph(ui.config.panel)
+            tapAndPaint(spacingRow(ui.config.panel), 0.1)
+            assert.is_true(select(2, layout()) > gap)
+            tapAndPaint(spacingRow(ui.config.panel), 0.1)
+            assert.is_false(toggleShowsOn(spacingRow(ui.config.panel)))
+            assert.are.equal(gap, select(2, layout()))
+            ui:saveSettings()
+            -- not left turned off for this book, as turning spacing on did
+            assert.are.same({ paragraph_no_whitespace = true }, ui.doc_settings:readSetting("style_tweaks"))
+            assert.are.same({ paragraph_no_whitespace = true }, G_reader_settings:readSetting("style_tweaks"))
+            ui.menu:hideToolbar()
+            closeReader(ui)
+            G_reader_settings:saveSetting("style_tweaks", global)
+            ui = openReader(sample_epub)
+        end)
+
+        it("should not claim a mode or spacing that the book's own style tweak may override", function()
+            local tweaks = { paragraph_no_indent = true, paragraph_whitespace = true }
+            local book_tweak = "p { text-indent: 2em !important; margin-top: 0 !important; }"
+            closeReader(ui)
+            ui = openReader(sample_epub, { style_tweaks = tweaks, book_style_tweak = book_tweak, book_style_tweak_enabled = true })
+            -- the page shows it: the book's style tweak, last in the style sheet, indents
+            assert.is_true(layout() > 0)
+            local main = openPanel(ui)
+            assert.are.equal(_("Paragraphs"), paragraphPill(main).text)
+            openParagraph(main)
+            assert.are.same({ TINT, TINT }, fills(ui.config.panel))
+            assert.is_false(toggleShowsOn(spacingRow(ui.config.panel)))
+            ui.menu:hideToolbar()
+            -- turned off, it overrides nothing
+            closeReader(ui)
+            ui = openReader(sample_epub, { style_tweaks = tweaks, book_style_tweak = book_tweak, book_style_tweak_enabled = false })
+            assert.are.equal(0, (layout()))
+            main = openPanel(ui)
+            assert.are.equal(_("First line flush"), paragraphPill(main).text)
+            openParagraph(main)
+            assert.is_true(toggleShowsOn(spacingRow(ui.config.panel)))
+            ui.menu:hideToolbar()
         end)
     end)
 

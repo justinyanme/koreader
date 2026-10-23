@@ -333,15 +333,21 @@ end
 
 Track.onCloseWidget = Track.free
 
---- Toggle: 42 × 26dp pill. Off: ink outline and ink knob. On: ink fill and paper knob.
+--- Toggle: 42 × 26dp pill, or `width` × `height`. Off: ink outline and ink knob. On: ink fill and paper knob.
+-- `on_card`, for a toggle on a paragraph card: off is a faded gray outline and knob over the card's fill. `inverted`,
+-- for one on an ink fill (a selected paragraph card), swaps ink and paper.
 local Toggle = InputContainer:extend{
     checked = false,
     callback = nil, -- function(new_checked)
     enabled = true,
+    width = Screen:scaleBySize(42),
+    height = Screen:scaleBySize(26),
+    on_card = false,
+    inverted = false,
 }
 
 function Toggle:init()
-    self.dimen = Geom:new{ w = Screen:scaleBySize(42), h = Screen:scaleBySize(26) }
+    self.dimen = Geom:new{ w = self.width, h = self.height }
     self.ges_events = tapEvents(self.dimen)
 end
 
@@ -349,17 +355,29 @@ function Toggle:paintTo(bb, x, y)
     self.dimen.x, self.dimen.y = x, y
     local w, h = self.dimen.w, self.dimen.h
     local r = math.floor(h / 2)
-    local ink = self.enabled and Palette.ink or Palette.ink_3
+    local ink, paper = Palette.ink, Palette.paper
+    if self.inverted then
+        ink, paper = paper, ink
+    end
+    if not self.enabled then
+        ink = Palette.ink_3
+    end
+    local knob_color = paper
     if self.checked then
         bb:paintRoundedRect(x, y, w, h, ink, r)
     else
-        bb:paintRoundedRect(x, y, w, h, Palette.paper, r)
-        bb:paintBorder(x, y, w, h, Size.border.button, ink, r, true)
+        knob_color = self.on_card and Palette.ink_3 or ink
+        if not self.on_card then
+            bb:paintRoundedRect(x, y, w, h, paper, r)
+        end
+        bb:paintBorder(x, y, w, h, Size.border.button, knob_color, r, true)
     end
-    local knob = Screen:scaleBySize(8)
-    local inset = Screen:scaleBySize(4) + knob
+    -- an 8dp knob 4dp from the end of a 26dp pill, in proportion for another height
+    local scale = h / Screen:scaleBySize(26)
+    local knob = math.floor(Screen:scaleBySize(8) * scale)
+    local inset = math.floor(Screen:scaleBySize(4) * scale) + knob
     local cx = self.checked and x + w - inset or x + inset
-    bb:paintCircle(cx, y + r, knob, self.checked and Palette.paper or ink)
+    bb:paintCircle(cx, y + r, knob, knob_color)
 end
 
 function Toggle:onTapSelect()
