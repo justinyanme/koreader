@@ -5,7 +5,8 @@ in pencil gray, centered on the footer line, as in WeChat Read (15-supplement/10
 ReaderToolbar shows it each time a book opens, as a view module: it is part of the page and stays through
 page turns, until the toolbar first shows or TIMEOUT seconds have passed, and never comes back for that
 book until it opens again. It lays a paper ground under itself, over whatever a customized footer centers
-on its line.
+on its line, and the footer paints it again when it repaints alone (its refreshes on resume, frontlight or
+charging changes).
 
 @usage
     ui.view:registerViewModule("toolbar_hint", ReaderToolbarHint:new{})
@@ -28,6 +29,7 @@ local ReaderToolbarHint = Widget:extend{
     ui = nil,
     shown = true, -- false once dismissed
     dimen = nil, -- where it was last painted
+    paints_over_footer = true, -- so that ReaderFooter paints it again when it repaints itself alone
 }
 
 ReaderToolbarHint.TIMEOUT = 60 -- seconds: "about a minute" (DECISIONS.md, B05)

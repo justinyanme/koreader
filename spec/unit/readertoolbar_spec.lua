@@ -826,6 +826,9 @@ describe("ReaderToolbar module", function()
                 end))
                 tap(Screen:getWidth() - 10, Screen:getHeight() / 2)
                 assert.is_true(hintShown(ui))
+                -- the footer repainting itself alone (as on resume, frontlight or charging changes) keeps it
+                ui:handleEvent(Event:new("FrontlightStateChanged"))
+                assert.is_true(hintShown(ui))
                 wait(ReaderToolbarHint.TIMEOUT - 2)
                 assert.is_true(hintShown(ui))
                 -- then it goes with a fast refresh of its own rect, on the footer line

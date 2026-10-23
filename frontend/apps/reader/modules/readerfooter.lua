@@ -2404,6 +2404,12 @@ function ReaderFooter:_updateFooterText(force_repaint, full_repaint)
 
             -- c.f., ReaderView:paintTo()
             UIManager:widgetRepaint(self.view.footer, 0, 0)
+            -- What a view module paints over the footer goes back on top (the e-ink redesign's open-book hint).
+            for _, module in pairs(self.view.view_modules) do
+                if module.paints_over_footer then
+                    UIManager:widgetRepaint(module, 0, 0)
+                end
+            end
             -- We've painted it first to ensure self.footer_content.dimen is sane
             UIManager:setDirty(nil, function()
                 return self.view.currently_scrolling and "fast" or "ui", self.footer_content.dimen
