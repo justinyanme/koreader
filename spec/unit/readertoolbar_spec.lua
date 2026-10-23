@@ -276,22 +276,18 @@ describe("ReaderToolbar module", function()
             local bars = ui.menu.bars
             local refreshes = refreshesOf(function() tapWidget(findIcon(bars.bottom, "eink/notes")) end)
             assert.is_nil(ui.menu.bars)
-            local drawer = ui.menu.drawer
-            assert.is_truthy(drawer)
-            assert.are.equal(drawer, topWidget())
-            assert.are.equal("notes", drawer.tab)
-            -- the bars go, the notes come, all "ui"
-            assert.are.same({ mode = "ui", region = bars.top_rect }, refreshes[1])
-            assert.are.same({ mode = "ui", region = bars.bottom_rect }, refreshes[2])
-            for _, r in ipairs(refreshes) do
-                assert.are.equal("ui", r.mode)
-            end
+            local page = ui.menu.drawer
+            assert.is_truthy(page)
+            assert.are.equal(page, topWidget())
+            assert.is_nil(page.filter)
+            -- the notes page covers the bars: one "ui" refresh of the whole screen
+            assert.are.same({ { mode = "ui", region = page.dimen } }, refreshes)
             ui.menu:closeDrawer()
             UIManager:forceRePaint()
 
-            -- the contents page's 书签 sends the same event, for the bookmarks
+            -- the contents page's 书签 sends the same event, for the bookmarks (there are none here)
             ui:handleEvent(Event:new("ShowNotes", "bookmarks"))
-            assert.are.equal("bookmarks", ui.menu.drawer.tab)
+            assert.is_true(ui.menu.drawer.covers_fullscreen)
             assert.are.equal(ui.menu.drawer, topWidget())
             ui.menu:closeDrawer()
             UIManager:forceRePaint()

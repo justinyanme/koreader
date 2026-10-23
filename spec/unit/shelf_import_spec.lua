@@ -210,11 +210,12 @@ describe("Shelf home, 导入 and 文件", function()
     it("opens from 导入 at the right of the title row: a card of the three routes over a circled ×", function()
         local fm, view = openShelf()
         local screen = Screen:getSize()
-        -- 导入 ends at the right gutter, level with the 书架 title, with its circled plus
+        -- 导入 sits before 选择, which ends at the right gutter, level with the 书架 title, with its circled plus
         local button = view.import_button
         assert.is_truthy(find(button, C_("Shelf", "Import")))
         assert.is_truthy(find(button, "eink/plus.circle"))
-        assert.are.equal(screen.w - dp(22), button.dimen.x + button.dimen.w)
+        assert.are.equal(screen.w - dp(22), view.select_button.dimen.x + view.select_button.dimen.w)
+        assert.are.equal(view.select_button.dimen.x - dp(24), button.dimen.x + button.dimen.w)
         assert.are.equal(view.title_button.dimen.y, button.dimen.y)
         assert.is_true(button.dimen.h >= dp(44))
         local refreshes, restore = spyRefreshes()
