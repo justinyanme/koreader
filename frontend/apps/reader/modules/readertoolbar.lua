@@ -168,7 +168,7 @@ local ReaderToolbar = ReaderMenu:extend{
     panel = nil, -- ui/widget/panel open between the page and the bottom bar
     panel_name = nil, -- the entry of that panel: "progress", "brightness", "more" or "font"
     drawer = nil, -- the full-screen page shown over the book: the contents page or the notes page
-    notes_return = nil, -- filter of the notes list to reopen on Back after a card jump
+    notes_return = nil, -- filter to restore on the first notes entry after a card jump
     hint = nil, -- ReaderToolbarHint while the open-book hint shows
 }
 
@@ -439,10 +439,11 @@ function ReaderToolbar:onShowToc()
     return true
 end
 
---- "ShowNotes" always opens all notes from the bottom bar, or bookmarks from the contents page's 书签.
--- Only Back after a card jump restores the previous filter and list page.
+--- "ShowNotes" opens all notes from the bottom bar, or bookmarks from the contents page's 书签.
+-- The first toolbar entry after a card jump restores the previous filter and list page once.
 function ReaderToolbar:onShowNotes(filter)
     if not Device:isTouchDevice() then return end
+    if filter == nil and self.notes_return then filter = self.notes_return.filter end
     self.notes_return = nil
     self:hideToolbar(true) -- the page covers the bars
     self:closeDrawer()
@@ -458,12 +459,6 @@ function ReaderToolbar:onShowNotes(filter)
     self.drawer = page
     UIManager:show(page, "ui", page.dimen)
     return true
-end
-
-function ReaderToolbar:onBack()
-    if self.notes_return then
-        return self:onShowNotes(self.notes_return.filter)
-    end
 end
 
 --- The notes page shown follows the notes as they change (not consumed: other modules want it too).

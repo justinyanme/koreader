@@ -5,7 +5,7 @@ thoughts and bookmarks) on a full-screen page (ui/widget/fullscreenpage), after 
 05-bookmarks/04-bookmark-in-notes.png and 05-bookmarks-and-highlights-filter.png.
 
 Opened by "ShowNotes" (ReaderToolbar): the toolbar's 笔记 lists all notes; the contents page's 书签 (and the
-search page's) lists only bookmarks, when the book has any. Back after a card jump restores the list left.
+search page's) lists only bookmarks, when the book has any. The first toolbar entry after a card jump restores the list left once.
 In the title band, 笔记, and 仅显示书签 at the right
 while the book has bookmarks: a toggle, its bookmark icon filled while only the bookmarks are listed. On the
 first page, the overview card: the book title, → 已读到 x% · 共 N 条笔记, ↗ 时长 N 分钟 (with the statistics
@@ -277,7 +277,7 @@ local NotesPage = FullscreenPage:extend{
     ui = nil,
     filter = nil, -- "bookmarks": only the bookmarks are listed (dropped when the book has none)
     on_close = nil, -- function, called once the page is closed
-    on_jump = nil, -- function, remembers the list for Back from the reader
+    on_jump = nil, -- function, remembers the list for the first notes entry from the reader
 }
 
 function NotesPage:init()
