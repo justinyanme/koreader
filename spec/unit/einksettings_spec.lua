@@ -524,13 +524,25 @@ describe("Reorganized settings", function()
             assert(ok, err)
         end)
 
-        it("dims rows that need a book", function()
+        it("dims rows that need a book, and says which ones this device lacks instead", function()
             local page = openSettings(fm)
             for __, name in ipairs{ _("Page turns and tap zones"), C_("Settings", "Status bar"), C_("Settings", "Progress sync") } do
                 local spec = row(page, name)
                 assert.is_false(spec.enabled)
                 assert.are.equal(_("Open a book first"), spec.value)
             end
+            page:closeMenu(true)
+            -- an item of the file browser's menu that this device lacks (Android's battery optimizations on the
+            -- emulator, as the sleep screen on Android): a book would not bring it
+            assert.is_nil(fm.menu.menu_items.ignore_battery_optimizations)
+            page = EinkSettings:new{ ui = fm, menu = fm.menu, groups = { { id = "power", text = "Power", rows = {
+                { id = "battery", text = "Battery", items = { "ignore_battery_optimizations" } },
+            } } } }
+            UIManager:show(page)
+            UIManager:forceRePaint()
+            local spec = row(page, "Battery")
+            assert.is_false(spec.enabled)
+            assert.are.equal(_("Not available"), spec.value)
         end)
 
         it("opens the original full menu from its last row, and keeps every original item reachable", function()

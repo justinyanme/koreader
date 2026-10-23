@@ -454,6 +454,22 @@ describe("ReaderMorePanel module", function()
                 assert.is_true(spec.enabled, name)
                 assert.are_not.equal(_("Open a book first"), spec.value)
             end
+            -- with a book open, no row asks for one: a row this device lacks says so (the emulator has no e-ink
+            -- refresh control, like a Boox that KOReader doesn't take for e-ink)
+            for p = 1, #page.pages do
+                page:goToPage(p)
+                UIManager:forceRePaint()
+                for __, spec in ipairs(page.shown) do
+                    assert.are_not.equal(_("Open a book first"), spec.value, spec.name)
+                end
+            end
+            if not require("device"):hasEinkScreen() then
+                local full_refresh = settingsRow(_.pgettext("Settings", "Full refresh rate"))
+                assert.is_false(full_refresh.enabled)
+                assert.are.equal(_("Not available"), full_refresh.value)
+            end
+            page:goToPage(1)
+            UIManager:forceRePaint()
             -- 翻页与点击区域 opens its own entries
             tapWidget({ dimen = settingsRow(_("Page turns and tap zones")).rect })
             UIManager:forceRePaint()
