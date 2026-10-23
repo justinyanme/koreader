@@ -34,6 +34,7 @@ local function dp(n) return Screen:scaleBySize(n) end
 local GUTTER, FIELD_H, CLEAR_W = dp(22), dp(50), dp(44)
 local HEADER_H = dp(130)
 local HISTORY_KEY = "shelf_search_history"
+local HISTORY_MAX = 20
 local Tappable = ShelfWidgets.Tappable
 
 local function text(str, role, width, bold)
@@ -164,12 +165,13 @@ function SearchPage:buildContent(rect)
         local row
         if self.results then
             local cover_w, cover_h, gap = dp(58), dp(84), dp(12)
+            -- Leaf5 reference glyphs: about 26px for titles and 22px for authors at the default UI size.
             local labels = VerticalGroup:new{ align = "left",
-                text(item.title, "ui_title", self.inner_w - cover_w - gap, true),
+                text(item.title, "ui_label", self.inner_w - cover_w - gap, true),
             }
             if item.authors then
                 table.insert(labels, VerticalSpan:new{ width = dp(4) })
-                table.insert(labels, text(item.authors, "ui_label", self.inner_w - cover_w - gap))
+                table.insert(labels, text(item.authors, "ui_micro", self.inner_w - cover_w - gap))
             end
             row = Tappable:new{
                 callback = function()
@@ -257,14 +259,16 @@ function SearchPage:submit()
     if self.closed then return end
     local query = util.trim(self.input:getText())
     if query == "" then return end
+    self.input:setText(query)
     self:stopTyping()
     self.query, self.page = query, 1
-    self.shelf:reload(false)
-    self.results = Shelf.view(self.shelf.books, "all", self.shelf.sort, query)
+    local books = Shelf.load(self.shelf.scanned, self.shelf.bim, self.shelf.cover_specs)
+    self.results = Shelf.view(books, "all", self.shelf.sort, query)
     for i = #self.history, 1, -1 do
         if self.history[i] == query then table.remove(self.history, i) end
     end
     table.insert(self.history, 1, query)
+    for i = #self.history, HISTORY_MAX + 1, -1 do self.history[i] = nil end
     G_reader_settings:saveSetting(HISTORY_KEY, util.tableDeepCopy(self.history))
     G_reader_settings:flush()
     self:refresh()

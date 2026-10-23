@@ -608,8 +608,16 @@ describe("Shelf home (FileManager replacement)", function()
                 if util.trim(query) ~= "" then assert.are.equal(util.trim(query), page.query) end
             end
 
+            local saved_scale, saved_keyboard
             before_each(function()
                 G_reader_settings:delSetting("shelf_search_history")
+                saved_scale = require("ui/font"):getUIScale()
+                saved_keyboard = G_reader_settings:readSetting("virtual_keyboard_enabled")
+            end)
+
+            after_each(function()
+                require("ui/font"):setUIScale(saved_scale)
+                G_reader_settings:saveSetting("virtual_keyboard_enabled", saved_keyboard)
             end)
 
             it("searches the whole shelf on its own page and returns to the original filter", function()
@@ -626,7 +634,8 @@ describe("Shelf home (FileManager replacement)", function()
                 assert.is_truthy(find(page, _("No search history")))
                 searchFor(page, "  A  ")
                 assert.is_truthy((find(page, T(_("Search in shelf: %1"), "A"))))
-                assert.is_truthy(find(page, "a"))
+                assert.are.equal("a", page.shown_rows[1][1][1][3][1].text)
+                assert.are.equal("A", page.input:getText())
                 assert.are.equal(1, #page.shown_rows)
                 assert.are.same(before, names(view.shown))
                 assert.are.same({ "A" }, G_reader_settings:readSetting("shelf_search_history"))
@@ -639,6 +648,22 @@ describe("Shelf home (FileManager replacement)", function()
                 for __, r in ipairs(refreshes) do
                     if r.requested then assert.are_not.equal("full", r.type) end
                 end
+                fm:onClose()
+            end)
+
+            it("keeps only the 20 newest queries on disk when another query is submitted", function()
+                local history = {}
+                for i = 1, 20 do history[i] = "query " .. i end
+                G_reader_settings:saveSetting("shelf_search_history", history)
+                local fm, view = openShelf(home)
+                tap(find(view, _("Search books")).dimen)
+                local page = topWidget()
+                searchFor(page, "new query")
+                local saved = require("luasettings"):open(G_reader_settings.file):readSetting("shelf_search_history")
+                assert.are.equal(20, #saved)
+                assert.are.equal("new query", saved[1])
+                assert.are.equal("query 19", saved[20])
+                tap(page.bar.back.dimen)
                 fm:onClose()
             end)
 
@@ -681,7 +706,6 @@ describe("Shelf home (FileManager replacement)", function()
                 G_reader_settings:saveSetting("shelf_search_history", history)
                 G_reader_settings:saveSetting("virtual_keyboard_enabled", true)
                 local Font = require("ui/font")
-                local scale = Font:getUIScale()
                 Font:setUIScale(1.35)
                 local fm, view = openShelf(home)
                 tap(find(view, _("Search books")).dimen)
@@ -702,8 +726,6 @@ describe("Shelf home (FileManager replacement)", function()
                 assert.are.same(history, G_reader_settings:readSetting("shelf_search_history"))
                 assert.is_false(page.input:isKeyboardVisible())
                 fm:onClose()
-                Font:setUIScale(scale)
-                G_reader_settings:delSetting("virtual_keyboard_enabled")
             end)
 
             it("opens a PDF result and never searches books hidden from the shelf", function()
@@ -1460,6 +1482,32 @@ describe("Shelf home (FileManager replacement)", function()
             assert.is_truthy(find(search, "Call to Arms"))
             assert.are.equal(1, #search.shown_rows)
             tap(search.bar.back.dimen)
+            fm:onClose()
+        end)
+
+        it("matches title case and partial authors without changing the underlying shelf", function()
+            local fm, view = openShelf(home)
+            view:stop()
+            local books, shown, counts = view.books, view.shown, util.tableDeepCopy(view.counts)
+            local jobs = #stub.jobs
+            tap(find(view, _("Search books")).dimen)
+            local search = topWidget()
+            for i, query in ipairs{ "CALL", "cAlL", "xUn" } do
+                if i > 1 then tap(search.clear_button.dimen) else tap(search.search_field.dimen) end
+                UIManager:sendEvent(Event:new("TextInput", query))
+                press("Press")
+                fastforward_ui_events()
+                UIManager:forceRePaint()
+                assert.are.equal(1, #search.shown_rows)
+                assert.are.equal("Call to Arms", search.shown_rows[1][1][1][3][1].text)
+                assert.are.equal(books, view.books)
+                assert.are.equal(shown, view.shown)
+                assert.are.same(counts, view.counts)
+                assert.is_nil(view.extracting)
+                assert.are.equal(jobs, #stub.jobs)
+            end
+            tap(search.bar.back.dimen)
+            assert.is_truthy(find(view, "Call to Arms"))
             fm:onClose()
         end)
 
