@@ -64,3 +64,36 @@ Release 下 FFI 导出符号是否被裁剪；解释器模式下大 EPUB 打开�
 | Q37 | ticket 切分：T0 阶段 A 技术验证（仓库外，交付 `doc/ios/phase-a-report.md`）；B0 窄屏离屏采集（Docker，与 T0 并行，只阻塞 B4）；B1 base fork 与构建骨架、符号门禁；B2 iOS 设备变体与能力位隐藏；B3 存储布局与三条导入；B4 dp 标尺、安全区、旋转、窄屏规则并更新 DESIGN/PRODUCT；B5 生命周期保存；B6 下载桥与书源；B7 封面进程内、后台重排与缩略图关闭；B8 亮度、URL、分享、语言、插件清单；C1 查询进程内化；C2 Keychain；C3 VoiceOver 五流程；C4 外接键盘；C5 KOPT（条件触发）；C6 手工验收清单 `doc/ios/acceptance.md` 与性能、内存、耗电记录；C7 Leaf5/Android 回归。阻塞：T0 → B1 → B2 → {B3, B4, B5} → {B6, B7, B8} → C1–C5 → C6 → C7。 |
 | Q38 | 一个父 issue；ticket 一次建好并带 Blocked by，创建时只给 T0 和 B0 打 `ready-for-agent`，T0 报告通过后再逐级打标。 |
 | Q39 | PRODUCT.md 和 DESIGN.md 由 B4 一并修改：Users、Operating Context、Capabilities、Accessibility 各加 iOS 内容；DESIGN 的 Layout 加窄屏 390 和 iPad 约 820 两档并写明 1dp≈1pt，Colors 加内容彩色规则，Refresh mapping 注明 LCD 上无效果但声明保留。design/demo 不改。 |
+
+## to-spec 与 to-tickets（2026-10-23）
+
+父 issue：[#85 feat(ios): 把微信读书式 KOReader 改版移植到 iPhone 和 iPad](https://github.com/justinyanme/koreader/issues/85)。测试接缝 A（ReaderUI）、B（书架/FileManager）沿用既有，C（iOS 设备变体构造点，可注入 SDL 平台名与原生桥函数表）是唯一新增。
+
+### 18 张 ticket 与真实阻塞边
+
+对首轮 Q37 的切分做了三处调整：新增 P1 预重构（书源下载统一走 opdsclient 策略，是 B6 前置，也修 ADR-0004 在下载路径上的缺口）；B8 瘦身为三座桥，语言并入 B2、插件清单并入 B1；阻塞边收紧为真实依赖（B5/B6/B7/C1 只等 B3，B8/C4 只等 B2，C2 等 B6，C3 等 B4，C5 等 B1）。子 issue 的 Blocked by 优先于 #85 Further Notes 的粗略顺序。全部为 #85 的原生 sub-issue，依赖用原生 blocked_by。
+
+| 票 | issue | Blocked by |
+| --- | --- | --- |
+| T0 阶段 A 技术验证 | [#86](https://github.com/justinyanme/koreader/issues/86) | 无 |
+| B0 窄屏离屏采集 | [#87](https://github.com/justinyanme/koreader/issues/87) | 无 |
+| P1 书源下载统一走 opdsclient 策略 | [#88](https://github.com/justinyanme/koreader/issues/88) | 无 |
+| B1 iOS 构建骨架 | [#89](https://github.com/justinyanme/koreader/issues/89) | #86 |
+| B2 iOS 设备变体与能力位 | [#90](https://github.com/justinyanme/koreader/issues/90) | #89 |
+| B3 沙盒内的书与数据 | [#91](https://github.com/justinyanme/koreader/issues/91) | #90 |
+| B4 dp 标尺、安全区与窄屏规则 | [#92](https://github.com/justinyanme/koreader/issues/92) | #90、#87 |
+| B5 生命周期保存 | [#93](https://github.com/justinyanme/koreader/issues/93) | #91 |
+| B6 书源异步下载 | [#94](https://github.com/justinyanme/koreader/issues/94) | #91、#88 |
+| B7 书架封面与无 fork 任务 | [#95](https://github.com/justinyanme/koreader/issues/95) | #91 |
+| B8 亮度、打开链接、分享 | [#96](https://github.com/justinyanme/koreader/issues/96) | #90 |
+| C1 查询进程内化 | [#97](https://github.com/justinyanme/koreader/issues/97) | #91 |
+| C2 Keychain | [#98](https://github.com/justinyanme/koreader/issues/98) | #94 |
+| C3 VoiceOver 五流程 | [#99](https://github.com/justinyanme/koreader/issues/99) | #92 |
+| C4 外接键盘翻页 | [#100](https://github.com/justinyanme/koreader/issues/100) | #90 |
+| C5 KOPT 重排（条件票） | [#101](https://github.com/justinyanme/koreader/issues/101) | #89 |
+| C6 稳定版综合验收 | [#102](https://github.com/justinyanme/koreader/issues/102) | #92–#101 |
+| C7 Leaf5 与 Android 回归 | [#103](https://github.com/justinyanme/koreader/issues/103) | #102 |
+
+### 打标规则（更新 Q38）
+
+创建时只给 **T0、B0、P1** 打 `ready-for-agent`（P1 的依赖已满足，owner 在 to-tickets 阶段明确把它加入可开工前沿，取代先前"只 T0、B0"的规则）。其余票在其 blocked_by 全部关闭后再打标。T0 结论为 no-go 时，B1 及其下游不解锁。
