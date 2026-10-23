@@ -1131,6 +1131,12 @@ describe("ReaderToolbar module", function()
             moveEvent(from.x, from.y, to.x, to.y, clock, false, ges)
         end
 
+        -- The finger stays down at `pos` long enough for a hold.
+        local function hold(pos)
+            clock = clock + time.s(1)
+            UIManager:sendEvent(Event:new("Gesture", { ges = "hold", pos = pos, time = clock }))
+        end
+
         -- The finger lifts at `pos` after moving slowly ("pan_release"), or after a hold ("hold_release").
         local function lift(pos, ges)
             clock = clock + time.s(1)
@@ -1190,6 +1196,21 @@ describe("ReaderToolbar module", function()
 
         local function percentFigure(ui, page)
             return { tostring(math.floor(page / ui.document:getPageCount() * 100)), "%" }
+        end
+
+        -- The page between the bars, which 加载中… covers.
+        local function pageArea(ui)
+            local bars = ui.menu.bars
+            local top = bars.show_top and bars.top_rect.h or 0
+            return Geom:new{ x = 0, y = top, w = Screen:getWidth(), h = ui.menu.panel:getRefreshRegion().y - top }
+        end
+
+        local function loadingShown()
+            local loading = _("Loading…")
+            for _, window in ipairs(UIManager._window_stack) do
+                if find(window.widget, function(w) return w.text == loading end) then return true end
+            end
+            return false
         end
 
         it("should only preview while the knob is dragged, and jump once when it is let go", function()
@@ -1416,20 +1437,9 @@ describe("ReaderToolbar module", function()
                 local anchor = ui.rolling:getBookLocation()
                 local panel = openProgress(ui)
                 local bars = ui.menu.bars
-                local function pageArea()
-                    local top = bars.show_top and bars.top_rect.h or 0
-                    return Geom:new{ x = 0, y = top, w = Screen:getWidth(), h = ui.menu.panel:getRefreshRegion().y - top }
-                end
-                local function loadingShown()
-                    local loading = _("Loading…")
-                    for _, window in ipairs(UIManager._window_stack) do
-                        if find(window.widget, function(w) return w.text == loading end) then return true end
-                    end
-                    return false
-                end
 
                 -- the book is laid out: a jump shows its page at once
-                local area = pageArea()
+                local area = pageArea(ui)
                 local mid = along(progressTrack(panel), 1/2)
                 local refreshes = refreshesOf(function() tap(mid.x, mid.y) end)
                 assert.are_not.equal(start, ui:getCurrentPage())
@@ -1456,7 +1466,7 @@ describe("ReaderToolbar module", function()
 
                 -- a jump now waits for the target's layout: 加载中… covers the page first, with the knob let go
                 -- resting where it was let go, and goes with the jump
-                area = pageArea()
+                area = pageArea(ui)
                 local track = progressTrack(panel)
                 local quarter = along(track, 1/4)
                 pan(onTrack(track, ui:getCurrentPage()), quarter)
@@ -1537,6 +1547,192 @@ describe("ReaderToolbar module", function()
             assert(ok, err)
         end)
 
+        it("should cover the page only while the book is being laid out, not once its full layout is ready", function()
+            local ui = openReader(sample_epub)
+            local rolling = ui.rolling
+            local states = rolling.RENDERING_STATE
+            local ok, err = pcall(function()
+                local panel = openProgress(ui)
+                -- the states KOReader's partial rendering goes through after a typesetting change
+                for _, case in ipairs{
+                    { "partially laid out", states.PARTIALLY_RERENDERED, true },
+                    { "laid out in the background", states.FULL_RENDERING_IN_BACKGROUND, true },
+                    { "layout ready, reload waiting for the reader to be idle", states.FULL_RENDERING_READY, false },
+                    { "reloading", states.RELOADING_DOCUMENT, true },
+                    { "laid out", nil, false },
+                } do
+                    rolling.rendering_state = case[2]
+                    local area = pageArea(ui)
+                    local track = progressTrack(panel)
+                    local page = ui:getCurrentPage()
+                    local target = along(track, page < track.page_count / 2 and 3/4 or 1/4)
+                    local refreshes = refreshesOf(function() tap(target.x, target.y) end)
+                    assert.are_not.equal(page, ui:getCurrentPage())
+                    assert.are.equal(case[3], refreshIndex(refreshes, "ui", area) ~= nil, case[1])
+                    assert.is_false(loadingShown())
+                end
+                ui.menu:hideToolbar()
+            end)
+            rolling.rendering_state = nil
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
+        it("should take 加载中… away when the jump fails, pass the error on, and keep no trace of the jump", function()
+            local ui = openReader(sample_epub)
+            local rolling = ui.rolling
+            local failing
+            local ok, err = pcall(function()
+                local start = ui:getCurrentPage()
+                local panel = openProgress(ui)
+                local bars = ui.menu.bars
+                local stack = #ui.link.location_stack
+                rolling.rendering_state = rolling.RENDERING_STATE.PARTIALLY_RERENDERED -- as after a typesetting change
+                -- the book goes away under the jump, as when it is reloaded
+                failing = stub(rolling, "onGotoPage", function() error("document closed", 0) end)
+                local area = pageArea(ui)
+                local mid = along(progressTrack(panel), 1/2)
+                local jumped, jump_err
+                local refreshes = refreshesOf(function()
+                    jumped, jump_err = pcall(tap, mid.x, mid.y)
+                end)
+                failing:revert()
+                failing = nil
+                assert.is_false(jumped)
+                assert.are.equal("document closed", jump_err)
+                -- the cover came and went: the page as it was shows again where it was
+                assert.is_false(loadingShown())
+                assert.are.equal(bars, topWidget())
+                local shown = refreshIndex(refreshes, "ui", area)
+                assert.is_truthy(shown)
+                local gone
+                for i = shown + 1, #refreshes do
+                    local g = refreshes[i].region
+                    if refreshes[i].mode == "ui" and g and g.x == area.x and g.y == area.y and g.w == area.w and g.h == area.h then
+                        gone = i
+                    end
+                end
+                assert.is_truthy(gone)
+                assert.are.equal(start, ui:getCurrentPage())
+                -- no jump happened: no way back to offer, nothing on the location stack
+                assert.are.equal(stack, #ui.link.location_stack)
+                rolling.rendering_state = nil
+                tapWidget(findIcon(bars.bottom, "eink/progress"))
+                tapWidget(findIcon(bars.bottom, "eink/progress"))
+                UIManager:forceRePaint()
+                assert.is_nil(returnPill(ui.menu.panel))
+                ui.menu:hideToolbar()
+            end)
+            if failing then failing:revert() end
+            rolling.rendering_state = nil
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
+        it("should take a hold let go on the track as a tap only when it started there", function()
+            local ui = openReader(sample_epub)
+            local ok, err = pcall(function()
+                local start = ui:getCurrentPage()
+                local panel = openProgress(ui)
+                local track = progressTrack(panel)
+                local stack = #ui.link.location_stack
+                local mid = along(track, 1/2)
+                local position = panel.content[1][1].dimen -- the position figure
+                -- held on the position figure, or on the page, then slid onto the track and let go there
+                for _, from in ipairs{
+                    point(position.x + position.w / 2, position.y + position.h / 2),
+                    point(Screen:getWidth() / 2, ui.menu.bars.top_rect.h + 100),
+                } do
+                    hold(from)
+                    pan(from, mid, "hold_pan")
+                    lift(mid, "hold_release")
+                    UIManager:forceRePaint()
+                    assert.are.equal(start, ui:getCurrentPage())
+                    assert.are.equal(stack, #ui.link.location_stack)
+                    assert.are.same(percentFigure(ui, start), statisticValues(panel, 1))
+                end
+                -- held on the track, without moving: a tap there
+                hold(mid)
+                lift(mid, "hold_release")
+                UIManager:forceRePaint()
+                assert.are.equal(track:pageAt(mid.x), ui:getCurrentPage())
+                assert.are.equal(stack + 1, #ui.link.location_stack)
+                ui.menu:hideToolbar()
+            end)
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
+        it("should forget a drag whose release never reached the track", function()
+            local Key = require("device/key")
+            local ui = openReader(sample_epub)
+            local ok, err = pcall(function()
+                local start = ui:getCurrentPage()
+                local panel = openProgress(ui)
+                local bars = ui.menu.bars
+                local track = progressTrack(panel)
+                local stack = #ui.link.location_stack
+                local from, to = onTrack(track, start), along(track, 3/4)
+                local away = point(Screen:getWidth() / 2, bars.top_rect.h + 100)
+                -- the finger lifts over a window on top of the bars: the track never hears of it
+                pan(from, to)
+                assert.are_not.same(percentFigure(ui, start), statisticValues(panel, 1))
+                -- the next gesture starts on the page: the knob rests on the page again, and stays there
+                local refreshes = refreshesOf(function() pan(away, point(away.x + 200, away.y)) end)
+                assert.are.same(percentFigure(ui, start), statisticValues(panel, 1))
+                assert.is_truthy(refreshIndex(refreshes, "ui", track.dimen))
+                assert.are.equal(0xFF, shade(onTrack(track, start)))
+                pan(away, point(away.x + 300, away.y))
+                lift(point(away.x + 300, away.y))
+                UIManager:forceRePaint()
+                assert.are.equal(start, ui:getCurrentPage())
+                assert.are.equal(stack, #ui.link.location_stack)
+                assert.are.same(percentFigure(ui, start), statisticValues(panel, 1))
+
+                -- a drag cut short by the panel closing (Back) leaves nothing behind either
+                pan(from, to)
+                UIManager:sendEvent(Event:new("KeyPress", Key:new("Back", {})))
+                UIManager:forceRePaint()
+                assert.is_nil(ui.menu.panel)
+                assert.is_false(track.held)
+                assert.is_nil(track.preview_page)
+                tapWidget(findIcon(bars.bottom, "eink/progress"))
+                UIManager:forceRePaint()
+                panel = ui.menu.panel
+                pan(away, point(away.x + 300, away.y))
+                lift(point(away.x + 300, away.y))
+                UIManager:forceRePaint()
+                assert.are.equal(start, ui:getCurrentPage())
+                assert.are.equal(stack, #ui.link.location_stack)
+                assert.are.same(percentFigure(ui, start), statisticValues(panel, 1))
+                ui.menu:hideToolbar()
+            end)
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
+        it("should repaint where the pill was only if it was painted", function()
+            local ui = openReader(sample_epub)
+            local ok, err = pcall(function()
+                local panel = openProgress(ui)
+                local bars = ui.menu.bars
+                local mid = along(progressTrack(panel), 1/2)
+                tap(mid.x, mid.y)
+                UIManager:forceRePaint()
+                local pill_rect = returnPill(panel).dimen:copy()
+                tapWidget(moreButton(bars))
+                UIManager:forceRePaint()
+                -- back to the progress panel, and away before it was ever painted: no pill to take away
+                tapWidget(findIcon(bars.bottom, "eink/progress"))
+                assert.is_truthy(returnPill(ui.menu.panel))
+                local refreshes = refreshesOf(function() tap(Screen:getWidth() - 10, bars.top_rect.h + 10) end)
+                assert.is_nil(ui.menu.bars)
+                assert.is_nil(refreshIndex(refreshes, "ui", pill_rect))
+            end)
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
         it("should drag after a hold, take a hold that does not move as a tap, and go back in a PDF", function()
             local ui = openReader(sample_pdf)
             local ok, err = pcall(function()
@@ -1546,6 +1742,7 @@ describe("ReaderToolbar module", function()
                 local track = progressTrack(panel)
                 -- a hold that does not move jumps where it is, as a tap
                 local mid = along(track, 1/2)
+                hold(mid)
                 lift(mid, "hold_release")
                 UIManager:forceRePaint()
                 local middle = track:pageAt(mid.x)
@@ -1554,6 +1751,7 @@ describe("ReaderToolbar module", function()
                 track = progressTrack(panel)
                 local from = onTrack(track, middle)
                 local last = point(track.dimen.x + track.width - track.inset, from.y)
+                hold(from)
                 pan(from, last, "hold_pan")
                 assert.are.equal(middle, ui:getCurrentPage())
                 assert.are.same({ "100", "%" }, statisticValues(panel, 1))

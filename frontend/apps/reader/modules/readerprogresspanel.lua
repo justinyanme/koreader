@@ -63,6 +63,7 @@ local ProgressTrack = InputContainer:extend{
     -- while dragging, and once let go until the jump lands
     preview_page = nil, -- the page the knob shows
     held = false, -- whether the finger is still down
+    hold_pos = nil, -- where the last hold started, on the track or not
 }
 
 function ProgressTrack:init()
@@ -83,6 +84,7 @@ function ProgressTrack:init()
     local pan_rate = Screen.low_pan_rate and 2.0 or 5.0
     self.ges_events = {
         TapSelect = { GestureRange:new{ ges = "tap", range = self.dimen } },
+        HoldStart = { GestureRange:new{ ges = "hold" } },
         DragMove = {
             GestureRange:new{ ges = "pan", rate = pan_rate },
             GestureRange:new{ ges = "hold_pan", rate = pan_rate },
@@ -159,10 +161,29 @@ local function sideways(ges)
     return ges.direction ~= "north" and ges.direction ~= "south"
 end
 
--- A move that started on the track, and not straight up or down, drags the knob.
+-- Forgets a drag whose finger lifted where the track did not see it (a window on top took the release).
+function ProgressTrack:dropDrag()
+    if self.held or self.preview_page then
+        self.held = false
+        self.preview_page = nil
+        self.on_preview(nil)
+    end
+end
+
+-- Notes where a hold starts, without taking it: its release is a tap only if it started on the track.
+function ProgressTrack:onHoldStart(_, ges)
+    self.hold_pos = ges.pos
+end
+
+-- A move that started on the track, and not straight up or down, drags the knob. A move that started
+-- elsewhere is another gesture: any drag left over is over.
 function ProgressTrack:onDragMove(_, ges)
+    if not (ges.start_pos and self.dimen:contains(ges.start_pos)) then
+        self:dropDrag()
+        return
+    end
     if not self.held then
-        if not (sideways(ges) and ges.start_pos and self.dimen:contains(ges.start_pos)) then return end
+        if not sideways(ges) then return end
         self.held = true
     end
     local page = self:pageAt(ges.pos.x)
@@ -173,13 +194,17 @@ function ProgressTrack:onDragMove(_, ges)
     return true
 end
 
--- The finger lifts: the jump, if it moved the knob off the page. A hold that did not move is a tap.
+-- The finger lifts: the jump, if it moved the knob off the page. A hold on the track that did not drag is a tap.
 function ProgressTrack:onDragRelease(_, ges)
     if self.held then
         return self:release(ges.pos.x)
     end
-    if ges.ges == "hold_release" and self.dimen:contains(ges.pos) then
-        return self:onTapSelect(nil, ges)
+    if ges.ges == "hold_release" then
+        local start = ges.start_pos or self.hold_pos
+        self.hold_pos = nil
+        if start and self.dimen:contains(start) and self.dimen:contains(ges.pos) then
+            return self:onTapSelect(nil, ges)
+        end
     end
 end
 
@@ -188,6 +213,13 @@ function ProgressTrack:onDragSwipe(_, ges)
     if self.held or sideways(ges) then
         return self:release(ges.end_pos.x)
     end
+end
+
+function ProgressTrack:free()
+    self.held = false
+    self.preview_page = nil
+    self.hold_pos = nil
+    InputContainer.free(self)
 end
 
 -- The knob rests where it was let go while the page jumps there (the panel then shows the page reached).
@@ -317,10 +349,15 @@ local function chapterStart(toc, page)
 end
 
 -- Whether a jump waits for the book's layout: after a typesetting change, partial rendering (KOReader's
--- default) lays a reflowable book out again only where it is shown until its background rendering is done,
--- so a jump lays out the target's chapter before it can show it.
+-- default) lays a reflowable book out again only where it is shown until its background rendering is done
+-- and the book reloaded, so a jump lays out the target's chapter before it can show it. Once the background
+-- rendering is ready, the reload waits for the reader to be idle: jumps don't wait for it.
 local function jumpWaitsForLayout(ui)
-    return ui.rolling ~= nil and ui.rolling.rendering_state ~= nil
+    local rolling = ui.rolling
+    if not rolling then return false end
+    local state, states = rolling.rendering_state, rolling.RENDERING_STATE
+    return state == states.PARTIALLY_RERENDERED or state == states.FULL_RENDERING_IN_BACKGROUND
+        or state == states.RELOADING_DOCUMENT
 end
 
 -- The gap between the bottom of the 返回原进度 pill and the panel's top edge, as measured on the Leaf5.
@@ -332,7 +369,7 @@ local ReaderProgressPanel = Panel:extend{
     position = nil, -- the position's Statistic
     track = nil, -- ProgressTrack
     pill = nil, -- ReturnPill, while there is a 原进度
-    pill_rect = nil, -- where the pill was last painted
+    pill_rect = nil, -- where the pill shows, if the last paint showed it
 }
 
 ReaderProgressPanel.onAnnotationsModified = Panel.refresh
@@ -345,21 +382,34 @@ end
 
 function ReaderProgressPanel:jump(target)
     local ui = self.toolbar.ui
-    if not self:getOrigin() then
-        origins[self.toolbar] = { location = ui.link:getCurrentLocation(), bars = self.toolbar.bars }
+    -- kept once the jump is done: one that fails leaves neither
+    local origin = not self:getOrigin() and ui.link:getCurrentLocation()
+    local left = ui.link:getCurrentLocation()
+    local loading, loading_rect
+    if jumpWaitsForLayout(ui) then
+        loading, loading_rect = self:showLoading()
     end
-    ui.link:addCurrentLocationToStack()
-    local loading = jumpWaitsForLayout(ui) and self:showLoading()
-    ui:handleEvent(Event:new("GotoPage", target))
+    local ok, err = pcall(ui.handleEvent, ui, Event:new("GotoPage", target))
     if loading then
-        -- the page takes its place once laid out, with the jump's own repaint
-        UIManager:close(loading)
+        -- the page takes its place once laid out, with the jump's own repaint; without a jump, the page as it was
+        if ok then
+            UIManager:close(loading)
+        else
+            UIManager:close(loading, "ui", loading_rect)
+        end
     end
+    if not ok then
+        error(err, 0)
+    end
+    if origin then
+        origins[self.toolbar] = { location = origin, bars = self.toolbar.bars }
+    end
+    ui.link:addCurrentLocationToStack(left)
     self:refresh()
 end
 
 --- Covers the page between the bars with 加载中… (centered on the screen, as in WeChat Read), until the next
--- repaint; the knob let go shows at rest meanwhile.
+-- repaint; the knob let go shows at rest meanwhile. Returns the cover and the rect it covers.
 function ReaderProgressPanel:showLoading()
     local bars = self.show_parent
     local top = bars.show_top and bars.top_rect.h or 0
@@ -378,7 +428,7 @@ function ReaderProgressPanel:showLoading()
     UIManager:setDirty(bars, "ui", self.track.dimen)
     UIManager:show(cover, "ui", rect, rect.x, rect.y)
     UIManager:forceRePaint() -- before the jump keeps the reader busy
-    return cover
+    return cover, rect
 end
 
 --- Goes back to the 原进度, closing the panel and the bars.
@@ -473,6 +523,7 @@ end
 function ReaderProgressPanel:paintTo(bb, x, y)
     Panel.paintTo(self, bb, x, y)
     local pill = self.pill
+    self.pill_rect = nil
     if pill then
         local size = pill:getSize()
         local pill_h = pill.pill_height
@@ -483,9 +534,10 @@ function ReaderProgressPanel:paintTo(bb, x, y)
 end
 
 function ReaderProgressPanel:free()
+    -- the page shows again where the pill was painted, whether the bars close or switch panels
     if self.pill_rect then
-        -- the page shows again where the pill was, whether the bars close or switch panels
         UIManager:setDirty(self.toolbar.view.dialog, "ui", self.pill_rect)
+        self.pill_rect = nil
     end
     Panel.free(self)
 end
