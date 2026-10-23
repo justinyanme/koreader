@@ -52,3 +52,15 @@ Release 下 FFI 导出符号是否被裁剪；解释器模式下大 EPUB 打开�
 | Q30 | "文件"页只浏览沙盒 `Documents`，没有别的根；导入页"从电脑传书"文案改成 Files 的"我的 iPhone/KOReader"和 Finder 文件共享。 |
 | Q31 | 随包插件：以 `make/android.mk` 排除清单为起点，再排除执行外部二进制/shell 的和墨水屏专属的；保留统计、KOSync、Calibre 无线、云存储、OPDS、封面浏览、自动翻页、生词本、词典（稳定版启用）。在构建配置里定。 |
 | Q32 | 没有显式 `language` 设置时跟随系统首选语言（`SDL_GetPreferredLocales`，不加桥）；原版入口可覆盖。 |
+
+## 第三轮（Q33–Q39，2026-10-23 确认；frontier 为空）
+
+| # | 决定 |
+| --- | --- |
+| Q33 | 首版不做任何备份排除：数据目录（含设置、docsettings、笔记）整体随 iCloud/Finder 备份，凭据暂以明文存在备份里。iCloud 备份由 Apple 加密；**Finder 备份是否加密取决于用户设置**，不能假定。稳定版迁入 Keychain 时用 AfterFirstUnlockThisDeviceOnly，恢复到新设备后书源和 KOSync 需重新登录，笔记和进度照常恢复。永远不排除数据目录；若将来排除单个凭据文件，必须同时提供重新登录路径。 |
+| Q34 | 下载桥不自动跟随重定向，把 3xx 和 Location 交给 Lua；复用 `opdsclient` 已有的跳转循环（次数上限、拒绝 https 降级、`auth_headers` 只发同源，每一跳重判）。书源的下载路径必须改为走同一个策略函数，不允许第二套判断。验收：跨域 302 后敏感头不出现在第二个请求里。 |
+| Q35 | 符号核对分四类：`ko_ios_*` 桥符号和 `platform/ios/ffi-symbols.txt` 列出的静态 base 库符号在构建时用 `nm` 核对、缺则失败；系统库符号由 dyld 解析、只在 Debug 启动自检里 `pcall` 解析并记日志；按能力未启用路径的 cdef（mxcfb、Android JNI、inotify、sdcv popen 等）不在清单。清单随 iOS 模块集维护，不自动扫全部 cdef。 |
+| Q36 | 后台保存六条：从 `willResignActive` 开始保存；续时标识无效时照常保存；过期回调立即结束任务并置标志，Lua 先写进度、笔记、设置三样必要项，过期后跳过非必要项；写入原子性依赖 `LuaSettings` 现有的临时文件 + fsync + 改名 + `.old`（`.sdr` 同类；阶段 A 验证在 iOS 上成立）；回前台时检查"保存未完成"标志补做；秒级合并落盘。**秒级落盘是正常可调度时的目标**，不保证崩溃、主循环阻塞或存储失败时只丢几秒；这些情形的验收是"已落盘的数据不损坏、可恢复到上一个完整版本"。 |
+| Q37 | ticket 切分：T0 阶段 A 技术验证（仓库外，交付 `doc/ios/phase-a-report.md`）；B0 窄屏离屏采集（Docker，与 T0 并行，只阻塞 B4）；B1 base fork 与构建骨架、符号门禁；B2 iOS 设备变体与能力位隐藏；B3 存储布局与三条导入；B4 dp 标尺、安全区、旋转、窄屏规则并更新 DESIGN/PRODUCT；B5 生命周期保存；B6 下载桥与书源；B7 封面进程内、后台重排与缩略图关闭；B8 亮度、URL、分享、语言、插件清单；C1 查询进程内化；C2 Keychain；C3 VoiceOver 五流程；C4 外接键盘；C5 KOPT（条件触发）；C6 手工验收清单 `doc/ios/acceptance.md` 与性能、内存、耗电记录；C7 Leaf5/Android 回归。阻塞：T0 → B1 → B2 → {B3, B4, B5} → {B6, B7, B8} → C1–C5 → C6 → C7。 |
+| Q38 | 一个父 issue；ticket 一次建好并带 Blocked by，创建时只给 T0 和 B0 打 `ready-for-agent`，T0 报告通过后再逐级打标。 |
+| Q39 | PRODUCT.md 和 DESIGN.md 由 B4 一并修改：Users、Operating Context、Capabilities、Accessibility 各加 iOS 内容；DESIGN 的 Layout 加窄屏 390 和 iPad 约 820 两档并写明 1dp≈1pt，Colors 加内容彩色规则，Refresh mapping 注明 LCD 上无效果但声明保留。design/demo 不改。 |
