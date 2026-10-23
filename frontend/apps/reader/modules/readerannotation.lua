@@ -553,9 +553,10 @@ function ReaderAnnotation:setNote(index, text)
     local value = text ~= "" and text or nil
     if not value and item.origin == "note" then
         self.ui.bookmark:removeItemByIndex(index)
-        return nil, true
+        return nil, true, true
     end
     local type_before = self.ui.bookmark.getBookmarkType(item)
+    if (item.note or "") == (value or "") then return type_before, false, false end
     item.note = value
     if item.drawer then
         self.ui.highlight:writePdfAnnotation("content", item, value or "")
@@ -567,7 +568,7 @@ function ReaderAnnotation:setNote(index, text)
         changes.nb_notes_added = -changes.nb_highlights_added
     end
     self.ui:handleEvent(Event:new("AnnotationsModified", changes))
-    return type_after, false
+    return type_after, false, true
 end
 
 function ReaderAnnotation:onAnnotationsModified(items)

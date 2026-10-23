@@ -223,7 +223,8 @@ describe("ReaderHighlightBubble module", function()
 
     -- a point inside the first visible box of a highlight
     local function highlightPoint(ui)
-        local r = ui.highlight:boxToScreen(ui.view.highlight.visible_boxes[1])
+        local box = ui.view.highlight.visible_boxes[1]
+        local r = ui.view:pageToScreenTransform(box.page, box.rect)
         return Geom:new{ x = r.x + math.floor(r.w / 2), y = r.y + math.floor(r.h / 2) }
     end
 
@@ -232,6 +233,22 @@ describe("ReaderHighlightBubble module", function()
             local w = UIManager._window_stack[i].widget
             if w.input and w.getRefreshRegion then return w end
         end
+    end
+
+    -- Paint saved decorations without body text so underline pixels cannot hide among glyphs.
+    local function savedInk(ui)
+        local Blitbuffer = require("ffi/blitbuffer")
+        local bb = Blitbuffer.new(Screen:getWidth(), Screen:getHeight(), Blitbuffer.TYPE_BB8)
+        bb:fill(Blitbuffer.COLOR_WHITE)
+        ui.view:drawSavedHighlight(bb, 0, 0)
+        local count = 0
+        for y = 0, bb:getHeight() - 1 do
+            for x = 0, bb:getWidth() - 1 do
+                if bb:getPixel(x, y):getColor8().a < 0xFF then count = count + 1 end
+            end
+        end
+        bb:free()
+        return count
     end
 
     describe("with an EPUB", function()
@@ -591,8 +608,27 @@ describe("ReaderHighlightBubble module", function()
             assert.is_true(lines_repainted)
         end)
 
+        it("should delete a highlight with a thought in one tap from its popover", function()
+            select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
+            tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
+            UIManager:forceRePaint()
+            tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+            UIManager:forceRePaint()
+            noteSheet().input:setText("Attached thought")
+            tapWidget(cell(noteSheet(), "Save"))
+            UIManager:forceRePaint()
+            local p = highlightPoint(ui)
+            tap(p.x, p.y)
+            UIManager:forceRePaint()
+            assert.is_truthy(cell(ui.highlight.highlight_dialog, "Delete note"))
+            tapWidget(cell(ui.highlight.highlight_dialog, "Delete highlight"))
+            assert.are.equal(0, #ui.annotation.annotations)
+            assert.is_nil(ui.highlight.highlight_dialog)
+            assert.is_nil(shown(require("ui/widget/confirmlayer")))
+        end)
+
         it("should save a direct thought without a highlight and delete the whole thought when cleared", function()
-            select(ui, Geom:new{ x = 400, y = 110 })
+            select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
             tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
             UIManager:forceRePaint()
             local sheet = noteSheet()
@@ -601,6 +637,7 @@ describe("ReaderHighlightBubble module", function()
             UIManager:forceRePaint()
             assert.are.equal("note", ui.annotation.annotations[1].origin)
             assert.are.equal("A direct thought", ui.annotation.annotations[1].note)
+            assert.are.equal(0, savedInk(ui))
             local mark = ui.view.view_modules.note_marks.targets[1]
             assert.is_true(inked(mark.x, mark.y, mark.x + mark.w - 1, mark.y + mark.h - 1))
             for _, r in ipairs(ui.highlight:highlightRects(1)) do
@@ -615,9 +652,15 @@ describe("ReaderHighlightBubble module", function()
             closeReader(ui)
             ui = openReader(sample_epub)
             assert.are.equal("note", ui.annotation.annotations[1].origin)
+            assert.are.equal(0, savedInk(ui))
+            assert.is_truthy(ui.view.view_modules.note_marks.targets[1])
             local p = highlightPoint(ui)
-            tap(p.x, p.y)
+            assert.is_nil(ui.highlight:onTap(nil, { pos = p }))
+            assert.is_nil(ui.highlight.highlight_dialog, "only the thought marker should open its actions")
+            mark = ui.view.view_modules.note_marks.targets[1]
+            tap(mark.x + mark.w / 2, mark.y + mark.h / 2)
             UIManager:forceRePaint()
+            assert.is_nil(cell(ui.highlight.highlight_dialog, "Delete highlight"))
             tapWidget(cell(ui.highlight.highlight_dialog, "Edit note"))
             UIManager:forceRePaint()
             sheet = noteSheet()
@@ -636,6 +679,140 @@ describe("ReaderHighlightBubble module", function()
             tapWidget(cell(sheet, "Back"))
             assert.is_nil(noteSheet())
             assert.are.equal(0, #ui.annotation.annotations)
+        end)
+
+        it("should keep a direct thought separate from an overlapping highlight", function()
+            select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
+            local range = require("util").tableDeepCopy(ui.highlight.selected_text)
+            tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
+            ui.highlight:closeBubble()
+            UIManager:forceRePaint()
+            local underline_pixels = savedInk(ui)
+            local index = ui.annotation:addNote(range, "Overlapping thought")
+            UIManager:setDirty(ui, "ui")
+            UIManager:forceRePaint()
+            assert.are.equal(underline_pixels, savedInk(ui))
+            local p = highlightPoint(ui)
+            tap(p.x, p.y)
+            UIManager:forceRePaint()
+            assert.is_truthy(cell(ui.highlight.highlight_dialog, "Delete highlight"))
+            assert.is_nil(cell(ui.highlight.highlight_dialog, "Delete note"))
+            ui.highlight:closeBubble()
+            local mark = ui.view.view_modules.note_marks.targets[index]
+            tap(mark.x + mark.w / 2, mark.y + mark.h / 2)
+            UIManager:forceRePaint()
+            assert.is_nil(cell(ui.highlight.highlight_dialog, "Delete highlight"))
+            tapWidget(cell(ui.highlight.highlight_dialog, "Delete note"))
+            UIManager:forceRePaint()
+            tapWidget(cell(topWidget(), "Delete"))
+            UIManager:forceRePaint()
+            assert.are.equal(1, #ui.annotation.annotations)
+            assert.is_nil(ui.annotation.annotations[1].note)
+            assert.are.equal(underline_pixels, savedInk(ui))
+        end)
+
+        it("should preserve a legacy thought without origin as a highlight after reopening", function()
+            select(ui, Geom:new{ x = 400, y = 110 })
+            tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+            UIManager:forceRePaint()
+            noteSheet().input:setText("Legacy thought")
+            tapWidget(cell(noteSheet(), "Save"))
+            closeReader(ui)
+            local settings = DocSettings:open(sample_epub)
+            local annotations = settings:readSetting("annotations")
+            annotations[1].origin = nil -- old sidecars cannot distinguish how a thought was created
+            settings:saveSetting("annotations", annotations)
+            settings:flush()
+            ui = openReader(sample_epub)
+            assert.is_nil(ui.annotation.annotations[1].origin)
+            assert.is_true(savedInk(ui) > 0)
+            local mark = ui.view.view_modules.note_marks.targets[1]
+            tap(mark.x + mark.w / 2, mark.y + mark.h / 2)
+            UIManager:forceRePaint()
+            assert.is_truthy(cell(ui.highlight.highlight_dialog, "Delete highlight"))
+            tapWidget(cell(ui.highlight.highlight_dialog, "Delete note"))
+            UIManager:forceRePaint()
+            tapWidget(cell(topWidget(), "Delete"))
+            UIManager:forceRePaint()
+            assert.are.equal(1, #ui.annotation.annotations)
+            assert.is_nil(ui.annotation.annotations[1].note)
+            assert.is_true(savedInk(ui) > 0)
+        end)
+
+        it("should wash the page and paint only a thought marker in night mode", function()
+            local night = G_reader_settings:readSetting("night_mode")
+            ui:handleEvent(Event:new("ToggleNightMode"))
+            local ok, err = pcall(function()
+                UIManager:forceRePaint()
+                assert.are.equal(1, Screen.bb:getInverse())
+                select(ui, Geom:new{ x = 400, y = 110 })
+                tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+                UIManager:forceRePaint()
+                local sheet = noteSheet()
+                assert.is_false(inked(0, 0, Screen:getWidth() - 1, sheet.sheet_y - 1))
+                sheet.input:setText("Night thought")
+                UIManager:forceRePaint()
+                assert.is_false(inked(0, 0, Screen:getWidth() - 1, sheet.sheet_y - 1))
+                tapWidget(cell(sheet, "Save"))
+                UIManager:forceRePaint()
+                assert.are.equal(0, savedInk(ui))
+                local marks = ui.view.view_modules.note_marks
+                local Blitbuffer = require("ffi/blitbuffer")
+                local bb = Blitbuffer.new(Screen:getWidth(), Screen:getHeight(), Blitbuffer.TYPE_BB8)
+                bb:setInverse(1)
+                bb:fill(Blitbuffer.COLOR_WHITE)
+                marks:paintTo(bb, 0, 0)
+                local r, visible = marks.targets[1], false
+                for y = r.y, r.y + r.h - 1 do
+                    for x = r.x, r.x + r.w - 1 do
+                        if bb:getPixelP(x, y)[0]:getColor8().a >= 0x80 then visible = true end
+                    end
+                end
+                bb:free()
+                assert.is_true(visible, "the thought marker should be light on the physical dark page")
+                assert.is_true(inked(0, 0, Screen:getWidth() - 1, math.floor(Screen:getHeight() / 2)))
+            end)
+            if Screen.bb:getInverse() == 1 then ui:handleEvent(Event:new("ToggleNightMode")) end
+            G_reader_settings:saveSetting("night_mode", night)
+            assert(ok, err)
+        end)
+
+        it("should close the thought editor and wash when the book closes externally", function()
+            select(ui, Geom:new{ x = 400, y = 110 })
+            tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+            UIManager:forceRePaint()
+            local sheet = noteSheet()
+            sheet.input:setText("unsaved draft")
+            ui:onClose()
+            assert.is_nil(noteSheet())
+            for _, window in ipairs(UIManager._window_stack) do
+                assert.are_not.equal(sheet.wash, window.widget)
+                assert.are_not.equal(sheet.input.keyboard, window.widget)
+            end
+            assert.are.equal(0, #DocSettings:open(sample_epub):readSetting("annotations"))
+            UIManager:quit()
+            ui = openReader(sample_epub)
+            assert.is_nil(noteSheet())
+        end)
+
+        it("should leave an unchanged empty thought alone when saving a plain highlight", function()
+            select(ui, Geom:new{ x = 400, y = 110 })
+            tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
+            UIManager:forceRePaint()
+            local item = ui.annotation.annotations[1]
+            local before = require("util").tableDeepCopy(item)
+            tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+            UIManager:forceRePaint()
+            spy.on(ui.annotation, "onAnnotationsModified")
+            local ok, err = pcall(function()
+                local refreshes = refreshesOf(function() tapWidget(cell(noteSheet(), "Save")) end)
+                assert.spy(ui.annotation.onAnnotationsModified).was_not_called()
+                -- Closing the wash still needs a page redraw even though the note did not change.
+                assert.is_true(hasRefresh(refreshes, "ui", Screen:getSize()))
+            end)
+            ui.annotation.onAnnotationsModified:revert()
+            assert(ok, err)
+            assert.are.same(before, item)
         end)
 
         it("should wash the inert page behind the compact editor and restore it on Back", function()
@@ -2164,6 +2341,44 @@ describe("ReaderHighlightBubble module", function()
     end)
 
     describe("without the replacement", function()
+        for _, file in ipairs{ sample_epub, sample_pdf } do
+            it("should keep direct thoughts visible without the replacement in " .. file, function()
+                local ui = openReader(file, true)
+                if ui.paging then
+                    ui:handleEvent(Event:new("SetScrollMode", false))
+                    ui.paging:onGotoPage(10)
+                else
+                    ui.rolling:onGotoPage(10)
+                end
+                UIManager:forceRePaint()
+                select(ui, ui.paging and Geom:new{ x = 430, y = 210 } or Geom:new{ x = 400, y = 110 })
+                tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+                UIManager:forceRePaint()
+                noteSheet().input:setText("Fallback thought")
+                tapWidget(cell(noteSheet(), "Save"))
+                UIManager:forceRePaint()
+                assert.are.equal(0, savedInk(ui))
+                -- Removing the optional marker module must also leave a visible fallback.
+                ui.view.view_modules.note_marks = nil
+                ui.view.highlight.page_boxes = {}
+                assert.is_true(savedInk(ui) > 0)
+                closeReader(ui)
+                Replacements.reader_highlight = nil
+                local ok, err = pcall(function()
+                    ui = openReader(file)
+                    assert.are.equal("note", ui.annotation.annotations[1].origin)
+                    assert.is_true(savedInk(ui) > 0)
+                    local p = highlightPoint(ui)
+                    tap(p.x, p.y)
+                    assert.are.equal("Fallback thought", topWidget().text)
+                    UIManager:close(topWidget())
+                    closeReader(ui)
+                end)
+                ReaderHighlightBubble.register()
+                assert(ok, err)
+            end)
+        end
+
         it("should offer the wave in the original Style dialog", function()
             Replacements.reader_highlight = nil
             local ok, err = pcall(function()

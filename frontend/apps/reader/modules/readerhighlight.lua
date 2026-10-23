@@ -1012,7 +1012,7 @@ function ReaderHighlight:onTap(_, ges)
         local pos = self.view:screenToPageTransform(ges.pos)
         local highlights_tapped, highlights_added = {}, {}
         for _, box in ipairs(self.view.highlight.visible_boxes) do
-            if inside_box(pos, box.rect) then
+            if box.drawer ~= "note" and inside_box(pos, box.rect) then
                 if self.select_mode then
                     if box.index == self.highlight_idx then
                         -- tap on the first fragment: abort select mode, clear highlight
@@ -2884,6 +2884,7 @@ function ReaderHighlight:getSavedExtendedHighlightPage(highlight, page, index)
         color    = highlight.color or self.view.highlight.saved_color,
         text     = highlight.text,
         note     = highlight.note,
+        origin   = highlight.origin,
         page     = highlight.page,
         pos0     = highlight.ext[page].pos0,
         pos1     = highlight.ext[page].pos1,

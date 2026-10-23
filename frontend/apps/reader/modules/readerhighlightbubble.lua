@@ -12,9 +12,9 @@ Replaces ReaderHighlight (apps/replacements reader_highlight slot):
   pages from the page corners as a long-press drag does, the popover hidden
   meanwhile; expanding either way saves one highlight on release and shows
   Delete highlight, unless an explicit legacy action is configured;
-- a tap on a highlight, or a long-press on a word of it, shows the same four
-  actions with "Delete highlight" in the first place; after a long-press, the
-  look-up is for the word pressed;
+- a tap on a highlight, or a long-press on a word of it, replaces "Highlight"
+  with "Delete highlight" and adds "Delete note" when it has a thought;
+  after a long-press, the look-up is for the word pressed;
 - copying closes the popover and confirms with a toast;
 - a thought is written in a compact band above the keyboard, over a washed,
   inert page; Back discards the draft, Save persists it and shows a toast;
@@ -811,12 +811,20 @@ function ReaderHighlightBubble:dismiss()
     self:clear(nil, true)
 end
 
-function ReaderHighlightBubble:onClose(keep_highlight)
+function ReaderHighlightBubble:onCloseWidget()
+    if self.note_sheet then self.note_sheet:onClose() end
     self:closeBubble()
+end
+
+function ReaderHighlightBubble:onClose(keep_highlight)
+    self:onCloseWidget()
     if not keep_highlight then
         self:clear()
     end
 end
+
+-- Close the draft while the document is still alive, before ReaderUI frees it.
+ReaderHighlightBubble.onCloseDocument = ReaderHighlightBubble.onClose
 
 function ReaderHighlightBubble:onHoldRelease()
     if not self.hold_pos and not self.select_mode then
@@ -870,7 +878,7 @@ function ReaderHighlightBubble:highlightsAt(pos)
     local indexes, seen = {}, {}
     for _, box in ipairs(self.view.highlight.visible_boxes or {}) do
         local r = box.rect
-        if not seen[box.index] and (not box.page or box.page == pos.page)
+        if box.drawer ~= "note" and not seen[box.index] and (not box.page or box.page == pos.page)
                 and pos.x >= r.x and pos.x <= r.x + r.w and pos.y >= r.y and pos.y <= r.y + r.h then
             seen[box.index] = true
             table.insert(indexes, box.index)
@@ -991,7 +999,8 @@ function ReaderHighlightBubble:showHighlightNoteOrDialog(index)
 end
 
 function ReaderHighlightBubble:onTap(arg, ges)
-    for index, rect in pairs(self.view.view_modules.note_marks.targets or {}) do
+    local marks = self.view.view_modules.note_marks
+    for index, rect in pairs(marks and marks.targets or {}) do
         if ges.pos:intersectWith(rect) then
             self:showHighlightBubble(index)
             return true
@@ -1009,36 +1018,47 @@ function ReaderHighlightBubble:showHighlightBubble(index, rects, word)
     if #rects == 0 then
         return ReaderHighlight.showHighlightNoteOrDialog(self, index)
     end
+    local actions = {}
+    if item.origin ~= "note" then
+        table.insert(actions, {
+            icon = "eink/highlight-off", text = C_("Highlight bubble", "Delete highlight"),
+            callback = function()
+                self:closeBubble()
+                self:deleteHighlight(index)
+            end,
+        })
+    end
+    if item.note then
+        table.insert(actions, {
+            icon = "eink/thought", text = C_("Thought editor", "Delete note"),
+            callback = function()
+                self:closeBubble()
+                local layer = ConfirmLayer:new{
+                    text = C_("Thought editor", "Delete this note?"),
+                    actions = { { text = _("Delete"), callback = function() self:setNote(index, "") end } },
+                }
+                UIManager:show(layer, "ui", layer:getRefreshRegion())
+            end,
+        })
+    end
+    table.insert(actions, self:lookupCell((word or item).text, function()
+        self:closeBubble()
+        self.selected_text = util.tableDeepCopy(word or item)
+        self:lookupDict(not word and index or nil)
+    end))
+    table.insert(actions, {
+        icon = "eink/thought",
+        text = item.note and C_("Highlight bubble", "Edit note") or C_("Highlight bubble", "Write note"),
+        callback = function() self:showNoteSheet(index) end,
+    })
+    table.insert(actions, {
+        icon = "eink/copy", text = C_("Text", "Copy"), callback = function()
+            self:closeBubble()
+            self:copyText(item.text)
+        end,
+    })
     local bubble = SelectionBubble:new{
-        rows = { {
-            { icon = item.note and "eink/thought" or "eink/highlight-off",
-              text = item.note and C_("Thought editor", "Delete note") or C_("Highlight bubble", "Delete highlight"), callback = function()
-                self:closeBubble()
-                if item.note then
-                    local layer = ConfirmLayer:new{
-                        text = C_("Thought editor", "Delete this note?"),
-                        actions = { { text = _("Delete"), callback = function() self:setNote(index, "") end } },
-                    }
-                    UIManager:show(layer, "ui", layer:getRefreshRegion())
-                else
-                    self:deleteHighlight(index)
-                end
-            end },
-            self:lookupCell((word or item).text, function()
-                self:closeBubble()
-                self.selected_text = util.tableDeepCopy(word or item)
-                self:lookupDict(not word and index or nil)
-            end),
-            { icon = "eink/thought",
-              text = item.note and C_("Highlight bubble", "Edit note") or C_("Highlight bubble", "Write note"),
-              callback = function()
-                self:showNoteSheet(index)
-              end },
-            { icon = "eink/copy", text = C_("Text", "Copy"), callback = function()
-                self:closeBubble()
-                self:copyText(item.text)
-            end },
-        } },
+        rows = { actions },
         anchor_rects = rects,
         tap_close_callback = function() self:closeBubble() end,
     }
@@ -1056,8 +1076,8 @@ end
 --- Updates the note through the shared lifecycle, repainting its text and marker.
 function ReaderHighlightBubble:setNote(index, text)
     local region = self:linesRegion(self:highlightRects(index))
-    self.ui.annotation:setNote(index, text)
-    UIManager:setDirty(self.dialog, "ui", region)
+    local _, _, changed = self.ui.annotation:setNote(index, text)
+    if changed then UIManager:setDirty(self.dialog, "ui", region) end
 end
 
 --- New thoughts stay drafts until Save; existing thoughts keep their value on Back.
@@ -1104,8 +1124,12 @@ function ReaderHighlightBubble:showNoteSheet(index)
         },
         bottom_inset = 0,
         wash = NoteWash:new{},
-        on_close = function() self:dismiss() end,
+        on_close = function()
+            self.note_sheet = nil
+            self:dismiss()
+        end,
     }
+    self.note_sheet = sheet
     input.parent = sheet
     UIManager:show(sheet.wash, "ui", Screen:getSize())
     UIManager:show(sheet, "ui", Screen:getSize())
