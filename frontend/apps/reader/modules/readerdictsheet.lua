@@ -69,13 +69,6 @@ end
 
 local function dp(n) return Screen:scaleBySize(n) end
 
---- A CJK character that can be part of a word: not CJK or fullwidth punctuation.
-local function isCJKWordChar(c)
-    if not util.isCJKChar(c) then return false end
-    local code = ffiUtil.utf8charcode(c)
-    return not ((code >= 0x3000 and code <= 0x303F) or (code >= 0xFF00 and code <= 0xFFEF))
-end
-
 --- Stem forms to try for a suffix-stripped English stem, most likely first.
 local function stemForms(s)
     local undoubled = s:match("^(.-(%a))%2$")
@@ -133,7 +126,7 @@ function ReaderDictSheet.candidates(word, extra)
         local n = #chars
         if n > MAX_MATCH_CHARS then return list end
         local cjk = {}
-        for i, c in ipairs(chars) do cjk[i] = isCJKWordChar(c) end
+        for i, c in ipairs(chars) do cjk[i] = util.isCJKWordChar(c) end
         -- longest first, then leftmost; only runs of CJK characters
         for len = n - 1, 2, -1 do
             for i = 1, n - len + 1 do
