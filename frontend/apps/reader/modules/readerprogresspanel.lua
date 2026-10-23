@@ -22,6 +22,7 @@ the panel then re-renders with a "ui" refresh of its own rect.
 ]]
 
 local Device = require("device")
+local EinkControls = require("ui/widget/einkcontrols")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Event = require("ui/event")
 local Font = require("ui/font")
@@ -497,7 +498,7 @@ function ReaderProgressPanel:buildContent()
         self.pill:free()
     end
     self.pill = origin and ReturnPill:new{ callback = function() self:returnToOrigin() end }
-    return VerticalGroup:new{
+    local content = VerticalGroup:new{
         align = "left",
         HorizontalGroup:new{
             self.position,
@@ -513,6 +514,23 @@ function ReaderProgressPanel:buildContent()
         VerticalSpan:new{ width = Screen:scaleBySize(20) },
         self.track,
     }
+    if ui.autoturn then
+        table.insert(content, VerticalSpan:new{ width = Screen:scaleBySize(20) })
+        table.insert(content, EinkControls.PillButton:new{
+            text = ui.autoturn:_enabled() and _("Autoturn settings") or _("Start autoturn"),
+            width = w, height = Screen:scaleBySize(35), bordersize = Size.border.default,
+            face = Font:getFace("ui_label"),
+            callback = function()
+                self.toolbar:hideToolbar()
+                if ui.autoturn:_enabled() then
+                    ui.autoturn:showSettings()
+                else
+                    ui.autoturn:start()
+                end
+            end,
+        })
+    end
+    return content
 end
 
 function ReaderProgressPanel:build()

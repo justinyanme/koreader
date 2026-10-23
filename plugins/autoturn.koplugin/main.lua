@@ -57,13 +57,19 @@ function AutoTurn:_unschedule()
     end
 end
 
-function AutoTurn:_start()
-    if self:_enabled() then
+function AutoTurn:_start(silent)
+    self:_unschedule()
+    if self:_enabled() and not self.suspended then
         local time_since_boot = UIManager:getElapsedTimeSinceBoot()
         logger.dbg("AutoTurn: start at", time.format_time(time_since_boot))
         PluginShare.pause_auto_suspend = true
         self.last_action_time = time_since_boot
         self:_schedule()
+
+        if self.pill and not self.settings then
+            UIManager:setDirty(self.ui.view.dialog, "ui", self.pill.dimen)
+        end
+        if silent then return end
 
         local text
         if self.autoturn_distance == 1 then
@@ -83,6 +89,59 @@ function AutoTurn:_start()
     end
 end
 
+-- Both the original precise controls and the five quick speeds use the same timer and saved values.
+function AutoTurn:setInterval(seconds, distance, silent)
+    self.autoturn_sec = seconds
+    if distance then self.autoturn_distance = distance end
+    self.enabled = seconds > 0
+    G_reader_settings:saveSetting("autoturn_timeout_seconds", seconds)
+    G_reader_settings:saveSetting("autoturn_distance", self.autoturn_distance)
+    G_reader_settings:saveSetting("autoturn_enabled", self.enabled)
+    self:_start(silent)
+end
+
+function AutoTurn:start()
+    self:setInterval(self.autoturn_sec > 0 and self.autoturn_sec or 60, 1, true)
+end
+
+function AutoTurn:stop()
+    self.enabled = false
+    G_reader_settings:makeFalse("autoturn_enabled")
+    self:_unschedule()
+    if self.pill then
+        UIManager:setDirty(self.ui.view.dialog, "ui", self.pill.dimen)
+    end
+end
+
+function AutoTurn:showSettings()
+    if self.settings then return end
+    self.settings = require("apps/reader/modules/readerautoturn").Settings:new{ autoturn = self }
+    UIManager:show(self.settings, "ui", self.settings.panel:getRefreshRegion())
+end
+
+function AutoTurn:onReaderReady()
+    if not (require("device"):isTouchDevice() and self.ui.menu.showPanel) then return end
+    if self.pill then self.pill:free() end
+    self.pill = require("apps/reader/modules/readerautoturn").Pill:new{ autoturn = self }
+    self.ui.view:registerViewModule("autoturn", self.pill)
+    self.ui:registerTouchZones({{
+        id = "autoturn_settings", ges = "tap",
+        screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
+        overrides = { "readermenu_tap", "tap_forward", "tap_backward", "readerfooter_tap", "tap_link", "readerhighlight_tap" },
+        handler = function(ges)
+            if self:_enabled() and not self.suspended and self.pill.dimen:contains(ges.pos) then
+                self:showSettings()
+                return true
+            end
+        end,
+    }})
+end
+
+function AutoTurn:onSetDimensions()
+    if self.settings then self.settings:close() end
+    self:onReaderReady()
+end
+
 function AutoTurn:init()
     UIManager.event_hook:registerWidget("InputEvent", self)
     self.autoturn_sec = G_reader_settings:readSetting("autoturn_timeout_seconds", 0)
@@ -92,7 +151,7 @@ function AutoTurn:init()
     self.task = function()
         self:_schedule()
     end
-    self:_start()
+    self:_start(self.ui.menu.showPanel ~= nil)
 end
 
 function AutoTurn:onCloseWidget()
@@ -104,6 +163,12 @@ end
 function AutoTurn:onCloseDocument()
     logger.dbg("AutoTurn: onCloseDocument")
     self:_unschedule()
+    if self.settings then self.settings:close() end
+    if self.pill then
+        self.ui.view.view_modules.autoturn = nil
+        self.pill:free()
+        self.pill = nil
+    end
 end
 
 function AutoTurn:onInputEvent()
@@ -115,12 +180,15 @@ end
 -- Unschedule it and restart after resume.
 function AutoTurn:onSuspend()
     logger.dbg("AutoTurn: onSuspend")
+    self.suspended = true
     self:_unschedule()
+    if self.settings then self.settings:close() end
 end
 
-function AutoTurn:_onResume()
+function AutoTurn:onResume()
     logger.dbg("AutoTurn: onResume")
-    self:_start()
+    self.suspended = false
+    self:_start(true)
 end
 
 function AutoTurn:addToMainMenu(menu_items)
@@ -149,22 +217,13 @@ function AutoTurn:addToMainMenu(menu_items)
                 ok_text = _("Set timeout"),
                 cancel_text = _("Disable"),
                 cancel_callback = function()
-                    self.enabled = false
-                    G_reader_settings:makeFalse("autoturn_enabled")
-                    self:_unschedule()
+                    self:stop()
                     menu:updateItems()
-                    self.onResume = nil
                 end,
                 ok_always_enabled = true,
                 callback = function(t)
-                    self.autoturn_sec = t.min * 60 + t.sec
-                    G_reader_settings:saveSetting("autoturn_timeout_seconds", self.autoturn_sec)
-                    self.enabled = true
-                    G_reader_settings:makeTrue("autoturn_enabled")
-                    self:_unschedule()
-                    self:_start()
+                    self:setInterval(t.min * 60 + t.sec)
                     menu:updateItems()
-                    self.onResume = self._onResume
                 end,
             }
             UIManager:show(autoturn_spin)
