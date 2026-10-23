@@ -648,11 +648,16 @@ describe("ReaderFulltextSearch module", function()
             assert(ok, err)
         end)
 
-        it("should leave the original search dialog to the original entries, such as the toolbar's search", function()
-            tapRect(Geom:new{ x = 0, y = math.floor(Screen:getHeight() / 2), w = Screen:getWidth(), h = 1 })
-            local search_icon = find(ui.menu.bars, function(w) return w.icon == "eink/search" and w.dimen end)
-            assert.is_truthy(search_icon)
-            tapWidget(search_icon)
+        it("should leave the original search dialog to the original menu, whose next hit it finds", function()
+            -- 全部设置（原版）: the original menu, its search tab, 全文搜索
+            ui:handleEvent(Event:new("ShowOriginalMenu"))
+            UIManager:forceRePaint()
+            local menu = ui.menu.menu_container
+            assert.is_truthy(menu)
+            tapWidget(find(menu, function(w) return w.icon == "appbar.search" and w.dimen end))
+            local entry = find(menu, function(w) return w.item and w.item.text == _("Fulltext search") and w.dimen end)
+            assert.is_truthy(entry)
+            tapWidget(entry)
             local dialog = ui.search.input_dialog
             assert.is_truthy(dialog)
             assert.is_true(UIManager:isWidgetShown(dialog))
