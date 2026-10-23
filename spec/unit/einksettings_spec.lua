@@ -7,6 +7,7 @@ describe("Reorganized settings", function()
 
     setup(function()
         require("commonrequire")
+        require("ffi").cdef[[int chmod(const char *path, unsigned int mode);]]
         disable_plugins()
         -- plugins that back settings rows
         for __, name in ipairs{ "autosuspend", "calibre", "cloudstorage", "kosync", "opds" } do
@@ -82,10 +83,20 @@ describe("Reorganized settings", function()
     end
 
     -- Input is sent the way it arrives, and the screen is repainted after it, as before the next input.
-    local function tap(rect)
+    local function tap(rect, no_wait)
         UIManager:sendEvent(Event:new("Gesture", { ges = "tap",
             pos = Geom:new{ x = rect.x + math.floor(rect.w / 2), y = rect.y + math.floor(rect.h / 2), w = 0, h = 0 } }))
         UIManager:forceRePaint()
+        if not no_wait then
+            for __, window in ipairs(UIManager._window_stack) do
+                if window.widget.text == _("Clearing cache…") then
+                    UIManager:shiftScheduledTasksBy(-require("ui/time").s(1))
+                    UIManager:_checkTasks()
+                    UIManager:forceRePaint()
+                    break
+                end
+            end
+        end
     end
 
     local function swipe(direction)
@@ -286,15 +297,20 @@ describe("Reorganized settings", function()
             DataStorage.getSettingsDir = function() return root .. "/settings" end
             local saved_home = G_reader_settings:readSetting("home_dir")
             G_reader_settings:saveSetting("home_dir", root)
+            -- Wait on process completion at the OS boundary; scheduled time is advanced explicitly.
+            local is_done = ffiUtil.isSubProcessDone
+            local process_wait = stub(ffiUtil, "isSubProcessDone", function(pid) return is_done(pid, true) end)
             local saved_bim = package.loaded.bookinfomanager
             local ok, err = pcall(function() fn(root, util) end)
             if fm.shelf_view then fm.shelf_view:stop() end
             local bim = package.loaded.bookinfomanager
             if bim and bim ~= saved_bim then bim:closeDbConnection() end
+            process_wait:revert()
             package.loaded.bookinfomanager = saved_bim
             G_reader_settings:saveSetting("home_dir", saved_home)
             DataStorage.getDataDir, DataStorage.getSettingsDir = data_dir, settings_dir
             while topWidget() ~= fm do UIManager:close(topWidget()) end
+            require("ffi").C.chmod(root .. "/cache/opds-thumbs/readonly", tonumber("755", 8))
             ffiUtil.purgeDir(root)
             assert(ok, err)
         end
@@ -392,23 +408,26 @@ describe("Reorganized settings", function()
                 assert.is_truthy(findText(fm, "Author"))
                 assert.is_truthy(findText(fm, "hidden"))
                 assert.is_nil(findText(fm, "Hidden metadata"))
-                -- Let the real shelf finish rebuilding the ordinary entry through its scheduled jobs.
-                local time = require("ui/time")
-                local deadline = time.now() + time.s(5)
-                UIManager:setInputTimeout(0)
-                repeat
-                    UIManager:shiftScheduledTasksBy(-time.s(1))
-                    UIManager:handleInput()
-                    ffiUtil.usleep(25000)
-                until findText(fm, "Romeo and Juliet") or time.now() > deadline
+                -- Run the scheduled extraction and collector with controlled time, no wall-clock polling.
+                for __ = 1, 3 do
+                    UIManager:shiftScheduledTasksBy(-require("ui/time").s(10))
+                    UIManager:_checkTasks()
+                end
+                UIManager:forceRePaint()
                 assert.is_truthy(findText(fm, "Romeo and Juliet"))
                 assert.is_truthy(findText(fm, "Custom cover title"))
                 assert.is_truthy(findText(fm, "hidden"))
                 assert.are.equal("Y", bim:getBookInfo(root .. "/hidden.epub").ignore_meta)
                 page = openSettings(fm)
-                assert.are.equal(util.getFriendlySize(lfs.attributes(bim.db_location, "size")
-                    + (lfs.attributes(bim.db_location .. "-wal", "size") or 0)
-                    + (lfs.attributes(bim.db_location .. "-shm", "size") or 0)), row(page, _("Clear cache")).subtitle)
+                local total = 0
+                for __, suffix in ipairs{ "", "-wal", "-shm", "-journal" } do
+                    total = total + (lfs.attributes(bim.db_location .. suffix, "size") or 0)
+                end
+                for name in lfs.dir(root .. "/cache/tmpcr3cache") do
+                    local attr = lfs.attributes(root .. "/cache/tmpcr3cache/" .. name)
+                    if attr and attr.mode == "file" then total = total + attr.size end
+                end
+                assert.are.equal(util.getFriendlySize(total), row(page, _("Clear cache")).subtitle)
             end)
         end)
 
@@ -436,17 +455,185 @@ describe("Reorganized settings", function()
             end)
         end)
 
-        it("reports cleanup failures and keeps the remaining usage visible", function()
+        it("clears thumbnails and discards an unreadable cover database", function()
             withCacheData(function(root, util)
                 local db_path = root .. "/settings/bookinfo_cache.sqlite3"
+                local thumb = root .. "/cache/opds-thumbs/image"
                 assert(util.writeToFile("corrupt cache", db_path))
+                assert(util.writeToFile("thumbnail", thumb))
                 local page = openSettings(fm)
                 tap(row(page, _("Clear cache")).rect)
                 tap(find(topWidget(), function(w) return w.text == _("Clear cache") and w.callback end).dimen)
-                assert.are.equal(_("Some caches could not be cleared. Please try again."), topWidget().text)
+                assert.are.equal(_("Cache cleared."), topWidget().text)
+                assert.is_nil(lfs.attributes(db_path))
+                assert.is_nil(lfs.attributes(thumb))
+                assert.are.equal(util.getFriendlySize(0), row(page, _("Clear cache")).subtitle)
+            end)
+        end)
+
+        it("clears thumbnails when the cover database stays locked", function()
+            withCacheData(function(root, util)
+                local bim = dofile("plugins/coverbrowser.koplugin/bookinfomanager.lua")
+                package.loaded.bookinfomanager = bim
+                bim:createDB()
                 UIManager:close(topWidget())
-                assert.are.equal(util.getFriendlySize(13), row(page, _("Clear cache")).subtitle)
-                assert.are.equal("corrupt cache", util.readFromFile(db_path))
+                bim:closeDbConnection()
+                local lock = require("lua-ljsqlite3/init").open(bim.db_location)
+                lock:exec("BEGIN IMMEDIATE;")
+                local thumb = root .. "/cache/opds-thumbs/image"
+                assert(util.writeToFile("thumb", thumb))
+                local ok, err = pcall(function()
+                    local page = openSettings(fm)
+                    tap(row(page, _("Clear cache")).rect)
+                    tap(find(topWidget(), function(w) return w.text == _("Clear cache") and w.callback end).dimen)
+                    assert.are.equal(ffiUtil.template(_("Cover database: %1 failed"), 1), topWidget().text)
+                    assert.is_nil(lfs.attributes(thumb))
+                    assert.are.equal("file", lfs.attributes(bim.db_location, "mode"))
+                end)
+                lock:exec("ROLLBACK;")
+                lock:close()
+                assert(ok, err)
+            end)
+        end)
+
+        it("continues after a read-only thumbnail and reports only the failed part", function()
+            withCacheData(function(root, util)
+                local readonly = root .. "/cache/opds-thumbs/readonly"
+                util.makePath(readonly)
+                assert(util.writeToFile("keep", readonly .. "/image"))
+                assert(util.writeToFile("remove", root .. "/cache/opds-thumbs/good"))
+                assert.are.equal(0, require("ffi").C.chmod(readonly .. "/image", tonumber("444", 8)))
+                assert.are.equal(0, require("ffi").C.chmod(readonly, tonumber("555", 8)))
+                local page = openSettings(fm)
+                tap(row(page, _("Clear cache")).rect)
+                tap(find(topWidget(), function(w) return w.text == _("Clear cache") and w.callback end).dimen)
+                assert.are.equal(ffiUtil.template(_("Thumbnail cache: %1 failed"), 1), topWidget().text)
+                assert.are.equal("keep", util.readFromFile(readonly .. "/image"))
+                assert.is_nil(lfs.attributes(root .. "/cache/opds-thumbs/good"))
+                assert.are.equal(util.getFriendlySize(4), row(page, _("Clear cache")).subtitle)
+            end)
+        end)
+
+        it("ignores files that disappear during traversal or deletion", function()
+            withCacheData(function(root, util)
+                local scanning, deleting = root .. "/cache/opds-thumbs/scanning", root .. "/cache/opds-thumbs/deleting"
+                assert(util.writeToFile("thumb", scanning))
+                assert(util.writeToFile("thumb", deleting))
+                local page = openSettings(fm)
+                local attributes, remove = lfs.symlinkattributes, os.remove
+                local attrs_stub = stub(lfs, "symlinkattributes", function(path, ...)
+                    if path == scanning then remove(path) end
+                    return attributes(path, ...)
+                end)
+                local remove_stub = stub(os, "remove", function(path)
+                    if path == deleting then remove(path) end
+                    return remove(path)
+                end)
+                local ok, err = pcall(function()
+                    tap(row(page, _("Clear cache")).rect)
+                    tap(find(topWidget(), function(w) return w.text == _("Clear cache") and w.callback end).dimen)
+                    assert.are.equal(_("Cache cleared."), topWidget().text)
+                    assert.are.equal(util.getFriendlySize(0), row(page, _("Clear cache")).subtitle)
+                end)
+                attrs_stub:revert()
+                remove_stub:revert()
+                assert(ok, err)
+            end)
+        end)
+
+        it("keeps cache usage stable across layout changes and updates it after cleanup", function()
+            withCacheData(function(root, util)
+                assert(util.writeToFile("thumb", root .. "/cache/opds-thumbs/first"))
+                local dir, scans = lfs.dir, 0
+                local dir_stub = stub(lfs, "dir", function(path)
+                    if path == root .. "/cache/opds-thumbs" then scans = scans + 1 end
+                    return dir(path)
+                end)
+                local saved = G_reader_settings:readSetting("page_turns_left_tap_forward")
+                local ok, err = pcall(function()
+                    local page = openSettings(fm)
+                    assert.are.equal(1, scans)
+                    assert(util.writeToFile("more", root .. "/cache/opds-thumbs/second"))
+                    tap(row(page, _("Tap left side for next page")).rect)
+                    assert.are.equal(1, scans)
+                    assert.are.equal(util.getFriendlySize(5), row(page, _("Clear cache")).subtitle)
+                    tap(row(page, _("Clear cache")).rect)
+                    tap(find(topWidget(), function(w) return w.text == _("Clear cache") and w.callback end).dimen, true)
+                    local progress
+                    for __, w in ipairs(UIManager._window_stack) do
+                        if w.widget.text == _("Clearing cache…") then progress = w.widget end
+                    end
+                    assert.is_truthy(progress)
+                    -- Hold the process result at the OS boundary while more than two seconds pass.
+                    local pending = stub(ffiUtil, "isSubProcessDone", function() return false end)
+                    local unreadable = stub(ffiUtil, "getNonBlockingReadSize", function() return 0 end)
+                    local shown_ok, shown_err = pcall(function()
+                        UIManager:shiftScheduledTasksBy(-require("ui/time").s(3))
+                        UIManager:_checkTasks()
+                        local still_shown = false
+                        for __, w in ipairs(UIManager._window_stack) do
+                            if w.widget == progress then still_shown = true end
+                        end
+                        assert.is_true(still_shown)
+                    end)
+                    pending:revert()
+                    unreadable:revert()
+                    assert(shown_ok, shown_err)
+                    UIManager:shiftScheduledTasksBy(-require("ui/time").s(1))
+                    UIManager:_checkTasks()
+                    UIManager:forceRePaint()
+                    assert.are.equal(_("Cache cleared."), topWidget().text)
+                    assert.are.equal(util.getFriendlySize(0), row(page, _("Clear cache")).subtitle)
+                end)
+                dir_stub:revert()
+                G_reader_settings:saveSetting("page_turns_left_tap_forward", saved)
+                assert(ok, err)
+            end)
+        end)
+
+        it("never traverses directory links within or above the thumbnail cache", function()
+            withCacheData(function(root, util)
+                local outside = home .. "/outside-cache-data"
+                util.makePath(outside)
+                assert(util.writeToFile("keep outside", outside .. "/data"))
+                local ok, err = pcall(function()
+                    for __, link in ipairs{ root .. "/cache/opds-thumbs/dirlink", root .. "/cache/opds-thumbs", root .. "/cache" } do
+                        if lfs.attributes(link, "mode") == "directory" then ffiUtil.purgeDir(link) end
+                        assert(lfs.link(outside, link, true))
+                        local page = openSettings(fm)
+                        assert.are.equal(util.getFriendlySize(0), row(page, _("Clear cache")).subtitle)
+                        tap(row(page, _("Clear cache")).rect)
+                        tap(find(topWidget(), function(w) return w.text == _("Clear cache") and w.callback end).dimen)
+                        assert.are.equal(_("Cache cleared."), topWidget().text)
+                        assert.are.equal("keep outside", util.readFromFile(outside .. "/data"))
+                        assert.are.equal("link", lfs.symlinkattributes(link, "mode"))
+                        UIManager:close(topWidget())
+                        page:closeMenu()
+                        assert(os.remove(link))
+                    end
+                end)
+                for __, link in ipairs{ root .. "/cache/opds-thumbs/dirlink", root .. "/cache/opds-thumbs", root .. "/cache" } do
+                    if lfs.symlinkattributes(link, "mode") == "link" then os.remove(link) end
+                end
+                ffiUtil.purgeDir(outside)
+                assert(ok, err)
+            end)
+        end)
+
+        it("includes typesetting and temporary caches in usage and clears both", function()
+            withCacheData(function(root, util)
+                for __, dir in ipairs{ "cr3cache", "tmpcr3cache" } do
+                    util.makePath(root .. "/cache/" .. dir)
+                    assert(util.writeToFile("rendered", root .. "/cache/" .. dir .. "/book"))
+                end
+                local page = openSettings(fm)
+                assert.are.equal(util.getFriendlySize(16), row(page, _("Clear cache")).subtitle)
+                tap(row(page, _("Clear cache")).rect)
+                tap(find(topWidget(), function(w) return w.text == _("Clear cache") and w.callback end).dimen)
+                assert.are.equal(_("Cache cleared."), topWidget().text)
+                assert.is_nil(lfs.attributes(root .. "/cache/cr3cache/book"))
+                assert.is_nil(lfs.attributes(root .. "/cache/tmpcr3cache/book"))
+                assert.are.equal(util.getFriendlySize(0), row(page, _("Clear cache")).subtitle)
             end)
         end)
 
@@ -970,6 +1157,33 @@ describe("Reorganized settings", function()
         after_each(function()
             if ui.menu.menu_container then ui.menu:onCloseReaderMenu() end
             while isSettings(topWidget()) do topWidget():closeMenu(true) end
+        end)
+
+        it("keeps the open book's cache while clearing other typesetting caches", function()
+            local util = require("util")
+            local active = ui.document:getCacheFilePath()
+            assert.is_string(active)
+            assert.are.equal("file", lfs.attributes(active, "mode"))
+            local original = util.readFromFile(active)
+            local dir = active:match("^(.*)/")
+            local other = dir .. "/cache-cleanup-other-book"
+            assert(util.writeToFile("other book", other))
+            local is_done = ffiUtil.isSubProcessDone
+            local process_wait = stub(ffiUtil, "isSubProcessDone", function(pid) return is_done(pid, true) end)
+            local ok, err = pcall(function()
+                local page = openSettings(ui)
+                tap(row(page, _("Clear cache")).rect)
+                tap(find(topWidget(), function(w) return w.text == _("Clear cache") and w.callback end).dimen)
+                assert.are.equal(_("Cache cleared."), topWidget().text)
+                assert.are.equal(original, util.readFromFile(active))
+                assert.is_nil(lfs.attributes(other))
+                UIManager:close(topWidget())
+                page:closeMenu()
+                assert.are.equal(ui, topWidget())
+            end)
+            process_wait:revert()
+            os.remove(other)
+            assert(ok, err)
         end)
 
         it("keeps refresh and ghosting out of the toolbar's 更多 list, whose last entry is the original menu", function()
