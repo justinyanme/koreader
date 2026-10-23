@@ -24,6 +24,8 @@ so it neither refreshes the hidden book nor holds the toggle up.
 ]]
 
 local CenterContainer = require("ui/widget/container/centercontainer")
+local ConfirmLayer = require("ui/widget/confirmlayer")
+local DataStorage = require("datastorage")
 local Device = require("device")
 local EinkControls = require("ui/widget/einkcontrols")
 local Event = require("ui/event")
@@ -40,12 +42,19 @@ local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local Palette = require("ui/palette")
 local Size = require("ui/size")
+local SQ3 = require("lua-ljsqlite3/init")
 local TextWidget = require("ui/widget/textwidget")
 local TocDrawer = require("apps/reader/modules/readertocdrawer")
+local Toast = require("ui/widget/toast")
+local Trapper = require("ui/trapper")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Screen = Device.screen
+local ffiUtil = require("ffi/util")
+local lfs = require("libs/libkoreader-lfs")
+local logger = require("logger")
+local util = require("util")
 local _ = require("gettext")
 
 local function dp(n) return Screen:scaleBySize(n) end
@@ -184,6 +193,178 @@ local EinkSettings = FullscreenPage:extend{
     page = 1,
 }
 
+local function cacheFiles(protected, skip_temporary)
+    local size, failures = 0, {}
+    local groups = { thumbs = {}, typesetting = {}, temporary = {} }
+    local function collect(path, files, recursive)
+        local attr, err, code = lfs.symlinkattributes(path)
+        if not attr then
+            if code ~= 2 then error(err) end
+            return 0
+        end
+        if attr.mode == "file" then
+            if protected and ffiUtil.realpath(path) == protected then return 0 end
+            table.insert(files, path)
+            size = size + attr.size
+        elseif recursive and attr.mode == "directory" then
+            local failed = 0
+            for name in lfs.dir(path) do
+                if name ~= "." and name ~= ".." then
+                    local ok, count = pcall(collect, path .. "/" .. name, files, true)
+                    failed = failed + (ok and count or 1)
+                end
+            end
+            return failed
+        end
+        return 0
+    end
+    local db_path = DataStorage:getSettingsDir() .. "/bookinfo_cache.sqlite3"
+    local database = {}
+    for _, suffix in ipairs{ "", "-wal", "-shm", "-journal" } do
+        local ok = pcall(collect, db_path .. suffix, database)
+        if not ok then failures.database = (failures.database or 0) + 1 end
+    end
+    local cache_dir = DataStorage:getDataDir() .. "/cache"
+    if lfs.symlinkattributes(cache_dir, "mode") == "directory" then
+        for key, dir in pairs{ thumbs = "opds-thumbs", typesetting = "cr3cache", temporary = "tmpcr3cache" } do
+            if key ~= "temporary" or not skip_temporary then
+                local files = groups[key]
+                local ok, count = pcall(collect, cache_dir .. "/" .. dir, files, true)
+                failures[key] = ok and count or 1
+            end
+        end
+    end
+    return groups, size, failures, db_path
+end
+
+local function removeCacheFile(path)
+    local ok, err, code = os.remove(path)
+    if not ok and code ~= 2 then
+        logger.warn("Cache cleanup:", path, err)
+        return 1
+    end
+    return 0
+end
+
+local function cacheUsage(protected, busy)
+    local size, failures = select(2, cacheFiles(protected, busy))
+    for __, count in pairs(failures) do
+        if count > 0 then return _("Not available") end
+    end
+    return util.getFriendlySize(size)
+end
+
+local function clearCaches(protected, busy)
+    local groups, __, failures, db_path = cacheFiles(protected, busy)
+    -- Independent files are cleared even when the cover database cannot be opened.
+    for key, files in pairs(groups) do
+        local ok, err = pcall(function()
+            for _, path in ipairs(files) do
+                failures[key] = (failures[key] or 0) + removeCacheFile(path)
+            end
+        end)
+        if not ok then
+            logger.warn("Cache cleanup:", err)
+            failures[key] = (failures[key] or 0) + 1
+        end
+    end
+    if busy then
+        failures.database = 1
+    elseif lfs.symlinkattributes(db_path, "mode") == "file" then
+        local db
+        local ok, err = pcall(function()
+            db = SQ3.open(db_path)
+            db:set_busy_timeout(5000)
+            -- Re-extraction overwrites ignore_* preferences; keep customized entries intact.
+            db:exec([[UPDATE bookinfo SET in_progress=0, unsupported=NULL, cover_fetched=NULL,
+                has_meta=NULL, has_cover=NULL, cover_sizetag=NULL, pages=NULL, title=NULL, authors=NULL,
+                series=NULL, series_index=NULL, language=NULL, keywords=NULL, description=NULL,
+                cover_w=NULL, cover_h=NULL, cover_bb_type=NULL, cover_bb_stride=NULL, cover_bb_data=NULL
+                WHERE ignore_meta IS NULL AND ignore_cover IS NULL;
+                PRAGMA temp_store=MEMORY; VACUUM; PRAGMA wal_checkpoint(TRUNCATE);]])
+        end)
+        if db then
+            local closed, close_err = pcall(db.close, db)
+            if not closed then ok, err = false, close_err end
+        end
+        if not ok then
+            logger.warn("Cache cleanup:", err)
+            -- An unreadable database is rebuildable; a live SQLite lock must retain its preferences.
+            if not db or tostring(err):find("[notadb]", 1, true) or tostring(err):find("[corrupt]", 1, true) then
+                for _, suffix in ipairs{ "", "-wal", "-shm", "-journal" } do
+                    failures.database = (failures.database or 0) + removeCacheFile(db_path .. suffix)
+                end
+            else
+                failures.database = (failures.database or 0) + 1
+            end
+        end
+    end
+    return { size = cacheUsage(protected, busy), failures = failures }
+end
+
+function EinkSettings:cacheSize()
+    if not self.cache_size then
+        local bim = package.loaded.bookinfomanager
+        self.cache_size = cacheUsage(self:protectedCacheFile(), bim and bim:isExtractingInBackground())
+    end
+    return self.cache_size
+end
+
+function EinkSettings:protectedCacheFile()
+    local document = self.ui.document
+    if document and document.getCacheFilePath then
+        local path = document:getCacheFilePath()
+        return path and ffiUtil.realpath(path)
+    end
+end
+
+function EinkSettings:clearCaches()
+    local bim = package.loaded.bookinfomanager
+    local busy = bim and bim:isExtractingInBackground()
+    if bim and not busy then bim:closeDbConnection() end
+    local protected = self:protectedCacheFile()
+    local progress = Toast:new{ text = _("Clearing cache…"), timeout = false }
+    UIManager:show(progress)
+    UIManager:forceRePaint()
+    Trapper:wrap(function()
+        local completed, result = Trapper:dismissableRunInSubprocess(function()
+            return clearCaches(protected, busy)
+        end, false)
+        UIManager:close(progress)
+        if bim and not lfs.attributes(bim.db_location) then bim.db_created = false end
+        self.cache_size = result and result.size or nil
+        self:refreshChanged()
+        local errors = {}
+        if completed and result then
+            for _, entry in ipairs{
+                { "thumbs", _("Thumbnail cache: %1 failed") },
+                { "typesetting", _("Typesetting cache: %1 failed") },
+                { "temporary", _("Temporary cache: %1 failed") },
+                { "database", _("Cover database: %1 failed") },
+            } do
+                local count = result.failures[entry[1]] or 0
+                if count > 0 then table.insert(errors, ffiUtil.template(entry[2], count)) end
+            end
+        else
+            table.insert(errors, _("Cache cleanup interrupted. Please try again."))
+        end
+        if #errors > 0 then
+            UIManager:show(InfoMessage:new{ text = table.concat(errors, "\n") })
+        else
+            UIManager:show(Toast:new{ text = _("Cache cleared.") })
+        end
+    end)
+end
+
+function EinkSettings:confirmCacheCleanup()
+    local layer = ConfirmLayer:new{
+        text = _("Clear cached covers, book metadata, book source thumbnails and typesetting data?") .. "\n\n"
+            .. _("Books, notes, download records and settings are kept."),
+        actions = { { text = _("Clear cache"), callback = function() self:clearCaches() end } },
+    }
+    UIManager:show(layer, "ui", layer:getRefreshRegion())
+end
+
 --- Shows the settings over `ui`, on `target` (a group or row id); without touch, the original menu.
 function EinkSettings.show(ui, menu, target)
     if not Device:isTouchDevice() then
@@ -260,7 +441,8 @@ function EinkSettings:homeEntry(row, group_id)
         return entry
     end
     if row.open then
-        entry.callback, entry.value_func = row.open, row.value
+        entry.callback = row.open
+        entry.value_func = row.value and function() return row.value(self) end
         return entry
     end
     local items = self:rowItems(row)
