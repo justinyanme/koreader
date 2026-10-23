@@ -28,6 +28,10 @@ describe("ReaderHighlightBubble module", function()
         DocSettings:open(sample_pdf):purge()
     end)
 
+    -- Existing selection tests exercise the explicit legacy "Ask" preference.
+    before_each(function() G_reader_settings:saveSetting("default_highlight_action", "ask") end)
+    after_each(function() G_reader_settings:delSetting("default_highlight_action") end)
+
     local function openReader(file, purge)
         if purge then DocSettings:open(file):purge() end
         local ui = ReaderUI:new{
@@ -742,6 +746,139 @@ describe("ReaderHighlightBubble module", function()
             -- SAMPSON, a speaker's name alone on its line, at the start of the text column
             local SAMPSON = { x = 100, y = 160 }
 
+            it("should save a direct drag once on release and offer immediate deletion by default", function()
+                G_reader_settings:delSetting("default_highlight_action")
+                gesture("hold", SAMPSON)
+                for _, pos in ipairs{ { x = 300, y = 200 }, { x = 300, y = 230 }, { x = 300, y = 260 } } do
+                    gesture("hold_pan", pos)
+                    assertNoNotes(ui)
+                end
+                local refreshes = refreshesOf(function() gesture("hold_release", { x = 300, y = 260 }) end)
+                assert.are.equal(1, #ui.annotation.annotations)
+                assertActions(topWidget(), HIGHLIGHT_ACTIONS)
+                assertNoFullScreen(refreshes)
+                for _, refresh in ipairs(refreshes) do assert.are_not.equal("full", refresh.mode) end
+                gesture("hold_release", { x = 300, y = 260 })
+                assert.are.equal(1, #ui.annotation.annotations)
+                tapWidget(cell(topWidget(), "Delete highlight"))
+                assertNoNotes(ui)
+                closeReader(ui)
+                ui = openReader(sample_epub)
+                assertNoNotes(ui)
+            end)
+
+            it("should save a released word only after its handle moves, and keep one highlight after reopening", function()
+                G_reader_settings:delSetting("default_highlight_action")
+                longPress(SAMPSON)
+                assertNoNotes(ui)
+                assertActions(topWidget(), SELECTION_ACTIONS)
+                local from = center(assertHandle(ui.highlight:selectionRects()[1], "end", true))
+                local to = { x = from.x + 200, y = from.y + 90 }
+                gesture("pan", to, { start_pos = from })
+                assertNoNotes(ui)
+                gesture("pan_release", to)
+                UIManager:forceRePaint()
+                assert.are.equal(1, #ui.annotation.annotations)
+                assertActions(topWidget(), HIGHLIGHT_ACTIONS)
+                local text = ui.annotation.annotations[1].text
+                assert.is_true(#text > #"SAMPSON")
+                tap(5, 5)
+                closeReader(ui)
+                ui = openReader(sample_epub)
+                assert.are.equal(1, #ui.annotation.annotations)
+                assert.are.equal(text, ui.annotation.annotations[1].text)
+                tapWidget({ dimen = ui.highlight:highlightRects(1)[1] })
+                UIManager:forceRePaint()
+                assertActions(topWidget(), HIGHLIGHT_ACTIONS)
+                tapWidget(cell(topWidget(), "Delete highlight"))
+                assertNoNotes(ui)
+            end)
+
+            it("should leave a word temporary after a small move, a stationary handle hold, and cancellation", function()
+                G_reader_settings:delSetting("default_highlight_action")
+                longPress(SAMPSON, { x = SAMPSON.x + 1, y = SAMPSON.y })
+                assertNoNotes(ui)
+                assertActions(topWidget(), SELECTION_ACTIONS)
+                local from = center(assertHandle(ui.highlight:selectionRects()[1], "end", true))
+                gesture("touch", from)
+                gesture("hold", from)
+                gesture("hold_release", from)
+                UIManager:forceRePaint()
+                assertNoNotes(ui)
+                assertActions(topWidget(), SELECTION_ACTIONS)
+                tap(5, 5)
+                closeReader(ui)
+                ui = openReader(sample_epub)
+                assertNoNotes(ui)
+                assert.is_false(G_reader_settings:has("default_highlight_action"))
+            end)
+
+            it("should save a handle swipe past the other end just once", function()
+                G_reader_settings:delSetting("default_highlight_action")
+                longPress(SAMPSON)
+                local from = center(assertHandle(ui.highlight:selectionRects()[1], "end", true))
+                drag(from, { x = from.x + 200, y = from.y - 60 }, "swipe")
+                assert.are.equal(1, #ui.annotation.annotations)
+                assert.is_true(ui.annotation.annotations[1].text:find("SAMPSON", 1, true) > 1)
+                assertActions(topWidget(), HIGHLIGHT_ACTIONS)
+                tapWidget(cell(topWidget(), "Delete highlight"))
+                assertNoNotes(ui)
+            end)
+
+            it("should save a cross-page drag and return to its starting page with deletion available", function()
+                G_reader_settings:delSetting("default_highlight_action")
+                local page = ui.view.state.page
+                longPress({ x = 100, y = 740 })
+                local from = center(assertHandle(ui.highlight:selectionRects()[1], "end"))
+                local w, h = Screen:getWidth(), Screen:getHeight()
+                gesture("pan", { x = from.x + 100, y = from.y }, { start_pos = from })
+                gesture("pan", { x = w - 5, y = h - 5 }, { start_pos = from })
+                gesture("pan", { x = w - 150, y = h - 150 }, { start_pos = from })
+                assertNoNotes(ui)
+                gesture("pan_release", { x = w - 150, y = h - 150 })
+                UIManager:forceRePaint()
+                for _ = 1, 3 do UIManager:_checkTasks() end
+                UIManager:forceRePaint()
+                assert.are.equal("page", ui.view.view_mode)
+                assert.are.equal(page, ui.view.state.page)
+                assert.are.equal(1, #ui.annotation.annotations)
+                assertActions(topWidget(), HIGHLIGHT_ACTIONS)
+                tapWidget(cell(topWidget(), "Delete highlight"))
+                assertNoNotes(ui)
+            end)
+
+            it("should keep an explicit single-word highlight action", function()
+                G_reader_settings:saveSetting("default_highlight_action", "highlight")
+                G_reader_settings:saveSetting("highlight_action_on_single_word", true)
+                longPress(SAMPSON)
+                G_reader_settings:delSetting("highlight_action_on_single_word")
+                assert.are.equal(1, #ui.annotation.annotations)
+                assert.is_nil(ui.highlight.highlight_dialog)
+            end)
+
+            for _, action in ipairs{ "highlight", "select" } do
+                it("should preserve the explicit " .. action .. " action for both drag paths", function()
+                    G_reader_settings:saveSetting("default_highlight_action", action)
+                    for _, handle in ipairs{ false, true } do
+                        if handle then
+                            longPress(SAMPSON)
+                            local from = center(assertHandle(ui.highlight:selectionRects()[1], "end", true))
+                            drag(from, { x = from.x + 200, y = from.y + 90 })
+                        else
+                            longPress(SAMPSON, { x = 300, y = 260 })
+                        end
+                        assert.are.equal(1, #ui.annotation.annotations)
+                        assert.are.equal(action == "select", ui.highlight.select_mode)
+                        assert.is_nil(ui.highlight.highlight_dialog)
+                        assert.are.equal(action, G_reader_settings:readSetting("default_highlight_action"))
+                        closeReader(ui)
+                        ui = openReader(sample_epub, true)
+                        ui.rolling:onGotoPage(10)
+                        UIManager:forceRePaint()
+                    end
+                end)
+            end
+
             it("should underline a long-pressed word in ink and hang a drop handle under each end", function()
                 local refreshes = refreshesOf(function() gesture("hold", SAMPSON) end)
                 local r = ui.highlight:selectionRects()[1]
@@ -1189,6 +1326,68 @@ describe("ReaderHighlightBubble module", function()
         end)
 
         describe("with a PDF", function()
+            it("should keep a PDF word temporary after jitter or a stationary handle hold", function()
+                G_reader_settings:delSetting("default_highlight_action")
+                local ui = openReader(sample_pdf, true)
+                ui:handleEvent(Event:new("SetScrollMode", false))
+                ui.paging:onGotoPage(10)
+                UIManager:forceRePaint()
+                longPress({ x = 430, y = 210 }, { x = 431, y = 210 })
+                assertNoNotes(ui)
+                assertActions(topWidget(), SELECTION_ACTIONS)
+                local r = ui.highlight:selectionRects()[1]
+                local from = { x = r.x + r.w + math.floor(Screen:scaleBySize(25) / 2),
+                    y = r.y + r.h - 1 - Screen:scaleBySize(4) + math.floor(Screen:scaleBySize(25) / 2) }
+                gesture("touch", from)
+                gesture("hold", from)
+                gesture("hold_release", from)
+                UIManager:forceRePaint()
+                assertNoNotes(ui)
+                assertActions(topWidget(), SELECTION_ACTIONS)
+                tap(5, Screen:getHeight() - 5)
+                closeReader(ui)
+            end)
+
+            for _, handle in ipairs{ false, true } do
+                it("should save one PDF highlight on " .. (handle and "handle" or "direct") .. " drag release", function()
+                    G_reader_settings:delSetting("default_highlight_action")
+                    local ui = openReader(sample_pdf, true)
+                    ui:handleEvent(Event:new("SetScrollMode", false))
+                    ui.paging:onGotoPage(10)
+                    UIManager:forceRePaint()
+                    local from = { x = 430, y = 210 }
+                    local to = { x = 60, y = 236 }
+                    if handle then
+                        longPress(from)
+                        assertNoNotes(ui)
+                        local r = ui.highlight:selectionRects()[1]
+                        from = { x = r.x + r.w + math.floor(Screen:scaleBySize(25) / 2),
+                            y = r.y + r.h - 1 - Screen:scaleBySize(4) + math.floor(Screen:scaleBySize(25) / 2) }
+                        to = { x = from.x - 300, y = from.y + 26 }
+                        gesture("pan", to, { start_pos = from })
+                    else
+                        gesture("hold", from)
+                        gesture("hold_pan", to)
+                    end
+                    assertNoNotes(ui)
+                    gesture(handle and "pan_release" or "hold_release", to)
+                    UIManager:forceRePaint()
+                    assert.are.equal(1, #ui.annotation.annotations)
+                    assertActions(topWidget(), HIGHLIGHT_ACTIONS)
+                    local text = ui.annotation.annotations[1].text
+                    tap(5, Screen:getHeight() - 5)
+                    closeReader(ui)
+                    ui = openReader(sample_pdf)
+                    assert.are.equal(1, #ui.annotation.annotations)
+                    assert.are.equal(text, ui.annotation.annotations[1].text)
+                    tapWidget({ dimen = ui.highlight:highlightRects(1)[1] })
+                    UIManager:forceRePaint()
+                    tapWidget(cell(topWidget(), "Delete highlight"))
+                    assertNoNotes(ui)
+                    closeReader(ui)
+                end)
+            end
+
             it("should underline the selection at the bottom of its boxes, with handles that drag its end", function()
                 local ui = openReader(sample_pdf, true)
                 ui:handleEvent(Event:new("SetScrollMode", false))
