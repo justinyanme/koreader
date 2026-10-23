@@ -471,7 +471,7 @@ end
 
 -- Grid of books
 
---- The caption under a cover, and whether it is the "downloaded" mark.
+--- The caption under a cover's title, and whether the book is on this device.
 function BookSourceView:cellStatus(page, book)
     local dl = self.downloads[book.key]
     if dl then
@@ -483,10 +483,10 @@ function BookSourceView:cellStatus(page, book)
     local file = BookSource.localFile(page.source, book)
     if file then
         local progress = BookSource.progress(file)
-        if not progress or progress.status == "new" then
-            return _("Downloaded"), true
+        if progress and progress.status ~= "new" then
+            return ShelfView.statusText(progress), true
         end
-        return ShelfView.statusText(progress), true
+        return book.author or "", true
     end
     return book.author or ""
 end
@@ -534,11 +534,24 @@ function BookSourceView:buildCell(page, book, x, y)
         band.overlap_offset = { 0, h - BAND_H }
         cover = OverlapGroup:new{ dimen = Geom:new{ w = w, h = h }, cover, band }
     end
-    local status, mark = self:cellStatus(page, book)
-    local status_widget = text(status, "ui_micro", mark and Palette.ink or Palette.ink_2, w - (mark and dp(16) or 0), mark)
-    if mark then
-        status_widget = HorizontalGroup:new{ align = "center", icon("eink/check", dp(13)), HorizontalSpan:new{ width = dp(3) },
-            status_widget }
+    local status, downloaded = self:cellStatus(page, book)
+    local check_w = downloaded and dp(16) or 0
+    local title = TextBoxWidget:new{
+        text = book.title,
+        face = Font:getFace("ui_label"),
+        width = w - check_w,
+        height = dp(36),
+        height_adjust = true,
+        height_overflow_show_ellipsis = true,
+    }
+    if downloaded then
+        -- WeChat Read's mark for a book on this device: a gray check before the title
+        title = HorizontalGroup:new{
+            align = "top",
+            CenterContainer:new{ dimen = Geom:new{ w = dp(13), h = title.line_height_px }, icon("eink/check", dp(13), true) },
+            HorizontalSpan:new{ width = check_w - dp(13) },
+            title,
+        }
     end
     local cell_h = h + ShelfWidgets.TEXT_H
     local rect = Geom:new{ x = x, y = y, w = w, h = cell_h }
@@ -559,15 +572,8 @@ function BookSourceView:buildCell(page, book, x, y)
                 VerticalGroup:new{
                     align = "left",
                     VerticalSpan:new{ width = dp(8) },
-                    TextBoxWidget:new{
-                        text = book.title,
-                        face = Font:getFace("ui_label"),
-                        width = w,
-                        height = dp(36),
-                        height_adjust = true,
-                        height_overflow_show_ellipsis = true,
-                    },
-                    status_widget,
+                    title,
+                    text(status, "ui_micro", Palette.ink_2, w),
                 },
             },
         },
@@ -1065,8 +1071,8 @@ function BookSourceView:finishDownload(dl, finished)
         return
     end
     BookSource.recordDownload(self.opds, dl.source, dl.book, file)
-    if self.closed then return end
-    self:openFile(file)
+    -- not opened: that would close the page and cancel the other downloads; a tap on the marked tile opens it
+    self:refreshTile(dl.book, "ui")
 end
 
 -- Reaps a finished or killed child and closes its pipe.

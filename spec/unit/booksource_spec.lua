@@ -253,6 +253,28 @@ describe("书源 (OPDS as a remote shelf)", function()
     end
 
     -- the top widget, under any toast
+    -- whether the grid tile titled `title` carries the gray "downloaded" check
+    local function marked(view, title)
+        local function tile(node, found)
+            if type(node) ~= "table" then return end
+            if node.hold_callback then found = node end
+            if node.text == title and node.face then return found end
+            for _, child in ipairs(node) do
+                local t = tile(child, found)
+                if t then return t end
+            end
+        end
+        local function check(node)
+            if type(node) ~= "table" then return false end
+            if node.icon == "eink/check" then return true end
+            for _, child in ipairs(node) do
+                if check(child) then return true end
+            end
+            return false
+        end
+        return check(tile(view))
+    end
+
     local function topWidget()
         local Notification = require("ui/widget/notification")
         for i = #UIManager._window_stack, 1, -1 do
@@ -689,19 +711,21 @@ describe("书源 (OPDS as a remote shelf)", function()
     end)
 
     describe("downloading", function()
-        it("downloads the preferred format on tap, names it, records it and opens it", function()
+        it("downloads the preferred format on tap, names it, records it and marks the tile, opening nothing", function()
             local view = openSources(openFM())
             local refreshes, restore = spyRefreshes()
             tap(view, "Book 1")
+            tap(view, "Book 4") -- at the same time: the first to finish must not cut the other off
             assert.is_not_nil(view.downloads["urn:uuid:book-1"])
-            waitFor(function() return #opened == 1 end, "the book to open")
+            waitFor(function() return next(view.downloads) == nil end, "both downloads")
             restore()
             local file = home .. "/Author 1 - Book 1.epub"
-            assert.are.same({ file }, opened)
+            assert.are.same({}, opened)
+            assert.is_true(UIManager:isWidgetShown(view))
             local f = io.open(file, "rb")
             assert.are.equal("BOOK /opds/download/1/epub/", f:read("*a"):sub(1, 27))
             f:close()
-            assert.is_false(UIManager:isWidgetShown(view))
+            assert.are.equal("file", lfs.attributes(home .. "/Author 4 - Book 4.epub", "mode"))
             assert.are.equal(file, savedSources()[1].downloaded["urn:uuid:book-1"])
             assert.is_nil(G_reader_settings:readSetting("download_dir"))
             for _, r in ipairs(refreshes) do
@@ -711,11 +735,10 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.are.equal(ROOT .. "/download/1/epub/", downloads[#downloads].url)
             assert.are.equal("id.access", downloads[#downloads].headers["CF-Access-Client-Id"])
 
-            -- downloaded: the tile says so, and a tap opens the file without a request
-            view = openSources(FileManager.instance)
-            assert.is_true(has(view, _("Downloaded")))
+            -- downloaded: a gray check before the title, and a tap opens the file without a request
+            assert.is_true(marked(view, "Book 1"))
+            assert.is_false(marked(view, "Book 2"))
             os.remove(log_file)
-            opened = {}
             tap(view, "Book 1")
             assert.are.same({ file }, opened)
             assert.are.same({}, requestsTo(ROOT .. "/download/"))
@@ -725,8 +748,8 @@ describe("书源 (OPDS as a remote shelf)", function()
             writeSources{ nas{ raw_names = true } }
             local view = openSources(openFM())
             tap(view, "Book 2") -- PDF and MOBI: MOBI is preferred
-            waitFor(function() return #opened == 1 end, "the book to open")
-            assert.are.same({ home .. "/server_name.epub" }, opened)
+            waitFor(function() return view.downloads["urn:uuid:book-2"] == nil end, "the download")
+            assert.are.equal(home .. "/server_name.epub", savedSources()[1].downloaded["urn:uuid:book-2"])
             local downloads = requestsTo(ROOT .. "/download/2/")
             assert.are.equal(ROOT .. "/download/2/mobi/", downloads[#downloads].url)
         end)
@@ -776,7 +799,7 @@ describe("书源 (OPDS as a remote shelf)", function()
         it("sends the credentials to the source's origin only", function()
             local view = openSources(openFM())
             view:download(view:top(), view:top().result.books[3], view:top().result.books[3].formats[1])
-            waitFor(function() return #opened == 1 end, "book 3")
+            waitFor(function() return next(view.downloads) == nil end, "book 3")
             local cdn = requestsTo("https://cdn.example/")
             assert.is_true(#cdn > 0)
             for _, r in ipairs(cdn) do
@@ -786,9 +809,8 @@ describe("书源 (OPDS as a remote shelf)", function()
                 assert.is_nil(r.headers["CF-Access-Client-Secret"])
             end
 
-            view = openSources(FileManager.instance)
             view:download(view:top(), view:top().result.books[4], view:top().result.books[4].formats[1])
-            waitFor(function() return #opened == 2 end, "book 4")
+            waitFor(function() return next(view.downloads) == nil end, "book 4")
             local same = requestsTo(ORIGIN .. "/files/book4.epub")
             assert.is_true(#same > 0)
             for _, r in ipairs(same) do
@@ -819,7 +841,7 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.is_true(has(sheet, _("Read")))
             assert.is_true(has(sheet, _("Download again, replacing this copy")))
             tap(sheet, _("Download again, replacing this copy"))
-            waitFor(function() return #opened == 1 end, "the new copy")
+            waitFor(function() return next(view.downloads) == nil end, "the new copy")
             local f = io.open(file, "rb")
             assert.are.equal("BOOK", f:read(4))
             f:close()
@@ -939,14 +961,17 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.are.same({}, requestsTo(ROOT .. "/download/"))
         end)
 
-        it("closes a keyboard dialog it opened when a download finishes and the book opens", function()
+        it("leaves a keyboard dialog alone when a download finishes, and closes it with the page", function()
             local view = openSources(openFM())
             tap(view, "Book 1")
             tap(view, "eink/more")
             tap(topWidget(), _("Edit source"))
             view.edit_rows.username.callback()
-            assert.are.equal(InputDialog, getmetatable(topWidget()).__index)
-            waitFor(function() return #opened == 1 end, "the book to open")
+            local dialog = topWidget()
+            assert.are.equal(InputDialog, getmetatable(dialog).__index)
+            waitFor(function() return view.downloads["urn:uuid:book-1"] == nil end, "the download")
+            assert.are.equal(dialog, topWidget())
+            view:close(true)
             for _, entry in ipairs(UIManager._window_stack) do
                 local class = getmetatable(entry.widget).__index
                 assert.is_true(class ~= InputDialog and class ~= BottomSheet and class ~= BookSourceView)
