@@ -1,5 +1,5 @@
 describe("ReaderTypesetPanel module", function()
-    local Blitbuffer, DocumentRegistry, DocSettings, ReaderUI, ReaderTypesetPanel, Replacements, UIManager, Event, Geom, Screen
+    local Blitbuffer, DocumentRegistry, DocSettings, Panel, ReaderUI, ReaderTypesetPanel, Replacements, UIManager, Event, Geom, Screen
     local _
     local sample_epub = "spec/front/unit/data/juliet.epub"
     local sample_pdf = "spec/front/unit/data/sample.pdf"
@@ -10,6 +10,7 @@ describe("ReaderTypesetPanel module", function()
         Blitbuffer = require("ffi/blitbuffer")
         DocumentRegistry = require("document/documentregistry")
         DocSettings = require("docsettings")
+        Panel = require("ui/widget/panel")
         ReaderUI = require("apps/reader/readerui")
         ReaderTypesetPanel = require("apps/reader/modules/readertypesetpanel")
         Replacements = require("apps/replacements")
@@ -114,9 +115,36 @@ describe("ReaderTypesetPanel module", function()
         return find(widget, function(c) return c.text == text end) ~= nil
     end
 
-    local function segmented(panel, first_label)
-        return find(panel, function(w) return getmetatable(w) and w.labels and w.labels[1] == first_label end)
+    -- The tracks of the panel, top to bottom: font size, weight, line spacing, margins.
+    local function tracks(panel)
+        local found, seen = {}, {}
+        local function walk(widget)
+            if type(widget) ~= "table" or seen[widget] then return end
+            seen[widget] = true
+            if widget.on_step and widget.stopX then
+                table.insert(found, widget)
+                return
+            end
+            for _, child in ipairs(widget) do walk(child) end
+            if rawget(widget, "content") then walk(widget.content) end
+        end
+        walk(panel)
+        return found
     end
+
+    local function trackOf(ui, i)
+        return tracks(ui.config.panel)[i]
+    end
+
+    local function tapTrack(track, x)
+        tap(track.dimen.x + x, track.dimen.y + math.floor(track.dimen.h / 2))
+        UIManager:forceRePaint()
+    end
+
+    -- The − and + buttons at the ends of a track, and its stops.
+    local function tapMinus(track) tapTrack(track, Screen:scaleBySize(10)) end
+    local function tapPlus(track) tapTrack(track, track.dimen.w - Screen:scaleBySize(10)) end
+    local function tapStop(track, i) tapTrack(track, track:stopX(i)) end
 
     local function fontCard(panel, name)
         return find(panel, function(w) return w.name == name and w.callback end)
@@ -230,17 +258,17 @@ describe("ReaderTypesetPanel module", function()
             UIManager:forceRePaint()
         end)
 
-        it("should apply font size, line spacing and margins at once and keep the panel open", function()
+        it("should apply font size, weight, line spacing and margins at once and keep the panel open", function()
             -- a text page: landing on a page with images flashes on its own ("refresh_on_pages_with_images")
             ui:handleEvent(Event:new("GotoPage", 20))
             UIManager:forceRePaint()
             local panel = openPanel(ui)
             local bars = ui.menu.bars
             local size = ui.document.configurable.font_size
-            local plus = find(panel, function(w) return w.icon == "eink/plus" and w.callback end)
+            local xpointer = ui.document:getXPointer()
             UIManager.refresh_count = 0
             local refreshes = refreshesOf(function()
-                tapWidget(plus)
+                tapPlus(trackOf(ui, 1))
                 runTasks() -- the re-render follows BatchedUpdateDone
             end)
             assert.is_true(ui.document.configurable.font_size > size)
@@ -256,20 +284,26 @@ describe("ReaderTypesetPanel module", function()
             assert.is_nil(modes.full)
             assert.is_true(modes.partial) -- the re-laid out page, as for a page turn
             assert.is_true(modes.ui) -- the panel
+            -- the page re-laid out around the same text
+            assert.are.equal(ui.document:getCurrentPage(), ui.document:getPageFromXPointer(xpointer))
 
-            tapWidget(segmented(panel, _.pgettext("Line spacing", "Compact")), 5/6)
-            UIManager:forceRePaint()
+            tapPlus(trackOf(ui, 2))
+            assert.are.equal(0.5, ui.document.configurable.font_base_weight)
+            tapStop(trackOf(ui, 3), 7)
             assert.are.equal(145, ui.document.configurable.line_spacing)
-            tapWidget(segmented(panel, _.pgettext("Margins", "Narrow")), 1/6)
-            UIManager:forceRePaint()
+            tapStop(trackOf(ui, 4), 3)
+            runTasks()
             assert.are.same({ 18, 18 }, ui.document.configurable.h_page_margins)
             assert.are.equal(Screen:scaleBySize(18), ui.document:getPageMargins().left)
+            assert.are.equal(panel, ui.config.panel)
             assert.are.equal(bars, topWidget())
 
             ui:saveSettings()
             assert.are.equal(ui.document.configurable.font_size, ui.doc_settings:readSetting("copt_font_size"))
+            assert.are.equal(0.5, ui.doc_settings:readSetting("copt_font_base_weight"))
             assert.are.equal(145, ui.doc_settings:readSetting("copt_line_spacing"))
             assert.are.same({ 18, 18 }, ui.doc_settings:readSetting("copt_h_page_margins"))
+            assert.are.equal(18, ui.doc_settings:readSetting("typeset_margin"))
             ui.menu:hideToolbar()
         end)
 
@@ -278,12 +312,15 @@ describe("ReaderTypesetPanel module", function()
             closeReader(ui)
             ui = openReader(sample_epub, nil, true)
             assert.are.equal(size, ui.document.configurable.font_size)
+            assert.are.equal(0.5, ui.document.configurable.font_base_weight)
             assert.are.equal(145, ui.document.configurable.line_spacing)
             assert.are.same({ 18, 18 }, ui.document.configurable.h_page_margins)
             assert.are.equal(Screen:scaleBySize(18), ui.document:getPageMargins().left)
-            local panel = openPanel(ui)
-            assert.are.equal(3, segmented(panel, _.pgettext("Line spacing", "Compact")).value)
-            assert.are.equal(1, segmented(panel, _.pgettext("Margins", "Narrow")).value)
+            openPanel(ui)
+            assert.are.equal(string.format("%g", size), trackOf(ui, 1).label)
+            assert.are.equal("4", trackOf(ui, 2).label)
+            assert.are.equal(7, trackOf(ui, 3).position)
+            assert.are.equal(3, trackOf(ui, 4).position)
             ui.menu:hideToolbar()
         end)
 
@@ -308,6 +345,7 @@ describe("ReaderTypesetPanel module", function()
             assert.are.equal("more", ui.config.page)
             assert.are.equal(more, ui.menu.panel)
             assert.is_true(hasText(more, _("Render Mode")))
+            assert.is_false(hasText(more, _("Font Weight"))) -- on the panel's own track now
             -- the top bar stays hidden, the bottom bar holds only a back arrow
             assert.are.equal(bars, topWidget())
             assert.is_false(bars.show_top)
@@ -412,13 +450,13 @@ describe("ReaderTypesetPanel module", function()
 
         it("should step the font size from an off-scale size to the next size below or above", function()
             ui.config:apply("font_size", 23, "SetFontSize")
-            local panel = openPanel(ui)
-            tapWidget(find(panel, function(w) return w.icon == "eink/minus" and w.callback end))
+            openPanel(ui)
+            tapMinus(trackOf(ui, 1))
             assert.are.equal(22, ui.document.configurable.font_size)
             ui.config:apply("font_size", 23, "SetFontSize")
             ui.config:refreshPanel()
             UIManager:forceRePaint()
-            tapWidget(find(panel, function(w) return w.icon == "eink/plus" and w.callback end))
+            tapPlus(trackOf(ui, 1))
             assert.are.equal(24, ui.document.configurable.font_size)
             runTasks()
             ui.menu:hideToolbar()
@@ -477,32 +515,32 @@ describe("ReaderTypesetPanel module", function()
             assert.are.equal(ui, topWidget())
         end)
 
-        it("should keep the chosen margin step across rotation, widened only to cap the line length", function()
+        it("should keep the chosen margin across rotation, widened only to cap the line length", function()
             ui.config:setFontSize(15)
             runTasks()
-            local panel = openPanel(ui)
-            tapWidget(segmented(panel, _.pgettext("Margins", "Narrow")), 1/6)
+            openPanel(ui)
+            tapStop(trackOf(ui, 4), 3)
             runTasks()
             assert.are.same({ 18, 18 }, ui.document.configurable.h_page_margins)
             ui.menu:hideToolbar()
 
             ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_CLOCKWISE))
             runTasks()
-            local narrow = ui.config:marginsFor(1)
+            local narrow = ui.config:marginsFor(18)
             assert.is_true(narrow > 18) -- a landscape line would hold more than 38 characters
             assert.are.same({ narrow, narrow }, ui.document.configurable.h_page_margins)
-            panel = openPanel(ui)
-            assert.are.equal(1, segmented(panel, _.pgettext("Margins", "Narrow")).value)
-            tapWidget(segmented(panel, _.pgettext("Margins", "Narrow")), 5/6)
+            openPanel(ui)
+            assert.are.equal(3, trackOf(ui, 4).position)
+            tapStop(trackOf(ui, 4), 7)
             runTasks()
-            assert.are.equal(3, ui.doc_settings:readSetting("typeset_margin_step"))
-            local wide = ui.config:marginsFor(3)
+            assert.are.equal(44, ui.doc_settings:readSetting("typeset_margin"))
+            local wide = ui.config:marginsFor(44)
             assert.are.same({ wide, wide }, ui.document.configurable.h_page_margins)
             UIManager:forceRePaint()
-            tapWidget(segmented(panel, _.pgettext("Margins", "Narrow")), 3/6)
+            tapStop(trackOf(ui, 4), 5)
             runTasks()
-            -- 窄 and 标准 may widen to the same margins: the step stays what was chosen
-            assert.are.equal(2, segmented(ui.config.panel, _.pgettext("Margins", "Narrow")).value)
+            -- 28 and 44dp may widen to the same margins: the knob stays at the margin chosen
+            assert.are.equal(5, trackOf(ui, 4).position)
             ui.menu:hideToolbar()
 
             ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_UPRIGHT))
@@ -512,7 +550,161 @@ describe("ReaderTypesetPanel module", function()
             -- margins set elsewhere are the user's own
             ui:handleEvent(Event:new("SetPageHorizMargins", { 15, 15 }))
             runTasks()
+            assert.is_nil(ui.doc_settings:readSetting("typeset_margin"))
+        end)
+    end)
+
+    describe("tracks", function()
+        local C_ = function(...) return _.pgettext(...) end
+        local DESIGN_VALUES = { copt_font_size = 19, copt_font_base_weight = 0, copt_line_spacing = 125, copt_h_page_margins = { 28, 28 } }
+        local ui
+        before_each(function()
+            ui = openReader(sample_epub, DESIGN_VALUES)
+            ui:handleEvent(Event:new("GotoPage", 20))
+            UIManager:forceRePaint()
+        end)
+        after_each(function()
+            if ui.menu.bars then ui.menu:hideToolbar(true) end
+            runTasks()
+            closeReader(ui)
+        end)
+
+        it("should show font size, weight, line spacing and margins in order, the knobs reading the real values", function()
+            local panel = openPanel(ui)
+            local t = tracks(panel)
+            assert.are.equal(4, #t)
+            assert.is_true(hasText(panel, _("Font settings")))
+            -- the title row, as tall as the pill at its right
+            local title = find(panel, function(w) return w.callback and hasText(w, _("More layout options")) end)
+            for i, case in ipairs{
+                { C_("Typeset track", "Small"), C_("Typeset track", "Large"), "19", 5 },
+                { C_("Typeset track", "Light"), C_("Typeset track", "Bold"), "3", 3 }, -- the engine's 0 ("Regular")
+                { C_("Typeset track", "Tight"), C_("Typeset track", "Loose"), C_("Typeset panel", "Line spacing"), 5 },
+                { C_("Typeset track", "Small"), C_("Typeset track", "Large"), _("Margins"), 5 },
+            } do
+                assert.are.same(case, { t[i].low, t[i].high, t[i].label, t[i].position })
+                assert.are.equal(Panel.getContentWidth(), t[i].dimen.w)
+                -- rows 44dp apart under the title row
+                local above = i == 1 and title.dimen or t[i - 1].dimen
+                assert.are.equal(above.y + above.h, t[i].dimen.y)
+                assert.are.equal(Screen:scaleBySize(44), t[i].dimen.h)
+            end
+            -- opening the panel changes nothing
+            assert.are.equal(19, ui.document.configurable.font_size)
+            assert.are.same({ 28, 28 }, ui.document.configurable.h_page_margins)
+            assert.is_nil(ui.doc_settings:readSetting("typeset_margin"))
+        end)
+
+        it("should step each track with − and + to the engine's next value, around the same text", function()
+            openPanel(ui)
+            for _, case in ipairs{
+                { 1, "font_size", 20, 18, "20" },
+                { 2, "font_base_weight", 0.5, -0.5, "4" },
+                { 3, "line_spacing", 135, 115 },
+                { 4, "h_page_margins", { 36, 36 }, { 23, 23 } },
+            } do
+                local i, name, up, down = case[1], case[2], case[3], case[4]
+                local xpointer = ui.document:getXPointer()
+                tapPlus(trackOf(ui, i))
+                runTasks()
+                assert.are.same(up, ui.document.configurable[name])
+                if case[5] then assert.are.equal(case[5], trackOf(ui, i).label) end
+                assert.are.equal(ui.document:getCurrentPage(), ui.document:getPageFromXPointer(xpointer), name)
+                tapMinus(trackOf(ui, i))
+                tapMinus(trackOf(ui, i))
+                runTasks()
+                assert.are.same(down, ui.document.configurable[name])
+                assert.are.equal(ui.document:getCurrentPage(), ui.document:getPageFromXPointer(xpointer), name)
+            end
+            runTasks()
+            assert.are.equal(23, ui.doc_settings:readSetting("typeset_margin"))
+            assert.are.equal(Screen:scaleBySize(23), ui.document:getPageMargins().left)
+            assert.is_truthy(ui.config.panel)
+        end)
+
+        it("should stop at the ends of a track, with the button there disabled", function()
+            openPanel(ui)
+            tapStop(trackOf(ui, 4), 9)
+            assert.are.same({ 70, 70 }, ui.document.configurable.h_page_margins)
+            assert.is_false(trackOf(ui, 4).can_step[1])
+            tapPlus(trackOf(ui, 4))
+            assert.are.same({ 70, 70 }, ui.document.configurable.h_page_margins)
+            tapStop(trackOf(ui, 3), 1)
+            assert.are.equal(85, ui.document.configurable.line_spacing)
+            assert.is_false(trackOf(ui, 3).can_step[-1])
+            tapStop(trackOf(ui, 1), 10)
+            assert.are.equal(28, ui.document.configurable.font_size)
+            assert.are.equal(10, trackOf(ui, 1).position)
+            tapPlus(trackOf(ui, 1))
+            assert.are.equal(28, ui.document.configurable.font_size)
+            tapStop(trackOf(ui, 1), 1)
+            assert.are.equal(15, ui.document.configurable.font_size)
+            tapMinus(trackOf(ui, 1))
+            assert.are.equal(15, ui.document.configurable.font_size)
+            assert.is_true(trackOf(ui, 1).can_step[1])
+        end)
+
+        it("should read back values past a track's ends there, with their own number, and go back onto it", function()
+            ui:handleEvent(Event:new("ConfigChange", "font_size", 32))
+            ui:handleEvent(Event:new("SetFontSize", 32))
+            ui:handleEvent(Event:new("ConfigChange", "line_spacing", 70))
+            ui:handleEvent(Event:new("SetLineSpace", 70))
+            runTasks()
+            openPanel(ui)
+            assert.are.equal("32", trackOf(ui, 1).label)
+            assert.is_true(trackOf(ui, 1).position > 10)
+            assert.is_false(trackOf(ui, 1).can_step[1])
+            assert.is_true(trackOf(ui, 3).position < 1)
+            tapPlus(trackOf(ui, 1))
+            tapMinus(trackOf(ui, 3))
+            assert.are.equal(32, ui.document.configurable.font_size)
+            assert.are.equal(70, ui.document.configurable.line_spacing)
+            -- the end stops, where the knobs show, take a tap
+            tapStop(trackOf(ui, 1), 10)
+            assert.are.equal(28, ui.document.configurable.font_size)
+            tapStop(trackOf(ui, 3), 1)
+            assert.are.equal(85, ui.document.configurable.line_spacing)
+        end)
+
+        it("should show fine values set elsewhere between two stops, without snapping them, and step from them", function()
+            ui:handleEvent(Event:new("ConfigChange", "font_size", 19.5))
+            ui:handleEvent(Event:new("SetFontSize", 19.5))
+            ui:handleEvent(Event:new("ConfigChange", "font_base_weight", 0.25))
+            ui:handleEvent(Event:new("SetFontBaseWeight", 0.25))
+            ui:handleEvent(Event:new("ConfigChange", "line_spacing", 100))
+            ui:handleEvent(Event:new("SetLineSpace", 100))
+            ui:handleEvent(Event:new("ConfigChange", "h_page_margins", { 20, 20 }))
+            ui:handleEvent(Event:new("SetPageHorizMargins", { 20, 20 }))
+            runTasks()
+            openPanel(ui)
+            local t = tracks(ui.config.panel)
+            assert.are.same({ "19.5", 5.5 }, { t[1].label, t[1].position })
+            assert.are.same({ _("Font Weight"), 3.5 }, { t[2].label, t[2].position })
+            assert.are.equal(2.5, t[3].position)
+            assert.is_near(3.4, t[4].position, 1e-9)
+            assert.are.equal(19.5, ui.document.configurable.font_size)
+            assert.are.equal(0.25, ui.document.configurable.font_base_weight)
+            assert.are.equal(100, ui.document.configurable.line_spacing)
+            assert.are.same({ 20, 20 }, ui.document.configurable.h_page_margins)
+
+            tapPlus(trackOf(ui, 1))
+            assert.are.equal(20, ui.document.configurable.font_size)
+            tapPlus(trackOf(ui, 2))
+            assert.are.equal(0.5, ui.document.configurable.font_base_weight)
+            tapMinus(trackOf(ui, 3))
+            assert.are.equal(95, ui.document.configurable.line_spacing)
+            tapMinus(trackOf(ui, 4))
+            assert.are.same({ 18, 18 }, ui.document.configurable.h_page_margins)
+        end)
+
+        it("should read a margin step saved by the first round as its margin", function()
+            closeReader(ui)
+            ui = openReader(sample_epub, { typeset_margin_step = 3 })
+            assert.are.same({ 44, 44 }, ui.document.configurable.h_page_margins)
+            assert.are.equal(44, ui.doc_settings:readSetting("typeset_margin"))
             assert.is_nil(ui.doc_settings:readSetting("typeset_margin_step"))
+            openPanel(ui)
+            assert.are.equal(7, trackOf(ui, 4).position)
         end)
     end)
 
