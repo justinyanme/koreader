@@ -238,6 +238,7 @@ function ReaderView:paintTo(bb, x, y)
 
     -- draw saved highlight (will return true if any of them are in color)
     local colorful
+    self.highlight.line_tops = nil -- fork: see ReaderView:drawLineHighlights()
     if self.highlight_visible then
         colorful = self:drawSavedHighlight(bb, x, y)
     end
@@ -695,7 +696,8 @@ end
 
 --- Fork: draws the line highlights (straight lines and waves) of reflowable text deferred by
 -- drawXPointerSavedHighlight(), each line of text under its glyphs (see ReaderView:underlineY()). They
--- come last, so that no line is measured with a line highlight already drawn on it.
+-- come last, so that no line is measured with a line highlight already drawn on it. Their tops stay in
+-- highlight.line_tops, by line ("y:h" of its box), for what is drawn on those lines afterwards.
 function ReaderView:drawLineHighlights(bb, x, y)
     local lines = self.highlight.lines
     self.highlight.lines = nil
@@ -709,6 +711,7 @@ function ReaderView:drawLineHighlights(bb, x, y)
     for key, rects in pairs(by_line) do
         line_ys[key] = self:underlineY(bb, rects)
     end
+    self.highlight.line_tops = line_ys
     for _, l in ipairs(lines) do
         self:drawHighlightRect(bb, x, y, l.rect, l.drawer, l.color, l.draw_note_mark, line_ys[l.key])
     end

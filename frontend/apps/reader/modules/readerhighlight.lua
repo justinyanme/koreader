@@ -1971,6 +1971,12 @@ function ReaderHighlight:onHoldPan(_, ges)
     if self.ui.keyselection:isActive() then
         self.ui.keyselection:clearOverlay()
     end
+    self:refreshSelection()
+end
+
+--- Repaints the page once the selection was extended (fork: a hook point; ReaderHighlightBubble repaints
+-- only the lines of the selection).
+function ReaderHighlight:refreshSelection()
     UIManager:setDirty(self.dialog, "ui")
 end
 

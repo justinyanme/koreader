@@ -631,6 +631,386 @@ describe("ReaderHighlightBubble module", function()
         end)
     end)
 
+    -- The selection is an ink underline with a drop handle under each end; dragging a handle moves that end.
+    -- Driven by gestures as the gesture detector sends them, through the window stack.
+    describe("selection underline and handles", function()
+        local time
+        setup(function() time = require("ui/time") end)
+
+        local clock = 0 -- gesture times, a second apart: past any rate limit
+        local function point(p) return Geom:new{ x = p.x, y = p.y, w = 0, h = 0 } end
+        -- fields: start_pos (pans) or end_pos (swipes), as points too
+        local function gesture(kind, pos, fields)
+            clock = clock + 1
+            local ev = { ges = kind, pos = point(pos), time = time.s(clock) }
+            for k, v in pairs(fields or {}) do ev[k] = v end
+            ev.start_pos = ev.start_pos and point(ev.start_pos)
+            ev.end_pos = ev.end_pos and point(ev.end_pos)
+            UIManager:sendEvent(Event:new("Gesture", ev))
+        end
+
+        -- A long-press at `from`, dragged to `to` if given, then released.
+        local function longPress(from, to)
+            gesture("hold", from)
+            if to then gesture("hold_pan", to) end
+            UIManager:forceRePaint()
+            gesture("hold_release", to or from)
+            UIManager:forceRePaint()
+        end
+
+        -- A finger put down at `from` and moved to `to` in three pans, then lifted: slowly (pan_release), or
+        -- quickly (swipe, reported from where it went down). Returns the refreshes of the pans.
+        local function drag(from, to, lift)
+            local refreshes = refreshesOf(function()
+                for i = 1, 3 do
+                    local p = { x = from.x + math.floor((to.x - from.x) * i / 3), y = from.y + math.floor((to.y - from.y) * i / 3) }
+                    gesture("pan", p, { start_pos = from, relative = { x = p.x - from.x, y = p.y - from.y } })
+                end
+            end)
+            if lift == "swipe" then
+                gesture("swipe", from, { end_pos = to })
+            else
+                gesture("pan_release", to)
+            end
+            UIManager:forceRePaint()
+            return refreshes
+        end
+
+        -- The row of a segment's underline: the lowest ink in its columns, under its glyphs.
+        local function underlineRow(r)
+            for row = r.y + r.h - 1, r.y, -1 do
+                for x = r.x, r.x + r.w - 1 do
+                    if gray(x, row) < 0x80 then return row end
+                end
+            end
+        end
+
+        -- A 1dp ink line under the segment's glyphs, not touching them (where a line highlight would be), and no
+        -- fill: paper in its box, where crengine's gray selection would be.
+        local function assertUnderline(r)
+            local u = underlineRow(r)
+            for x = r.x, r.x + r.w - 1 do
+                assert.is_true(gray(x, u) < 0x80, "underline at " .. x)
+                assert.is_true(gray(x, u + Screen:scaleBySize(1)) >= 0x80, "1dp at " .. x)
+                assert.is_true(gray(x, u - 1) >= 0x80, "under the glyphs at " .. x)
+                assert.is_true(gray(x, r.y + 1) >= 0xF0, "fill at " .. x)
+            end
+            -- paper between the glyphs and the line, but for the tips of their strokes
+            local paper = 0
+            for x = r.x, r.x + r.w - 1 do
+                if gray(x, u - 1) >= 0xF0 then paper = paper + 1 end
+            end
+            assert.is_true(paper > r.w * 0.9)
+        end
+
+        -- The 25dp ink drop hanging under the start or end of a segment, its flat top 4dp above the underline,
+        -- its corner toward the text squared and the other ones round (checked when clear of other text).
+        -- Returns its square.
+        local function assertHandle(r, side, clear)
+            local d, u = Screen:scaleBySize(25), underlineRow(r)
+            local h = Geom:new{ x = side == "start" and r.x - d or r.x + r.w, y = u - Screen:scaleBySize(4), w = d, h = d }
+            local inner, outer = h.x, h.x + d - 1
+            if side == "start" then inner, outer = outer, inner end
+            assert.is_true(gray(inner, h.y + 1) < 0x80, side .. ": squared corner")
+            assert.is_true(gray(h.x + math.floor(d / 2), h.y + math.floor(d / 2)) < 0x80, side .. ": center")
+            if clear then
+                assert.is_true(gray(outer, h.y + 1) >= 0xF0, side .. ": round top corner")
+                assert.is_true(gray(inner, h.y + d - 1) >= 0xF0, side .. ": round bottom corner")
+                assert.is_true(gray(h.x + math.floor(d / 2), h.y + d - 1) < 0x80, side .. ": bottom")
+                assert.is_true(gray(h.x + math.floor(d / 2), h.y + d + 1) >= 0xF0, side .. ": below")
+            end
+            return h
+        end
+
+        local function center(r)
+            return { x = r.x + math.floor(r.w / 2), y = r.y + math.floor(r.h / 2) }
+        end
+
+        local function assertNoNotes(ui)
+            assert.are.equal(0, #ui.annotation.annotations)
+        end
+
+        describe("with an EPUB", function()
+            local ui
+            before_each(function()
+                ui = openReader(sample_epub, true)
+                ui.rolling:onGotoPage(10)
+                UIManager:forceRePaint()
+            end)
+            after_each(function() closeReader(ui) end)
+
+            -- SAMPSON, a speaker's name alone on its line, at the start of the text column
+            local SAMPSON = { x = 100, y = 160 }
+
+            it("should underline a long-pressed word in ink and hang a drop handle under each end", function()
+                local refreshes = refreshesOf(function() gesture("hold", SAMPSON) end)
+                local r = ui.highlight:selectionRects()[1]
+                assert.are.equal("SAMPSON", ui.highlight.selected_text.text)
+                assertUnderline(r)
+                local handles = { assertHandle(r, "start", true), assertHandle(r, "end", true) }
+                -- shown as soon as the word is selected, along with it
+                assertNoFullScreen(refreshes)
+                local shown_all = false
+                for _, refresh in ipairs(refreshes) do
+                    shown_all = shown_all or (refresh.region:contains(handles[1]) and refresh.region:contains(handles[2]))
+                end
+                assert.is_true(shown_all)
+
+                -- still there with the popover, which points at the word
+                gesture("hold_release", SAMPSON)
+                UIManager:forceRePaint()
+                local bubble = ui.highlight.highlight_dialog
+                assert.are.equal(bubble, topWidget())
+                assertPopover(bubble, ui.highlight:selectionRects())
+                assertUnderline(r)
+                assertHandle(r, "start", true)
+                assertHandle(r, "end", true)
+                assertNoNotes(ui)
+
+                -- and gone with it
+                refreshes = refreshesOf(function() tap(Screen:getWidth() - 5, Screen:getHeight() - 5) end)
+                assert.is_nil(ui.highlight.selected_text)
+                assertNoFullScreen(refreshes)
+                for _, h in ipairs(handles) do
+                    assert.is_true(gray(h.x + math.floor(h.w / 2), h.y + math.floor(h.h / 2)) >= 0xF0)
+                    local repainted = false
+                    for _, refresh in ipairs(refreshes) do
+                        repainted = repainted or refresh.region:contains(h)
+                    end
+                    assert.is_true(repainted)
+                end
+            end)
+
+            it("should underline every line of a selection dragged over several", function()
+                longPress(SAMPSON, { x = 300, y = 200 })
+                local rects = ui.highlight:selectionRects()
+                assert.is_true(rects[#rects].y > rects[1].y)
+                for _, r in ipairs(rects) do assertUnderline(r) end
+                assertHandle(rects[1], "start", true)
+                assertHandle(rects[#rects], "end")
+                ui.highlight:onClose()
+            end)
+
+            it("should move the end with its handle across lines, then show the popover again, saving nothing", function()
+                longPress(SAMPSON)
+                local before = ui.highlight.selected_text
+                local r = ui.highlight:selectionRects()[1]
+                local handle = assertHandle(r, "end", true)
+                local bubble = ui.highlight.highlight_dialog
+                local card = bubble.bubble_rect
+                local from = center(handle)
+                local to = { x = from.x + 130, y = from.y + 40 }
+
+                -- the popover hides while the handle is dragged; the page shows again where it was
+                gesture("pan", { x = from.x + 40, y = from.y + 10 }, { start_pos = from })
+                UIManager:forceRePaint()
+                assert.is_true(bubble.hidden)
+                assert.is_true(gray(card.x, card.y + math.floor(card.h / 2)) >= 0xF0)
+
+                local refreshes = drag(from, to)
+                local selected = ui.highlight.selected_text
+                assert.are.equal(before.pos0, selected.pos0) -- the start stays
+                assert.are_not.equal(before.pos1, selected.pos1)
+                assert.are.equal(1, selected.text:find("SAMPSON", 1, true))
+                local rects = ui.highlight:selectionRects()
+                assert.is_true(rects[#rects].y > r.y) -- another line
+                for _, rect in ipairs(rects) do assertUnderline(rect) end
+                assertHandle(rects[1], "start", true)
+                local new_handle = assertHandle(rects[#rects], "end")
+                assert.is_true(gray(handle.x + handle.w - 1, handle.y + 1) >= 0xF0) -- the old one is gone
+                -- only lines and handles repainted, black and white: fast
+                assert.is_true(#refreshes > 0)
+                assertNoFullScreen(refreshes)
+                for _, refresh in ipairs(refreshes) do
+                    assert.are.equal("fast", refresh.mode)
+                end
+                assert.is_true(refreshes[#refreshes].region:contains(new_handle))
+
+                -- still a selection: its popover is back, at its new place
+                bubble = ui.highlight.highlight_dialog
+                assert.are.equal(bubble, topWidget())
+                assert.is_falsy(bubble.hidden)
+                assertPopover(bubble, rects)
+                assertActions(bubble, SELECTION_ACTIONS)
+                assertNoNotes(ui)
+
+                -- a tap on a handle keeps it; one elsewhere clears it, and nothing was saved
+                tap(new_handle.x + math.floor(new_handle.w / 2), new_handle.y + math.floor(new_handle.h / 2))
+                assert.are.equal(selected, ui.highlight.selected_text)
+                assert.are.equal(bubble, topWidget())
+                tap(Screen:getWidth() - 5, Screen:getHeight() - 5)
+                assert.is_nil(ui.highlight.selected_text)
+                assert.are.equal(ui, topWidget())
+                closeReader(ui)
+                assert.are.same({}, DocSettings:open(sample_epub):readSetting("annotations") or {})
+                ui = openReader(sample_epub)
+            end)
+
+            it("should move the start with its handle after a hold, the end staying", function()
+                longPress(SAMPSON)
+                local before = ui.highlight.selected_text
+                local r = ui.highlight:selectionRects()[1]
+                local from = center(assertHandle(r, "start", true))
+                local to = { x = from.x + 250, y = from.y - 60 }
+                -- a slow drag: the hold comes once the finger moved off the handle, short of a pan
+                gesture("touch", from)
+                gesture("hold", { x = from.x + 28, y = from.y + 28 })
+                gesture("hold_pan", to)
+                gesture("hold_release", to)
+                UIManager:forceRePaint()
+                local selected = ui.highlight.selected_text
+                assert.are.equal(before.pos1, selected.pos1)
+                assert.are_not.equal(before.pos0, selected.pos0)
+                local rects = ui.highlight:selectionRects()
+                assert.is_true(rects[1].y < r.y)
+                assertHandle(rects[1], "start")
+                assertHandle(rects[#rects], "end", true)
+                assert.are.equal(ui.highlight.highlight_dialog, topWidget())
+                assertNoNotes(ui)
+                ui.highlight:onClose()
+            end)
+
+            it("should swap the ends when a handle is dragged past the other one, also with a quick swipe", function()
+                longPress(SAMPSON)
+                local before = ui.highlight.selected_text
+                local r = ui.highlight:selectionRects()[1]
+                local from = center(assertHandle(r, "end", true))
+                drag(from, { x = from.x + 200, y = from.y - 60 }, "swipe")
+                local selected = ui.highlight.selected_text
+                -- from a word on the line above to the end of the name, which the start was in
+                assert.are.equal(before.pos1, selected.pos1)
+                assert.are_not.equal(before.pos0, selected.pos0)
+                local rects = ui.highlight:selectionRects()
+                assert.is_true(rects[1].y < r.y)
+                assertHandle(rects[#rects], "end", true)
+                assert.are.equal(ui.highlight.highlight_dialog, topWidget())
+                assertNoNotes(ui)
+                ui.highlight:onClose()
+            end)
+
+            it("should keep a popover below a selection at the page top clear of its handles", function()
+                longPress({ x = 300, y = 30 }) -- on the first line
+                local bubble = ui.highlight.highlight_dialog
+                assert.is_false(bubble.above)
+                local r = ui.highlight:selectionRects()[1]
+                local h = assertHandle(r, "end")
+                assert.is_true(bubble:getRefreshRegion().y >= h.y + h.h)
+                ui.highlight:onClose()
+            end)
+
+            it("should keep the handles on the page and the popover above at the page foot", function()
+                local last = { x = 100, y = 740 } -- SAMPSON again, on the last line
+                longPress(last)
+                local bubble = ui.highlight.highlight_dialog
+                assert.is_true(bubble.above)
+                local r = ui.highlight:selectionRects()[1]
+                assert.is_true(r.y > Screen:getHeight() * 0.85)
+                for _, side in ipairs{ "start", "end" } do
+                    local h = assertHandle(r, side)
+                    assert.is_true(h.y + h.h <= Screen:getHeight())
+                end
+                ui.highlight:onClose()
+            end)
+
+            it("should underline a selection where a line highlight already is on the same line", function()
+                G_reader_settings:saveSetting("highlight_color", "gray") -- as on a black and white screen
+                ui.view.highlight.saved_color = "gray"
+                local r = (function()
+                    gesture("hold", SAMPSON)
+                    local rect = ui.highlight:selectionRects()[1]
+                    ui.highlight:onClose()
+                    UIManager:forceRePaint()
+                    return rect
+                end)()
+                local glyphs = underlineRow(r) -- on a clean page: the glyphs' bottom
+                longPress(SAMPSON)
+                tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
+                ui.highlight:closeBubble()
+                UIManager:forceRePaint()
+                local line = underlineRow(r) -- the highlight's line, 2dp thick
+                assert.are.equal(glyphs + Screen:scaleBySize(3) + Screen:scaleBySize(2), line)
+                -- a selection from the line above over it: its underline is on that line, not under it
+                longPress({ x = 400, y = 110 }, { x = 120, y = 160 })
+                local rects = ui.highlight:selectionRects()
+                assert.are.equal(r.y, rects[#rects].y)
+                assert.are.equal(line, underlineRow(r))
+                assertHandle(rects[#rects], "end")
+                ui.highlight:onClose()
+                G_reader_settings:delSetting("highlight_color")
+            end)
+
+            it("should select across pages with a handle dragged to the bottom corner, then turn back", function()
+                local page = ui.view.state.page
+                longPress({ x = 100, y = 740 }) -- the last line
+                local before = ui.highlight.selected_text
+                local r = ui.highlight:selectionRects()[1]
+                local from = center(assertHandle(r, "end"))
+                local w, h = Screen:getWidth(), Screen:getHeight()
+                -- out of the corner first, then into it: the page scrolls a third of the screen up, and the
+                -- selection with it, even released there
+                gesture("pan", { x = from.x + 100, y = from.y }, { start_pos = from })
+                gesture("pan", { x = w - 5, y = h - 5 }, { start_pos = from })
+                assert.are.equal("scroll", ui.view.view_mode)
+                gesture("pan_release", { x = w - 5, y = h - 5 })
+                UIManager:forceRePaint()
+                local selected = ui.highlight.selected_text
+                local lines = ui.document:getScreenBoxesFromPositions(selected.pos0, selected.pos1, true)
+                assert.is_true(lines[1].y < r.y - Screen:getHeight() / 4)
+                for _, line in ipairs(lines) do assertUnderline(line) end
+                local handle = assertHandle(lines[#lines], "end")
+                assert.are.equal(ui.highlight.highlight_dialog, topWidget())
+                -- and goes on from there into the next page's text
+                from = center(handle)
+                drag(from, { x = w - 150, y = math.min(h - 150, from.y + 200) })
+                selected = ui.highlight.selected_text
+                assert.are.equal(before.pos0, selected.pos0)
+                assert.are.equal(1, ui.document:compareXPointers(before.pos1, selected.pos1))
+                assert.is_true(#selected.text > #"SAMPSON" + 40) -- on into the next page's text
+                assert.are.equal(ui.highlight.highlight_dialog, topWidget())
+                assertNoNotes(ui)
+                -- clearing turns back to the page it started on
+                tap(5, 5)
+                UIManager:forceRePaint()
+                assert.are.equal("page", ui.view.view_mode)
+                assert.are.equal(page, ui.view.state.page)
+                assertNoNotes(ui)
+            end)
+        end)
+
+        describe("with a PDF", function()
+            it("should underline the selection at the bottom of its boxes, with handles that drag its end", function()
+                local ui = openReader(sample_pdf, true)
+                ui:handleEvent(Event:new("SetScrollMode", false))
+                ui.paging:onGotoPage(10)
+                UIManager:forceRePaint()
+                longPress({ x = 430, y = 210 })
+                assert.is_nil(next(ui.view.highlight.temp)) -- not ReaderView's gray boxes
+                local rects = ui.highlight:selectionRects()
+                local r = rects[1]
+                for x = r.x, r.x + r.w - 1 do
+                    assert.is_true(gray(x, r.y + r.h - 1) < 0x80, "underline at " .. x)
+                end
+                local handle = Geom:new{ x = r.x + r.w, y = r.y + r.h - 1 - Screen:scaleBySize(4),
+                    w = Screen:scaleBySize(25), h = Screen:scaleBySize(25) }
+                local from = center(handle)
+                assert.is_true(gray(from.x, from.y) < 0x80)
+                assert.is_true(gray(r.x - math.floor(handle.w / 2), from.y) < 0x80) -- and the start's
+                local text = ui.highlight.selected_text.text
+                drag(from, { x = from.x - 300, y = from.y + 26 })
+                local selected = ui.highlight.selected_text
+                assert.are_not.equal(text, selected.text)
+                assert.are.equal(1, selected.text:find(text, 1, true))
+                assert.is_nil(next(ui.view.highlight.temp))
+                assert.are.equal(ui.highlight.highlight_dialog, topWidget())
+                assertNoNotes(ui)
+                tap(5, Screen:getHeight() - 5)
+                assert.is_nil(ui.highlight.selected_text)
+                assertNoNotes(ui)
+                closeReader(ui)
+            end)
+        end)
+    end)
+
     describe("line highlights under the glyphs", function()
         local ffiUtil, lfs
         setup(function()
