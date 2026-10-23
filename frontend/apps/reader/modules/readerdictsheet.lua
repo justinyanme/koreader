@@ -16,7 +16,7 @@ cards, from the top:
 - the online translation (Translator), named as needing the network: for a selection of several words that is
   not CJK and that no dictionary has, or after 在线翻译. It has its own loading, offline (打开 Wi-Fi) and failure
   (重试) states;
-- 维基百科, loaded on a tap, then its intro, which a tap opens as a paginated full-text article;
+- 百科释义, loaded on a tap, then its intro, which a tap opens as a paginated full-text article;
 - 加入生词本 (vocabulary builder), removing a word after the confirm layer, and 在本书中搜索.
 Lookups are exact over a list of candidates: a Chinese selection that is not a word is matched by the longest
 word it contains (up to 20 characters), and an English word also tries simple lemmas (plural, past tense, -ing).
@@ -25,9 +25,9 @@ The fuzzy search setting is not used here. Chinese text is never sent to the tra
 The back arrow (or the Back key) returns to the page of the selection, which stays a moment, as upstream.
 
 Refreshes: the page opens and closes whole, and turning a page or a card changing state repaints the content and
-the bar (all "ui"), as does the full Wikipedia article. A local lookup slower than upstream's delay shows the page with 查询中… (a tap cancels it, as
-upstream); a faster one opens the page with its results. Nothing here asks for "full" (the upstream popup flashes
-as it closes, as it always has).
+the bar (all "ui"), as does the full Wikipedia article. A local lookup slower than upstream's delay shows the
+page with 查询中… (a tap cancels it, as upstream); a faster one opens the page with its results. Nothing here asks
+for "full" (the upstream popup flashes as it closes, as it always has).
 ]]
 
 local CenterContainer = require("ui/widget/container/centercontainer")
@@ -466,7 +466,7 @@ function LookupPage:readResults()
         if g.phonetic and g.phonetic ~= self.phonetic then -- another one than beside the headword
             table.insert(g.units, { text = g.phonetic })
         end
-        for ___, sense in ipairs(g.senses) do table.insert(g.units, sense) end
+        for __, sense in ipairs(g.senses) do table.insert(g.units, sense) end
         if g.cut then
             table.insert(g.units, { text = _("Tap the card for the rest of the entry.") })
         end
@@ -744,12 +744,13 @@ end
 function LookupPage:wikiCard()
     local wiki = self.wiki
     local group = VerticalGroup:new{ align = "left" }
-    local title = wiki and wiki.results and wiki.results[1].dict or _("Wikipedia")
+    local title = _("Encyclopedia definition")
     table.insert(group, self:heading(title, nil, not wiki or wiki.results))
     local callback
     if wiki and wiki.results then
         table.insert(group, VerticalSpan:new{ width = HEADING_GAP })
-        table.insert(group, textBox(wiki.results[1].definition, bodyFace(), self.inner_w, INTRO_LINES))
+        local summary = util.trim(wiki.results[1].definition:gsub("%s*\n%s*", "\n"))
+        table.insert(group, textBox(summary, bodyFace(), self.inner_w, INTRO_LINES))
     end
     if not wiki or (wiki.results and not (wiki.loading or wiki.offline or wiki.failed or wiki.missing)) then
         callback = function() self:loadWiki(wiki and wiki.results ~= nil) end
@@ -1022,8 +1023,8 @@ function LookupPage:onVocabulary()
         return
     end
     local title = self.ui.doc_props and self.ui.doc_props.display_title or _("Dictionary lookup")
-    -- the plugin saves the words around the selection, which is still there
-    self.ui:handleEvent(Event:new("WordLookedUp", word, title, true))
+    -- The card always keeps the source, even when automatic context saving is disabled.
+    self.ui:handleEvent(Event:new("WordLookedUp", word, title, true, true))
     if vocab:hasWord(word) then
         self:update()
         UIManager:show(Toast:new{ text = _("Added to vocabulary builder") })

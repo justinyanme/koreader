@@ -405,7 +405,24 @@ These follow their reference screenshots directly, using the parts above:
 - **Contents** (`04-contents-and-search/01-contents.png`): book title and ↓去底部, the 搜索全书内容 field, collapsible rows, and 书签 beside the pager.
 - **Search** (`04-contents-and-search/04-search-input.png`, `05-search-results.png`, `08-search-no-results.png`): opened from the contents page's field, over that page. The book title, then the field in the same place with 取消 at its right (back to the contents page), and the keyboard. Hits are grouped under chapter headings (Title role); each hit is an excerpt of at most two Body lines with the matched text paper on ink, and a page that goes on with a chapter repeats its heading. Searching shows the reason line alone; when nothing matches, 没有找到相关内容 sits in the list's place and the query stays editable. 书签 and the pager as on the contents page; the back arrow returns to the book.
 - **Notes** (`06-notes/01-notes-list.png`, `05-bookmarks/04-bookmark-in-notes.png`): the overview card (book title, → 已读到 x% · 共 N 条笔记, ↗ 时长 N 分钟, cover at the right), then cards grouped under chapter headings. 仅显示书签 / 显示全部 shows only when the book has bookmarks.
-- **Lookup** (`07-selection-and-lookup/19-chinese-lookup-settled.png`, `22-english-translation-result.png`): a stack of cards: the headword, one card per dictionary named on the card, the 维基百科 card with ›, a centered 加入生词本 card, and an 在本书中搜索 › row card. Words go to the local dictionaries first. A non-CJK phrase that no dictionary has gets an 在线翻译 card marked 需要联网 instead; a word that none has gets a card saying why (not in the local dictionaries, none installed), with an 在线翻译 pill for non-CJK text. Chinese never goes to the translator. 查询中… sits under the headword while a slow lookup runs (`18-chinese-lookup-result.png`), and in the translation card while it waits. A dictionary card too long for the page continues on the next one under its name, and a sense taller than a page continues from its next line; nothing is cut (past 100 senses, the card says the popup has the rest). A tap on a dictionary card opens its full entry in KOReader's original popup over the cards, and closing the popup comes back to them. The 维基百科 card loads its summary on demand; its › fetches the exact article in the summary’s language and opens its full text on a page with a centered title, 46dp side margins and the common bottom back/pager bar. Back restores the query cards and selection. Offline, failed and missing requests keep their context and offer Wi-Fi or retry. The article uses the existing Wikipedia text and image backend, with the reader’s image preference and lazy thumbnail loading, without a WebView; original Wikipedia tools remain in the original menus. Short unknown words can also go into 生词本 with their book and context. 在本书中搜索 opens the search page with the selected text, preserving inflections even if the dictionary found a lemma.
+- **Lookup** (`07-selection-and-lookup/19-chinese-lookup-settled.png`, `22-english-translation-result.png`): a
+  stack of cards: the headword, one card per dictionary named on the card, the 百科释义 card with ›, a centered
+  加入生词本 card, and an 在本书中搜索 › row card. Words go to the local dictionaries first. A non-CJK phrase that no
+  dictionary has gets an 在线翻译 card marked 需要联网 instead; a word that none has gets a card saying why (not in
+  the local dictionaries, none installed), with an 在线翻译 pill for non-CJK text. Chinese never goes to the
+  translator. 查询中… sits under the headword while a slow lookup runs (`18-chinese-lookup-result.png`), and in
+  the translation card while it waits. A dictionary card too long for the page continues on the next one under
+  its name, and a sense taller than a page continues from its next line; nothing is cut (past 100 senses, the
+  card says the popup has the rest). A tap on a dictionary card opens its full entry in KOReader's original
+  popup over the cards, and closing the popup comes back to them. The 百科释义 card loads its summary on demand;
+  its › fetches the exact article in the summary's language and opens its full text on a page with a centered
+  title, 46dp side margins and the common bottom back/pager bar. Back restores the query cards and selection.
+  Offline, failed and missing requests keep their context and offer Wi-Fi or retry. The article uses the
+  existing Wikipedia text and image backend, with the reader's image preference and lazy thumbnail loading,
+  without a WebView; original Wikipedia tools remain in the original menus. Short unknown words can also go
+  into 生词本 with their book and context, regardless of the vocabulary builder's context setting.
+  在本书中搜索 opens the search page with the selected text, preserving inflections even if the dictionary found
+  a lemma.
 - **我** (`13-reading-preferences/01-profile-entry.png`): the name (display), 累计阅读 X 小时 Y 分钟 with figure-sized numbers, 本周阅读 … | 连续 N 天, then rows.
 - **Settings** (`13-reading-preferences/02-settings.png`): a centered title, then toggle and chevron rows.
 - **Interface font size** (`13-reading-preferences/03-interface-font-size.png`): 字体大小 under 设置 → 阅读, showing the current size. The page has the heading 点击滑块设置界面字体大小 (title) over a label-sized note that the book's text is sized in the reader. Above the bottom band sits a track between the − and + circles, with the five sizes as steps (no step marks), 小 and 大 inside its ends and the current size's name (12dp bold) above the knob. It is the typesetting track (see Tracks) without step marks, its stops running to the track's ends, so the knob covers 小 or 大 at the first or last size. A tap on the track or on − / + applies the size at once and repaints the page above the band with `ui`. − and + are gray at the ends.
@@ -437,7 +454,7 @@ Where the reference depends on WeChat accounts, the cloud, the community or the 
 | Bottom bar ends with 听 | No 听, and no empty slot |
 | Popover action 听当前 | None |
 | Thought editor: 发表 and a 私密 pill | 保存 and no privacy control; a thought's detail may show a static 仅自己可见 |
-| Lookup: Sogou encyclopedia | 维基百科 summary; › opens the full article |
+| Lookup: Sogou encyclopedia | 百科释义 (Wikipedia summary); › opens the full article |
 | Lookup: 全书繁转简 card | 加入生词本 (with its source) |
 | Lookup: 去书城搜索 row | 在本书中搜索 |
 | One highlight style | Line by default; marker and wave stay for old highlights and in 设置 → 阅读 → 划线样式 (ADR-0006) |
