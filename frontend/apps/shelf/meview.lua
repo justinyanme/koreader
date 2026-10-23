@@ -1,12 +1,20 @@
 --[[--
-The 我的 tab: this week's reading, a streak line, and entries for all notes,
-the vocabulary, 文件, sync and transfer, and settings.
+The 我 tab (13-reading-preferences/01-profile-entry.png): the reader's name in the display serif, the reading time
+the statistics plugin recorded (累计阅读 X 小时 Y 分钟 over 本周阅读 X 小时 Y 分钟 | 连续 N 天), then rows with a
+circled icon, a title over a subtitle and a chevron: 全部书笔记, 生词本, 文件, 同步与传书, 设置 and 版本更新.
+
+The name is the nickname set here, else the KOSync user name, else the device model (Me.name()); a tap on it edits
+the nickname, and saving it empty goes back to the others. A tap on the reading time opens the statistics plugin's
+reading progress, as 更多 → 阅读统计 does in the reader; without the plugin the time says so and takes no tap.
+版本更新 shows the version running, and a tap shows KOReader's About with how to update this build: a new APK.
+It never checks KOReader's updates (OTA), which would install upstream KOReader over this build; the original
+menu keeps its Update entry.
 
 Subpages open over the content area, above the tab bar, with a nav bar and a
 paged list. Entering, leaving and paging repaint the content area (or the list
-under the nav bar) with a "ui" refresh; nothing here flashes. Back leaves a
-subpage (on the home it reaches the file manager); the file manager's swipe
-handler pages the current list through MeView:swipe().
+under the nav bar) with a "ui" refresh, and so does a new name; nothing here
+flashes. Back leaves a subpage (on the home it reaches the file manager); the
+file manager's swipe handler pages the current list through MeView:swipe().
 
 The home page shows counts only, cached until invalidate(); a subpage loads its
 notes or words when it opens and drops them when it closes.
@@ -14,7 +22,6 @@ notes or words when it opens and drops them when it closes.
 
 local BD = require("ui/bidi")
 local CenterContainer = require("ui/widget/container/centercontainer")
-local DataStorage = require("datastorage")
 local Device = require("device")
 local EinkControls = require("ui/widget/einkcontrols")
 local Event = require("ui/event")
@@ -26,10 +33,11 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
 local InfoMessage = require("ui/widget/infomessage")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local InputDialog = require("ui/widget/inputdialog")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
-local LuaSettings = require("luasettings")
 local Me = require("apps/shelf/me")
+local OverlapGroup = require("ui/widget/overlapgroup")
 local Palette = require("ui/palette")
 local ShelfWidgets = require("apps/shelf/shelfwidgets")
 local Size = require("ui/size")
@@ -38,24 +46,37 @@ local TextWidget = require("ui/widget/textwidget")
 local TocDrawer = require("apps/reader/modules/readertocdrawer")
 local TopContainer = require("ui/widget/container/topcontainer")
 local UIManager = require("ui/uimanager")
+local Version = require("version")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Widget = require("ui/widget/widget")
-local datetime = require("datetime")
 local filemanagerutil = require("apps/filemanager/filemanagerutil")
 local Screen = Device.screen
 local T = require("ffi/util").template
 local _ = require("gettext")
 local C_ = _.pgettext
+local N_ = _.ngettext
 
 local function dp(n) return Screen:scaleBySize(n) end
 
-local GUTTER = dp(24)
+local GUTTER = dp(24) -- subpages
 local NAV_H = dp(52)
 local PAGER_H = dp(44)
-local ROW_H = dp(56)
-local CHART_H = dp(118)
-local WEEKDAYS = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" }
+local ROW_H = dp(56) -- subpage rows
+-- The home page, measured on the reference (the name's top from where the shelf's search field starts).
+local HOME_GUTTER = dp(22)
+local NAME_SIZE = 28 -- the display serif
+local FIGURE_SIZE = 24 -- the Figure role: the numbers of 累计阅读
+local NAME_BASELINE = dp(51)
+local TOTAL_BASELINE = dp(85) -- 累计阅读
+local WEEK_BASELINE = dp(108) -- 本周阅读 | 连续
+local HEADER_H = dp(136) -- down to the rule over the rows, at least
+local HOME_ROW_H = dp(94)
+local RING = dp(37)
+local RING_ICON = dp(21)
+local RING_GAP = dp(18) -- from the ring to the title
+local CHEV_W, CHEV_H = dp(9), dp(17) -- the ink chevron, ending at the gutter
+local TITLE_GAP = dp(4) -- between a row's title and its subtitle
 
 local function getFace(face)
     return type(face) == "string" and Font:getFace(face) or face
@@ -88,72 +109,54 @@ local function rule(w, color)
     return LineWidget:new{ background = color, dimen = Geom:new{ w = w, h = Size.border.default } }
 end
 
-local function durationText(minutes)
-    return T(_("%1 h %2 min"), math.floor(minutes / 60), minutes % 60)
+--[[--
+A translated template set on one baseline: its %1, %2… are `figures`, in `figure_face`, and the words around them in
+`word_face`; bold or not. Returns the line and its baseline.
+]]
+local function figureLine(template, figures, word_face, figure_face, bold)
+    local parts, pos = {}, 1
+    while true do
+        local s, e, n = template:find("%%(%d)", pos)
+        local words = template:sub(pos, s and s - 1 or -1)
+        if words ~= "" then
+            table.insert(parts, text(words, word_face, Palette.ink, nil, bold))
+        end
+        if not s then break end
+        table.insert(parts, text(tostring(figures[tonumber(n)]), figure_face, Palette.ink, nil, bold))
+        pos = e + 1
+    end
+    local baseline = 0
+    for __, part in ipairs(parts) do
+        baseline = math.max(baseline, part:getBaseline())
+    end
+    local line = HorizontalGroup:new{ align = "top" }
+    for __, part in ipairs(parts) do
+        table.insert(line, VerticalGroup:new{ VerticalSpan:new{ width = baseline - part:getBaseline() }, part })
+    end
+    return line, baseline
 end
 
---- Bars of minutes read per day, Monday first, at heights proportional to the week's longest day.
-local WeekChart = Widget:extend{
-    week = nil, -- Me.week()
-    width = nil,
+--- A row's icon in a 37dp rule-gray ring.
+local Ring = Widget:extend{
+    icon = nil,
+    dim = nil,
 }
 
-function WeekChart:init()
-    self.dimen = Geom:new{ w = self.width, h = CHART_H }
-    self.gap = dp(10)
-    self.col_w = math.floor((self.width - 6 * self.gap) / 7)
-    self.labels, self.values = {}, {}
-    local max = 0
-    for i = 1, 7 do
-        local today = i == self.week.today
-        local minutes = self.week.minutes[i]
-        self.labels[i] = text(today and _("Today") or datetime.shortDayOfWeekTranslation[WEEKDAYS[i]], "ui_micro",
-            today and Palette.ink or Palette.ink_2, self.col_w, today)
-        if minutes then
-            self.values[i] = text(tostring(minutes), "ui_micro", today and Palette.ink or Palette.ink_2, self.col_w, today)
-            max = math.max(max, minutes)
-        end
-    end
-    self.label_h = self.labels[1]:getSize().h
-    self.bar_max = CHART_H - 2 * self.label_h - 2 * dp(4)
-    -- bar heights in px, nil for days to come; a non-zero day gets at least 1px
-    self.bar_heights = {}
-    for i = 1, self.week.today do
-        local minutes = self.week.minutes[i]
-        self.bar_heights[i] = minutes > 0 and math.max(1, math.floor(minutes / max * self.bar_max + 0.5)) or 0
-    end
+function Ring:init()
+    self.dimen = Geom:new{ w = RING, h = RING }
+    self.glyph = IconWidget:new{ icon = self.icon, width = RING_ICON, height = RING_ICON, alpha = true, dim = self.dim }
 end
 
-function WeekChart:paintTo(bb, x, y)
+function Ring:paintTo(bb, x, y)
     self.dimen.x, self.dimen.y = x, y
-    local base = y + CHART_H - self.label_h - dp(4) -- bottom of the bars
-    local bar_w = math.floor(self.col_w * 0.6)
-    for i = 1, 7 do
-        local cx = x + (i - 1) * (self.col_w + self.gap)
-        local function center(widget, wy)
-            widget:paintTo(bb, cx + math.floor((self.col_w - widget:getSize().w) / 2), wy)
-        end
-        center(self.labels[i], base + dp(4))
-        local bx = cx + math.floor((self.col_w - bar_w) / 2)
-        local h = self.bar_heights[i]
-        if h then
-            bb:paintRect(bx, base - h, bar_w, h, Palette.ink)
-            center(self.values[i], base - h - dp(4) - self.label_h)
-        else
-            -- a day to come: a dashed stub
-            local stub, line = dp(6), Size.border.default
-            for dx = 0, bar_w - 1, dp(4) do
-                bb:paintRect(bx + dx, base - stub, math.min(dp(2), bar_w - dx), line, Palette.ink_3)
-            end
-            bb:paintRect(bx, base - stub, line, stub, Palette.ink_3)
-            bb:paintRect(bx + bar_w - line, base - stub, line, stub, Palette.ink_3)
-        end
-    end
+    bb:paintBorder(x, y, RING, RING, Size.border.default, Palette.rule, math.floor(RING / 2),
+        G_reader_settings:nilOrTrue("anti_alias_ui"))
+    local offset = math.floor((RING - RING_ICON) / 2)
+    self.glyph:paintTo(bb, x + offset, y + offset)
 end
 
-function WeekChart:free()
-    for __, w in pairs(self.labels) do w:free() end
-    for __, w in pairs(self.values) do w:free() end
+function Ring:free()
+    self.glyph:free()
 end
 
 local MeView = InputContainer:extend{
@@ -165,6 +168,7 @@ local MeView = InputContainer:extend{
 function MeView:init()
     self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = self.height }
     self.inner_w = self.width - 2 * GUTTER
+    self.home_w = self.width - 2 * HOME_GUTTER
     if Device:hasKeys() then
         self.key_events.Back = { { Device.input.group.Back } }
     end
@@ -177,12 +181,13 @@ cached; the caller refreshes. Called each time the tab opens and when the layout
 function MeView:reset(state)
     self.home = self.home or state and state.home
     if not self.home then
-        local counts = Me.counts()
+        local time = Me.readingTime()
         self.home = {
-            week = Me.week(),
+            name = Me.name(),
+            total_minutes = time.total_minutes,
+            week_minutes = time.week_minutes,
             streak = Me.streak(),
-            note_count = counts.note_count,
-            finished_this_year = counts.finished_this_year,
+            note_count = Me.noteCount(),
             word_count = Me.vocabCount(),
         }
     end
@@ -238,50 +243,202 @@ local function padded(widget, top, bottom)
     }
 end
 
-function MeView:buildHome()
-    local heading = text(_("Reading this week"), "ui_body", Palette.ink, nil, true)
+-- Hours and minutes of `minutes`.
+local function hoursMinutes(minutes)
+    return math.floor(minutes / 60), minutes % 60
+end
+
+--- The name, then the reading time, each line on its baseline as measured, the measures growing with the interface
+-- font size. Returns the header and its lines' Tappables (the name; the time, without the statistics plugin nil).
+function MeView:buildHeader()
     local home = self.home
-    local total = text(durationText(home.week.total_minutes), "ui_label")
-    self.chart = WeekChart:new{ week = home.week, width = self.inner_w }
-    local stats = VerticalGroup:new{
-        align = "left",
-        HorizontalGroup:new{
-            align = "bottom",
-            heading,
-            HorizontalSpan:new{ width = self.inner_w - heading:getSize().w - total:getSize().w },
-            total,
-        },
-        VerticalSpan:new{ width = dp(12) },
-        self.chart,
-        VerticalSpan:new{ width = dp(10) },
-        text(T(_("%1-day reading streak · %2 finished this year"), home.streak, home.finished_this_year),
-            "ui_caption", Palette.ink_2, self.inner_w),
+    local name = text(home.name, Font:getFace("ui_headword", NAME_SIZE), Palette.ink, self.home_w)
+    local lines = { { widget = name, baseline = name:getBaseline(), at = NAME_BASELINE } }
+    if self.ui.statistics then
+        local total_h, total_min = hoursMinutes(home.total_minutes)
+        local week_h, week_min = hoursMinutes(home.week_minutes)
+        -- @translators On the Me page: all the reading time recorded, %1 hours and %2 minutes; the numbers are shown large. Chinese: 累计阅读 %1 小时 %2 分钟
+        local total, total_baseline = figureLine(_("Total reading %1 h %2 min"), { total_h, total_min },
+            "ui_label", Font:getFace("ui_headline", FIGURE_SIZE), true)
+        -- @translators On the Me page, under the total reading time: this week's, %1 hours and %2 minutes, and %3 days in a row with reading. Chinese: 本周阅读 %1 小时 %2 分钟 | 连续 %3 天
+        local week, week_baseline = figureLine(_("This week %1 h %2 min | %3-day streak"),
+            { week_h, week_min, home.streak }, "ui_label", "ui_caption")
+        table.insert(lines, { widget = total, baseline = total_baseline, at = TOTAL_BASELINE })
+        table.insert(lines, { widget = week, baseline = week_baseline, at = WEEK_BASELINE })
+    else
+        -- @translators On the Me page in place of the reading time, while the reading statistics plugin is disabled.
+        local off = text(_("Reading statistics are off"), "ui_label", Palette.ink_3, self.home_w)
+        table.insert(lines, { widget = off, baseline = off:getBaseline(), at = TOTAL_BASELINE })
+    end
+    local scale = Font:getUIScale()
+    local group = VerticalGroup:new{ align = "left" }
+    local bottom = 0 -- of the lines so far
+    for __, line in ipairs(lines) do
+        local top = math.floor(line.at * scale) - line.baseline
+        table.insert(group, VerticalSpan:new{ width = top - bottom })
+        table.insert(group, line.widget)
+        bottom = top + line.widget:getSize().h
+    end
+    table.insert(group, VerticalSpan:new{ width = math.max(math.floor(HEADER_H * scale), bottom) - bottom })
+    -- the name's tap reaches down to the time, the time's down to the rule
+    local name_h = group[1].width + name:getSize().h
+    local name_tap = ShelfWidgets.Tappable:new{
+        callback = function() self:editName() end,
+        LeftContainer:new{ dimen = Geom:new{ w = self.home_w, h = name_h }, VerticalSpan:new{ width = 0 } },
     }
-    local rows = VerticalGroup:new{
-        align = "left",
-        self:entryRow(C_("Me page", "Notes"), T(_("%1 highlights and notes"), home.note_count),
-            function() self:open("notes") end),
-        self:entryRow(C_("Me page", "Vocabulary"), T(_("%1 words"), home.word_count),
-            function() self:open("vocab") end),
-        -- 文件 shows in the file manager's content area, on the folder named here; its back arrow returns here
-        self:entryRow(_("Files"), BD.dirpath(self.ui.file_chooser.path), function() self.ui:openFiles() end),
-        self:entryRow(_("Sync and transfer"), "KOSync · Calibre · OPDS", function() self:open("sync") end),
-        self:entryRow(_("Settings"), _("Reading · Screen · Network · Device"), function()
-            self.ui:handleEvent(Event:new("ShowEinkSettings"))
-        end),
+    local time_tap = self.ui.statistics and ShelfWidgets.Tappable:new{
+        callback = function() self.ui.statistics:onShowReaderProgress() end,
+        LeftContainer:new{ dimen = Geom:new{ w = self.home_w, h = group:getSize().h - name_h },
+            VerticalSpan:new{ width = 0 } },
     }
+    return group, name_tap, time_tap
+end
+
+--- Edits the nickname: saved, it shows at once; saved empty, the KOSync user name or the device model shows again.
+function MeView:editName()
+    local dialog
+    dialog = InputDialog:new{
+        -- @translators Title of the dialog editing the name shown on the Me page.
+        title = _("Nickname"),
+        input = Me.nickname() or "",
+        input_hint = Me.defaultName(), -- what saving it empty shows
+        buttons = {{
+            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            {
+                text = _("Save"),
+                is_enter_default = true,
+                callback = function()
+                    UIManager:close(dialog)
+                    Me.setNickname(dialog:getInputText())
+                    self.home.name = Me.name()
+                    if not self.subpage then
+                        self:build()
+                        UIManager:setDirty(self.ui, "ui", self.dimen)
+                    end
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+-- A home row's title over its subtitle, `w` wide.
+local function rowText(title, subtitle, color, w)
     return VerticalGroup:new{
         align = "left",
-        padded(text(_("Me"), "ui_headline", Palette.ink, self.inner_w), dp(14), dp(6)),
-        padded(stats, dp(4), dp(14)),
-        rule(self.width, Palette.ink),
-        padded(rows),
+        text(title, "ui_title_large", color, w),
+        VerticalSpan:new{ width = TITLE_GAP },
+        text(subtitle, "ui_label", color, w),
+    }
+end
+
+--- A home row `h` tall (94dp, less where the screen is short): a ringed icon, a bold title over a subtitle and a
+-- chevron; dimmed without a callback. `row` is one of homeRows().
+function MeView:homeRow(row, h)
+    local text_w = self.home_w - RING - RING_GAP - CHEV_W
+    local inner_h = h - Size.border.default
+    return ShelfWidgets.Tappable:new{
+        callback = row.callback,
+        VerticalGroup:new{
+            HorizontalGroup:new{
+                CenterContainer:new{ dimen = Geom:new{ w = RING, h = inner_h },
+                    Ring:new{ icon = row.icon, dim = not row.callback or nil } },
+                HorizontalSpan:new{ width = RING_GAP },
+                LeftContainer:new{ dimen = Geom:new{ w = text_w, h = inner_h },
+                    rowText(row.title, row.subtitle, row.callback and Palette.ink or Palette.ink_3, text_w - dp(12)) },
+                CenterContainer:new{ dimen = Geom:new{ w = CHEV_W, h = inner_h },
+                    row.callback and IconWidget:new{ icon = "eink/me.chev", width = CHEV_W, height = CHEV_H, alpha = true }
+                        or HorizontalSpan:new{ width = 0 } },
+            },
+            rule(self.home_w, Palette.rule),
+        },
+    }
+end
+
+-- The home rows, top to bottom: { icon, title, subtitle, callback (nil: dimmed) }.
+function MeView:homeRows()
+    local home = self.home
+    return {
+        {
+            icon = "eink/me.notes",
+            -- @translators On the Me page and as its page title: the notes of all books together (not the notes of a whole book). Chinese: 全部书笔记
+            title = C_("Me page", "Notes in all books"),
+            -- @translators On the Me page, under 全部书笔记: the notes of all books, highlights, thoughts and bookmarks together.
+            subtitle = T(N_("1 note", "%1 notes", home.note_count), home.note_count),
+            callback = function() self:open("notes") end,
+        },
+        {
+            icon = "eink/me.vocabulary", title = C_("Me page", "Vocabulary"), subtitle = T(_("%1 words"), home.word_count),
+            callback = function() self:open("vocab") end,
+        },
+        -- 文件 shows in the file manager's content area, on the folder named here; its back arrow returns here
+        {
+            icon = "eink/folder", title = _("Files"), subtitle = BD.dirpath(self.ui.file_chooser.path),
+            callback = function() self.ui:openFiles() end,
+        },
+        {
+            icon = "eink/me.sync", title = _("Sync and transfer"), subtitle = "KOSync · Calibre · OPDS",
+            callback = function() self:open("sync") end,
+        },
+        {
+            icon = "eink/me.settings", title = _("Settings"), subtitle = _("Reading · Screen · Network · Device"),
+            callback = function() self.ui:handleEvent(Event:new("ShowEinkSettings")) end,
+        },
+        {
+            icon = "eink/me.update",
+            -- @translators On the Me page: shows the version running and how to update it. Chinese: 版本更新
+            title = C_("Me page", "Version update"),
+            -- @translators On the Me page, under 版本更新: the version running.
+            subtitle = T(_("Current version %1"), Version:getShortVersion()),
+            callback = function() self:showVersion() end,
+        },
+    }
+end
+
+--- KOReader's About (as in the original menu's Help), and that this build is updated by installing a new APK.
+function MeView:showVersion()
+    UIManager:show(InfoMessage:new{
+        text = T(_("KOReader %1\n\nA document viewer for E Ink devices.\n\nLicensed under Affero GPL v3. All dependencies are free software.\n\nhttp://koreader.rocks"),
+            BD.ltr(Version:getCurrentRevision()))
+            -- @translators On the Me page, after KOReader's About: this fork is built by its owner and is not updated over the air. Chinese: 本机为自编译的定制版本，更新请安装新的 APK。
+            .. "\n\n" .. _("This is a custom build made for this device. To update it, install a new APK."),
+        icon = "koreader",
+    })
+end
+
+function MeView:buildHome()
+    local header, name_tap, time_tap = self:buildHeader()
+    local rows = self:homeRows()
+    -- the rows keep their height where it fits (the Leaf5, portrait), and share what is left under the rule otherwise
+    local probe = rowText("0", "0")
+    local row_h = math.max(probe:getSize().h + dp(12), math.min(HOME_ROW_H,
+        math.floor((self.height - header:getSize().h - Size.border.default) / #rows)))
+    probe:free()
+    local list = VerticalGroup:new{ align = "left", rule(self.home_w, Palette.rule) }
+    for __, row in ipairs(rows) do
+        table.insert(list, self:homeRow(row, row_h))
+    end
+    self.name_tap, self.time_tap = name_tap, time_tap
+    local taps = VerticalGroup:new{ align = "left", name_tap }
+    if time_tap then table.insert(taps, time_tap) end
+    return FrameContainer:new{
+        bordersize = 0, padding = 0, padding_left = HOME_GUTTER, padding_right = HOME_GUTTER,
+        VerticalGroup:new{
+            align = "left",
+            OverlapGroup:new{
+                dimen = Geom:new{ w = self.home_w, h = header:getSize().h },
+                header,
+                taps,
+            },
+            list,
+        },
     }
 end
 
 -- subpage => title and the method measuring its list rows
 local subpages = {
-    notes = { title = function() return C_("Me page", "Notes") end, items = "notesItems" },
+    notes = { title = function() return C_("Me page", "Notes in all books") end, items = "notesItems" },
     vocab = { title = function() return C_("Me page", "Vocabulary") end, items = "vocabItems" },
     sync = { title = function() return _("Sync and transfer") end, items = "syncItems" },
 }
@@ -408,7 +565,8 @@ end
 
 function MeView:notesItems()
     if #self.books == 0 then
-        return { self:emptyItem(_("No notes yet"), _("Long-press text in a book, then tap Highlight or Add note.")) }
+        -- @translators On the notes of all books, while there are none.
+        return { self:emptyItem(_("No notes yet"), _("Long-press text in a book to highlight it or write a thought, or bookmark a page from the toolbar.")) }
     end
     local items = {}
     if self.ui.exporter then
@@ -477,7 +635,7 @@ function MeView:syncItems()
     if disabled.kosync then
         table.insert(items, self:entryItem(_("Progress sync"), _("Plugin disabled")))
     else
-        local kosync = LuaSettings:open(DataStorage:getSettingsDir() .. "/kosync.lua"):readSetting("settings") or {}
+        local kosync = Me.kosyncSettings()
         table.insert(items, self:entryItem(_("Progress sync"),
             kosync.userkey and kosync.username and T(_("Logged in as %1"), kosync.username) or _("Not logged in"),
             function()

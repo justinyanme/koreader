@@ -1,6 +1,6 @@
 --[[--
 The books marked 读完 on this device, of any year, in the order they were marked: the N of 读完的第 N 本
-(see CONTEXT.md), and the day a book was finished for the 我 tab.
+(see CONTEXT.md).
 
 The books are those of reading history and of the shelf (the home folder, hidden ones included), each file
 on its own, so two formats of a book are two books. The list is built once, opening each book's settings at
@@ -20,14 +20,14 @@ local books -- real path → when it was marked finished, or false; nil until bu
 local scanned_home -- the home folder the list was built from
 local changed = {} -- files to read again
 
---- The day (YYYY-MM-DD) a finished book was marked finished, from its summary. Books finished before that
+-- The day (YYYY-MM-DD) a finished book was marked finished, from its summary. Books finished before that
 -- time was recorded (`finished_time`) only have the day their status last changed.
-function FinishedBooks.day(summary)
+local function finishedDay(summary)
     return summary.finished_time and os.date("%Y-%m-%d", summary.finished_time) or summary.modified or ""
 end
 
 local function finishedKey(path, summary)
-    return { path = path, time = summary.finished_time, day = FinishedBooks.day(summary) }
+    return { path = path, time = summary.finished_time, day = finishedDay(summary) }
 end
 
 -- Books without a recorded time come before the recorded ones of their day.

@@ -400,7 +400,7 @@ describe("Interface font size", function()
             assert.are.equal(fm, topWidget())
             assert.are.same({ { mode = "ui", region = settings.dimen } }, refreshes)
             local settings_row = findText(fm.me_view, _("Settings"))
-            assert.is_near(roleSize("ui_body", 1.35), settings_row.face.orig_size, 1e-9)
+            assert.is_near(roleSize("ui_title_large", 1.35), settings_row.face.orig_size, 1e-9)
             assertFits(fm.me_view)
             -- on 书架, the title, a role at a size of its own, follows; the cover's lettering keeps the cover's
             -- proportions; the grid still fits above the bottom band
