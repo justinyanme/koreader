@@ -9,6 +9,10 @@ Showing and closing are "ui" over the whole screen, which the paling changes.
 The page is paled while painting, so repaint the layer only with what is under it
 (UIManager:setDirty("all", ...)), never alone.
 
+The reader's 更多 panel (apps/reader/modules/readermorepanel) shows the same band
+without a question, above the bottom bar: see ConfirmLayer.buildBand() and
+ConfirmLayer.wash().
+
 @usage
     local layer = ConfirmLayer:new{
         text = _("Delete this source?"),
@@ -40,8 +44,9 @@ local _ = require("gettext")
 local ActionRow = InputContainer:extend{
     width = nil,
     height = nil,
+    text = nil, -- what the label reads
     label = nil, -- widget
-    callback = nil,
+    callback = nil, -- none on a faded row
 }
 
 function ActionRow:init()
@@ -51,22 +56,24 @@ function ActionRow:init()
 end
 
 function ActionRow:onTapSelect()
-    self.callback()
+    if self.callback then
+        self.callback()
+    end
     return true
 end
 
 --- A row label: bold, and with two Chinese characters spaced apart (删 除, 取 消), as WeChat Read sets them.
-local function rowLabel(text)
+local function rowLabel(text, color)
     local face = Font:getFace("ui_body")
     local chars = util.splitToChars(text)
     if #chars == 2 and util.isCJKChar(chars[1]) and util.isCJKChar(chars[2]) then
         return HorizontalGroup:new{
-            TextWidget:new{ text = chars[1], face = face, bold = true, fgcolor = Palette.ink },
+            TextWidget:new{ text = chars[1], face = face, bold = true, fgcolor = color },
             HorizontalSpan:new{ width = math.floor(face.size / 4) },
-            TextWidget:new{ text = chars[2], face = face, bold = true, fgcolor = Palette.ink },
+            TextWidget:new{ text = chars[2], face = face, bold = true, fgcolor = color },
         }
     end
-    return TextWidget:new{ text = text, face = face, bold = true, fgcolor = Palette.ink, max_width = Screen:getWidth() }
+    return TextWidget:new{ text = text, face = face, bold = true, fgcolor = color, max_width = Screen:getWidth() }
 end
 
 local ConfirmLayer = InputContainer:extend{
@@ -83,22 +90,6 @@ function ConfirmLayer:init()
     if Device:hasKeys() then
         self.key_events.Close = { { Device.input.group.Back } }
     end
-    local gutter = Screen:scaleBySize(24)
-    local question = TextBoxWidget:new{
-        text = self.text,
-        face = Font:getFace("ui_label_large"),
-        bold = true,
-        fgcolor = Palette.ink,
-        alignment = "center",
-        width = sw - 2 * gutter,
-    }
-    local band = VerticalGroup:new{
-        LineWidget:new{ background = Palette.ink, dimen = Geom:new{ w = sw, h = Size.border.thick } },
-        CenterContainer:new{
-            dimen = Geom:new{ w = sw, h = math.max(Screen:scaleBySize(53), question:getSize().h + 2 * Screen:scaleBySize(14)) },
-            question,
-        },
-    }
     local rows = {}
     for _, action in ipairs(self.actions) do
         table.insert(rows, { text = action.text, callback = function()
@@ -107,19 +98,55 @@ function ConfirmLayer:init()
         end })
     end
     table.insert(rows, { text = _("Cancel"), callback = function() self:onClose() end })
-    for _, row in ipairs(rows) do
-        table.insert(band, LineWidget:new{ background = Palette.confirm_rule, dimen = Geom:new{ w = sw, h = Size.border.default } })
-        table.insert(band, ActionRow:new{
-            width = sw,
-            height = Screen:scaleBySize(58),
-            label = rowLabel(row.text),
-            callback = row.callback,
-        })
-    end
+    local band = ConfirmLayer.buildBand(self.text, rows)
     table.insert(band, VerticalSpan:new{ width = Screen:scaleBySize(20) })
     self[1] = band
     local band_h = band:getSize().h
     self.band_rect = Geom:new{ x = 0, y = sh - band_h, w = sw, h = band_h }
+end
+
+--- The paper band, screen-wide: the 2dp ink rule, a centered `question` (none for a list of actions), then a row
+-- per entry of `rows`, { text =, callback = }, split by gray lines. A row without a callback is faded: a tap on it
+-- does nothing.
+function ConfirmLayer.buildBand(question, rows)
+    local sw = Screen:getWidth()
+    local band = VerticalGroup:new{
+        LineWidget:new{ background = Palette.ink, dimen = Geom:new{ w = sw, h = Size.border.thick } },
+    }
+    if question then
+        local gutter = Screen:scaleBySize(24)
+        local text = TextBoxWidget:new{
+            text = question,
+            face = Font:getFace("ui_label_large"),
+            bold = true,
+            fgcolor = Palette.ink,
+            alignment = "center",
+            width = sw - 2 * gutter,
+        }
+        table.insert(band, CenterContainer:new{
+            dimen = Geom:new{ w = sw, h = math.max(Screen:scaleBySize(53), text:getSize().h + 2 * Screen:scaleBySize(14)) },
+            text,
+        })
+    end
+    for i, row in ipairs(rows) do
+        if question or i > 1 then -- without a question, the ink rule tops the first row
+            table.insert(band, LineWidget:new{ background = Palette.confirm_rule, dimen = Geom:new{ w = sw, h = Size.border.default } })
+        end
+        table.insert(band, ActionRow:new{
+            width = sw,
+            height = Screen:scaleBySize(58),
+            text = row.text,
+            label = rowLabel(row.text, row.callback and Palette.ink or Palette.ink_3),
+            callback = row.callback,
+        })
+    end
+    return band
+end
+
+--- Pales what is painted in that rect: ink ends up as Palette.wash, paper stays paper (in night mode, the other
+-- way round). Paint it only once over a freshly painted page.
+function ConfirmLayer.wash(bb, x, y, w, h)
+    bb:lightenRect(x, y, w, h, Palette.wash.a / 0xFF)
 end
 
 --- The whole screen: the page is paled under the band.
@@ -128,8 +155,7 @@ function ConfirmLayer:getRefreshRegion()
 end
 
 function ConfirmLayer:paintTo(bb, x, y)
-    -- the wash: ink on the page ends up as Palette.wash, paper stays paper (in night mode, the other way round)
-    bb:lightenRect(x, y, self.dimen.w, self.band_rect.y, Palette.wash.a / 0xFF)
+    ConfirmLayer.wash(bb, x, y, self.dimen.w, self.band_rect.y)
     bb:paintRect(x, y + self.band_rect.y, self.band_rect.w, self.band_rect.h, Palette.paper)
     self[1]:paintTo(bb, x, y + self.band_rect.y)
 end

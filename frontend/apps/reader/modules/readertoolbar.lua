@@ -3,7 +3,7 @@ Reader toolbar of the e-ink redesign (see DESIGN.md, Reader toolbars and Panels)
 
 Replaces the reader menu (apps/replacements reader_menu slot): a swipe up, or a
 tap in the middle third of the page, shows a top bar (its icons at the right:
-bookmark, more) and a bottom bar (back, a short rule, then contents, notes,
+bookmark, shelf state, more) and a bottom bar (back, a short rule, then contents, notes,
 progress, font); taps on the left and right thirds and sideways swipes turn
 pages, and links and highlights keep their taps. The swipe up works anywhere on
 a page, but only from the bottom edge in scroll mode, where swipes scroll, and
@@ -19,7 +19,7 @@ WeChat Read. Another entry switches the panel
 in place, the open panel's own entry closes it, and a tap on the page closes the
 panel and the bars without turning the page. Back leaves one layer at a time:
 a nested panel opened from a panel (only a back arrow below, no top bar), the
-panel, then the bars. What a panel opens elsewhere (book information, menus,
+panel, then the bars. What a panel opens elsewhere (book details, menus,
 settings) closes the panel and the bars first.
 
 Showing, switching or hiding the toolbar and its panel only refreshes their
@@ -45,9 +45,13 @@ local ReaderMenu = require("apps/reader/modules/readermenu")
 local ReaderToolbarHint = require("apps/reader/modules/readertoolbarhint")
 local RightContainer = require("ui/widget/container/rightcontainer")
 local Size = require("ui/size")
+local Shelf = require("apps/shelf/shelf")
+local Toast = require("ui/widget/toast")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local Screen = Device.screen
+local _ = require("gettext")
+local T = require("ffi/util").template
 
 -- Sizes from WeChat Read on the Leaf5 (01-reader-navigation/01-toolbars.png).
 local TOP_H = Screen:scaleBySize(50)
@@ -283,6 +287,11 @@ end
 
 function ReaderToolbar:onReaderReady()
     self:initGesListener()
+    self.view.dogear:free()
+    self.view.dogear = require("apps/reader/modules/readertoolbardogear"):new{ view = self.view, ui = self.ui }
+    self.view[1] = self.view.dogear
+    self.view.dogear:onReadSettings(self.ui.doc_settings)
+    self.view.dogear:onReaderReady()
     -- each time a book opens, but not when a setting reloads it, nor when swipes don't show the toolbar,
     -- nor without a footer line to sit on (the text may then reach the bottom)
     if Device:isTouchDevice() and not self.ui.reloading and self.activation_menu ~= "tap"
@@ -457,6 +466,7 @@ end
 
 --- The notes page shown follows the notes as they change (not consumed: other modules want it too).
 function ReaderToolbar:onAnnotationsModified()
+    self:updateBookmarkButton()
     if self.panel then
         self.panel:handleEvent(Event:new("AnnotationsModified"))
     end
@@ -480,7 +490,7 @@ function ReaderToolbar:closeDrawer()
     end
 end
 
---- The top bar: its icons at the right, from left to right 书签 and 更多 (书架状态 goes between them,
+--- The top bar: its icons at the right, from left to right 书签, 书架状态 and 更多 (
 -- future 繁简 and 手写 entries to their left; nothing holds their place).
 function ReaderToolbar:buildTopBar()
     local sw = Screen:getWidth()
@@ -497,6 +507,9 @@ function ReaderToolbar:buildTopBar()
         }
     end
     self.bookmark_button = iconButton(self:bookmarkIcon(), function() self:toggleBookmark() end)
+    self.shelf_eligible = Shelf.isInHome(self.ui.document.file)
+    local on_shelf = self.shelf_eligible and not Shelf.isRemoved(self.ui.document.file)
+    self.shelf_button = iconButton(on_shelf and "eink/shelf-on" or "eink/shelf", function() self:toggleShelf() end)
     return FrameContainer:new{
         bordersize = 0, padding = 0, background = Palette.paper,
         VerticalGroup:new{
@@ -504,6 +517,7 @@ function ReaderToolbar:buildTopBar()
                 dimen = Geom:new{ w = sw, h = row_h },
                 HorizontalGroup:new{
                     self.bookmark_button,
+                    self.shelf_button,
                     iconButton("eink/more", function() self:togglePanel("more") end),
                 },
             },
@@ -603,6 +617,7 @@ function ReaderToolbar:hideToolbar(no_refresh)
     local snapshot = bars:snapshot()
     self.bars = nil
     self.bookmark_button = nil
+    self.shelf_button = nil
     UIManager:close(bars)
     self:dropPanel()
     bars.top:free()
@@ -707,12 +722,42 @@ function ReaderToolbar:refreshBars(before)
 end
 
 function ReaderToolbar:bookmarkIcon()
-    return self.ui.bookmark:isPageBookmarked() and "eink/bookmark-on" or "eink/bookmark"
+    return self.ui.bookmark:isPageBookmarked() and "eink/bookmark-on" or "eink/bookmark-add"
 end
 
 function ReaderToolbar:toggleBookmark()
+    local was_bookmarked = self.ui.bookmark:isPageBookmarked()
+    self:hideToolbar()
     self.ui.bookmark:onToggleBookmark() -- also refreshes the dog-ear
-    self:updateBookmarkButton()
+    self.ui.bookmark:setDogearVisibility(self.ui.bookmark:getCurrentPageNumber())
+    UIManager:show(Toast:new{ text = was_bookmarked and _("Bookmark removed") or _("Bookmark added") })
+end
+
+function ReaderToolbar:toggleShelf()
+    local file = self.ui.document.file
+    if not self.shelf_eligible then
+        self:hideToolbar()
+        UIManager:show(require("ui/widget/infomessage"):new{
+            text = T(_("To add this book to the shelf, place its file in the home folder:\n%1"), Shelf.homeDir()),
+        })
+    elseif Shelf.isRemoved(file) then
+        Shelf.restore(file)
+        local rect = self.shelf_button.dimen:copy()
+        self.shelf_button:setIcon("eink/shelf-on")
+        self.shelf_button.dimen.x, self.shelf_button.dimen.y = rect.x, rect.y
+        UIManager:setDirty(self.bars, "fast", rect)
+        UIManager:show(Toast:new{ text = _("Added to shelf") })
+    else
+        self:hideToolbar()
+        local layer = require("ui/widget/confirmlayer"):new{
+            text = T(_("Remove “%1” from the shelf? The file stays on the device."), self.ui.doc_props.display_title),
+            actions = { { text = _.pgettext("Shelf", "Remove"), callback = function()
+                Shelf.remove({ file })
+                UIManager:show(Toast:new{ text = _("Removed from shelf") })
+            end } },
+        }
+        UIManager:show(layer, "ui", layer:getRefreshRegion())
+    end
 end
 
 -- Shows whether the current page has a bookmark ("fast" on the button only, when that changed).
