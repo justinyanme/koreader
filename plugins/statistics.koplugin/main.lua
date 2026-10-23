@@ -268,21 +268,20 @@ function ReaderStatistics:getStatsBookStatus()
     self:insertDB()
     local conn = SQ3.open(db_location)
     local sql_stmt = [[
-        SELECT count(*)
-        FROM   (
-                    SELECT strftime('%%Y-%%m-%%d', start_time, 'unixepoch', 'localtime') AS dates
-                    FROM   page_stat
-                    WHERE  id_book = %d
-                    GROUP  BY dates
-               );
+        SELECT count(DISTINCT strftime('%%Y-%%m-%%d', start_time, 'unixepoch', 'localtime')),
+               min(start_time), max(start_time)
+        FROM   page_stat
+        WHERE  id_book = %d;
     ]]
-    local total_days = conn:rowexec(string.format(sql_stmt, self.id_curr_book))
+    local total_days, first_read, last_read = conn:rowexec(string.format(sql_stmt, self.id_curr_book))
     local total_read_pages, total_time_book = conn:rowexec(string.format(STATISTICS_SQL_BOOK_TOTALS_QUERY, self.id_curr_book))
     conn:close()
     return {
         days = tonumber(total_days),
         time = tonumber(total_time_book) or 0,
         pages = tonumber(total_read_pages) or 0,
+        first_read = tonumber(first_read),
+        last_read = tonumber(last_read),
     }
 end
 

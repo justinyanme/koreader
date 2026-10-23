@@ -12,7 +12,9 @@ local FullscreenPage = require("ui/widget/fullscreenpage")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
+local IconWidget = require("ui/widget/iconwidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local Palette = require("ui/palette")
 local Size = require("ui/size")
@@ -23,7 +25,6 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Screen = Device.screen
 local _ = require("gettext")
-local N_ = _.ngettext
 local T = require("ffi/util").template
 
 local function dp(n) return Screen:scaleBySize(n) end
@@ -36,10 +37,84 @@ local BookEnd = FullscreenPage:extend{}
 
 function BookEnd:init()
     FullscreenPage.init(self)
+    self.stats = self.ui.statistics and self.ui.statistics:getStatsBookStatus()
     if Device:hasKeys() then
         self.key_events.ShowMenu = Device:hasFewKeys() and { { { "Menu", "Right" } } } or { { "Menu" } }
     end
     self:build()
+end
+
+local function shortDate(timestamp)
+    return T(_.pgettext("Book end date", "%1/%2"), tonumber(os.date("%m", timestamp)), tonumber(os.date("%d", timestamp)))
+end
+
+local function statText(str, size, width, bold)
+    return TextWidget:new{
+        text = str, face = Font:getFace("ui_label", size), bold = bold, padding = 0,
+        fgcolor = Palette.ink, max_width = width,
+    }
+end
+
+function BookEnd:buildStatistics(width)
+    local stats = self.stats
+    local minutes = stats and math.floor(stats.time / 60)
+    local started, last_read
+    if stats and stats.first_read then
+        started = T(_("Started reading on %1"), shortDate(stats.first_read))
+    end
+    if stats and stats.last_read then
+        local date = os.date("%Y-%m-%d", stats.last_read)
+        local yesterday = os.date("*t")
+        yesterday.day = yesterday.day - 1
+        local label = date == os.date("%Y-%m-%d") and _("Today")
+            or date == os.date("%Y-%m-%d", os.time(yesterday)) and _("Yesterday")
+            or shortDate(stats.last_read)
+        last_read = T(_("Last read · %1"), label)
+    end
+    local count = #self.ui.annotation.annotations
+    local values = {
+        { _.pgettext("Book end", "Total reading time"), minutes, _.pgettext("Time", "min"), started },
+        { _("Reading days"), stats and stats.days, _.npgettext("Book end unit", "day", "days", stats and stats.days or 0), last_read },
+        { _.pgettext("Book end", "Thoughts and notes"), count, _.npgettext("Book end unit", "note", "notes", count), count > 0 and _("A book full of highlights") or nil },
+    }
+    local pad = dp(20)
+    local inner_w = width - 2 * (pad + Size.border.default)
+    local widths = { math.floor(inner_w * 0.44), math.floor(inner_w * 0.41) }
+    widths[3] = inner_w - widths[1] - widths[2]
+    local row = HorizontalGroup:new{ align = "top" }
+    for i, value in ipairs(values) do
+        local cell_w = widths[i]
+        local number = HorizontalGroup:new{
+            align = "bottom", statText(value[2] and tostring(value[2]) or "—", 18, cell_w, true),
+        }
+        if value[2] then
+            table.insert(number, statText(value[3], 11, cell_w, true))
+        end
+        local caption = value[4] and statText(value[4], 10, cell_w - (i == 3 and dp(9) or 0))
+        if i == 3 and caption then
+            caption = HorizontalGroup:new{
+                caption, IconWidget:new{ icon = "eink/chev", width = dp(9), height = dp(9), alpha = true, dim = true },
+            }
+        end
+        local content = VerticalGroup:new{
+            align = "left", statText(value[1], 11, cell_w, true),
+            VerticalSpan:new{ width = dp(3) }, number,
+            VerticalSpan:new{ width = dp(2) },
+            LeftContainer:new{ dimen = Geom:new{ w = cell_w, h = dp(14) }, caption or VerticalSpan:new{ width = dp(14) } },
+        }
+        local cell = LeftContainer:new{ dimen = Geom:new{ w = cell_w, h = dp(90) }, content }
+        if i == 3 then
+            cell = InputContainer:new{ dimen = cell.dimen:copy(), cell }
+            cell.ges_events.Notes = { GestureRange:new{ ges = "tap", range = cell.dimen } }
+            cell.onNotes = function() self.ui:handleEvent(Event:new("ShowNotes")) return true end
+            self.notes_button = cell
+        end
+        table.insert(row, cell)
+    end
+    return FrameContainer:new{
+        padding = 0, padding_left = pad, padding_right = pad,
+        bordersize = Size.border.default, radius = dp(16), color = Palette.ink, row,
+    }
 end
 
 function BookEnd:build()
@@ -83,35 +158,7 @@ function BookEnd:build()
         at(math.floor(sh * 0.275), self.mark_button)
     end
 
-    local stats = self.ui.statistics and self.ui.statistics:getStatsBookStatus()
-    local values = {}
-    if stats then
-        local minutes = math.floor(stats.time / 60)
-        local duration = minutes < 60 and T(N_("1 minute", "%1 minutes", minutes), minutes)
-            or T(_("%1 h %2 min"), math.floor(minutes / 60), minutes % 60)
-        table.insert(values, { _("Time spent reading"), duration })
-        table.insert(values, { _("Reading days"), T(N_("1 day", "%1 days", stats.days), stats.days) })
-    end
-    local count = #self.ui.annotation.annotations
-    table.insert(values, { _.pgettext("Notes page", "Notes"), tostring(count) })
-    local row = HorizontalGroup:new{ align = "center" }
-    local cell_w = math.floor((width - 2 * Size.border.default) / #values)
-    for i, value in ipairs(values) do
-        local content = VerticalGroup:new{
-            align = "left", text(value[1], "ui_label", cell_w - dp(16)),
-            VerticalSpan:new{ width = dp(4) }, text(value[2], "ui_title_large", cell_w - dp(16)),
-        }
-        local cell = CenterContainer:new{ dimen = Geom:new{ w = cell_w, h = dp(80) }, content }
-        if i == #values then
-            cell = InputContainer:new{ dimen = cell.dimen:copy(), cell }
-            cell.ges_events.Notes = { GestureRange:new{ ges = "tap", range = cell.dimen } }
-            cell.onNotes = function() self.ui:handleEvent(Event:new("ShowNotes")) return true end
-        end
-        table.insert(row, cell)
-    end
-    at(math.floor(sh * 0.368), FrameContainer:new{
-        padding = 0, bordersize = Size.border.default, radius = dp(16), color = Palette.ink, row,
-    })
+    at(math.floor(sh * 0.368), self:buildStatistics(width))
     self.state_rect = Geom:new{ x = math.floor((sw - width) / 2), w = width, h = column:getSize().h }
     self.exit_button = Button:new{
         text = _("Exit reading"), width = width, height = dp(44), radius = dp(12),
@@ -171,6 +218,7 @@ end
 
 function BookEnd:onTapBlock(_, ges)
     local menu = self.ui.menu
+    -- The original ReaderMenu, still supported without the toolbar replacement, has no tap layout.
     local layout = menu.getTapLayout and menu:getTapLayout() or {
         { 0, 0, 1/3, 1, "backward" }, { 1/3, 0, 1/3, 1, "toolbar" }, { 2/3, 0, 1/3, 1, "forward" },
     }

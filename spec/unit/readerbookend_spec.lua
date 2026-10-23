@@ -21,6 +21,7 @@ describe("Book end", function()
         UIManager:sendEvent(Event:new("Gesture", {
             ges = kind, pos = Geom:new{ x = x, y = y }, direction = direction, distance = 0, time = require("ui/time").now(),
         }))
+        UIManager:_checkTasks()
         UIManager:forceRePaint()
     end
 
@@ -79,7 +80,7 @@ describe("Book end", function()
         ffiUtil.purgeDir(home)
         lfs.mkdir(home)
         saved = {}
-        for __, key in ipairs{ "home_dir", "lastdir", "shelf_filter", "end_document_action", "end_document_auto_mark" } do
+        for __, key in ipairs{ "home_dir", "lastdir", "shelf_filter", "end_document_action", "end_document_auto_mark", "collate" } do
             saved[key] = G_reader_settings:readSetting(key)
             G_reader_settings:delSetting(key)
         end
@@ -95,7 +96,11 @@ describe("Book end", function()
     end)
 
     after_each(function()
-        if ui and ui.document then ui:onClose() end
+        if ui and ui.document then
+            ui.statistics = nil
+            ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_UPRIGHT))
+            ui:onClose()
+        end
         ui = nil
         if FileManager.instance then FileManager.instance:onClose() end
         while UIManager._window_stack[1] do UIManager:close(top()) end
@@ -105,7 +110,7 @@ describe("Book end", function()
 
     teardown(function()
         for key, value in pairs(saved) do G_reader_settings:saveSetting(key, value) end
-        for __, key in ipairs{ "home_dir", "lastdir", "shelf_filter", "end_document_action", "end_document_auto_mark" } do
+        for __, key in ipairs{ "home_dir", "lastdir", "shelf_filter", "end_document_action", "end_document_auto_mark", "collate" } do
             if saved[key] == nil then G_reader_settings:delSetting(key) end
         end
         Replacements.reader_menu, Replacements.filemanager = nil, nil
@@ -237,6 +242,7 @@ describe("Book end", function()
         tap(toc.bar.back)
         assert.are.equal(page, top())
         ui:handleEvent(Event:new("GotoPercent", 0))
+        UIManager:_checkTasks()
         UIManager:forceRePaint()
         assert.is_nil(ui.status.book_end)
         assert.are.equal(ui, top())
@@ -299,22 +305,168 @@ describe("Book end", function()
         end
     end)
 
-    it("keeps explicit automatic marking and end actions", function()
-        G_reader_settings:saveSetting("end_document_auto_mark", true)
+    for __, action in ipairs{ "default", "goto_beginning", "nothing", "pop-up", "mark_read", "file_browser", "next_file" } do
+        for ___, auto_mark in ipairs{ false, true } do
+            it("honors " .. action .. " with auto-mark " .. tostring(auto_mark), function()
+                G_reader_settings:saveSetting("end_document_auto_mark", auto_mark)
+                if action ~= "default" then G_reader_settings:saveSetting("end_document_action", action) end
+                G_reader_settings:saveSetting("collate", "strcoll")
+                local file = home .. "/juliet.epub"
+                open(file)
+                lastPage()
+                assert.are.equal("reading", ui.doc_settings:readSetting("summary").status)
+                nextPage()
+                UIManager:_checkTasks()
+                UIManager:_checkTasks()
+                UIManager:forceRePaint()
+                if action == "file_browser" then
+                    assert.are.equal(FileManager.instance, top())
+                    assert.is_nil(ui.document)
+                    assert.are.equal(auto_mark and "complete" or "reading", DocSettings:open(file):readSetting("summary").status)
+                elseif action == "next_file" then
+                    ui = ReaderUI.instance
+                    assert.are.equal(ui, top())
+                    assert.are.equal(home .. "/sample.pdf", ui.document.file)
+                    assert.are.equal(auto_mark and "complete" or "reading", DocSettings:open(file):readSetting("summary").status)
+                else
+                    assert.are.equal((auto_mark or action == "mark_read") and "complete" or "reading", ui.doc_settings:readSetting("summary").status)
+                    if action == "default" then
+                        assert.are.equal(ui.status.book_end, top())
+                        assert.is_truthy(find(top(), _.pgettext("Book end", auto_mark and "Finished" or "Mark as finished")))
+                    elseif action == "pop-up" then
+                        assert.are.equal("end_document", top().name)
+                        assert.is_truthy(find(top(), _("Go to beginning")))
+                    elseif action == "mark_read" then
+                        assert.is_truthy(find(top(), _("You've reached the end of the document.\nThe current book has been marked as finished.")))
+                    else
+                        assert.are.equal(ui, top())
+                        assert.are.equal(action == "goto_beginning" and 1 or ui.document:getPageCount(), ui:getCurrentPage())
+                    end
+                end
+            end)
+        end
+    end
+
+    for __, file in ipairs{ "juliet.epub", "sample.pdf" } do
+        it("keeps the book end open across portrait and landscape rotation: " .. file, function()
+            open(home .. "/" .. file)
+            lastPage()
+            nextPage()
+            local page = ui.status.book_end
+            for ___, mode in ipairs{ Screen.DEVICE_ROTATED_CLOCKWISE, Screen.DEVICE_ROTATED_UPRIGHT } do
+                ui:handleEvent(Event:new("SetRotationMode", mode))
+                UIManager:_checkTasks()
+                UIManager:forceRePaint()
+                assert.are.equal(page, ui.status.book_end)
+                assert.are.equal(page, top())
+                assert.are.equal(Screen:getWidth(), page.dimen.w)
+                assert.are.equal(Screen:getHeight(), page.dimen.h)
+                assert.is_truthy(find(page, _("The End")))
+                assert.is_true(page.exit_button.dimen.y + page.exit_button.dimen.h <= page.dimen.h)
+            end
+            gesture("tap", Screen:getWidth() * 0.1, Screen:getHeight() / 2)
+            assert.is_nil(ui.status.book_end)
+        end)
+    end
+
+    it("snapshots statistics once while rebuilding the three-column card", function()
+        open(home .. "/juliet.epub")
+        local calls = 0
+        local now = os.time()
+        ui.statistics = { getStatsBookStatus = function()
+            calls = calls + 1
+            return { time = 33 * 60, days = 4, first_read = now - 3 * 86400, last_read = now }
+        end }
+        lastPage()
+        nextPage()
+        local page = ui.status.book_end
+        assert.is_truthy(find(page, "33"))
+        assert.is_truthy(find(page, "4"))
+        assert.is_true(find(page, "33").face.size > find(page, _.pgettext("Time", "min")).face.size)
+        assert.is_truthy(find(page, _("Last read · %1"):gsub("%%1", _("Today"))))
+        toolbar()
+        tap(ui.menu.bookmark_button)
+        UIManager:close(top())
+        tap(page.mark_button)
+        ui:handleEvent(Event:new("SetDimensions", Screen:getSize()))
+        UIManager:_checkTasks()
+        UIManager:forceRePaint()
+        assert.are.equal(1, calls)
+        assert.is_truthy(find(page, _("A book full of highlights")))
+        tap(page.notes_button)
+        assert.are.equal(ui.menu.drawer, top())
+        ui.statistics = nil
+    end)
+
+    it("keeps three columns and shows unavailable statistics as dashes", function()
         open(home .. "/juliet.epub")
         lastPage()
-        assert.are.equal("reading", ui.doc_settings:readSetting("summary").status)
         nextPage()
-        assert.are.equal("complete", ui.doc_settings:readSetting("summary").status)
-        assert.is_truthy(find(ui.status.book_end, _.pgettext("Book end", "Finished")))
-        gesture("swipe", 100, 200, "east")
-        G_reader_settings:saveSetting("end_document_action", "goto_beginning")
+        local page = ui.status.book_end
+        assert.is_truthy(find(page, _.pgettext("Book end", "Total reading time")))
+        assert.is_truthy(find(page, _("Reading days")))
+        assert.is_truthy(find(page, _.pgettext("Book end", "Thoughts and notes")))
+        assert.is_truthy(find(page, "—"))
+        assert.is_nil(find(page, _("A book full of highlights")))
+    end)
+
+    for __, days_ago in ipairs{ 0, 1, 7 } do
+        it("shows the start date and last-read date for " .. days_ago .. " days ago", function()
+            open(home .. "/juliet.epub")
+            local date = os.date("*t")
+            date.day = date.day - days_ago
+            local last_read = os.time(date)
+            ui.statistics = { getStatsBookStatus = function()
+                return { time = 60, days = 1, first_read = last_read, last_read = last_read }
+            end }
+            lastPage()
+            nextPage()
+            local T = ffiUtil.template
+            local short_date = T(_.pgettext("Book end date", "%1/%2"), tonumber(os.date("%m", last_read)), tonumber(os.date("%d", last_read)))
+            local label = days_ago == 0 and _("Today") or days_ago == 1 and _("Yesterday") or short_date
+            assert.is_truthy(find(ui.status.book_end, T(_("Started reading on %1"), short_date)))
+            assert.is_truthy(find(ui.status.book_end, T(_("Last read · %1"), label)))
+        end)
+    end
+
+    it("enters the book end after the final viewport in scroll mode", function()
+        open(home .. "/juliet.epub")
+        ui:handleEvent(Event:new("SetViewMode", "scroll"))
+        -- Dismiss the existing mode notification.
+        while top() ~= ui do UIManager:close(top()) end
+        ui:handleEvent(Event:new("GotoPercent", 100))
+        UIManager:forceRePaint()
+        for i = 1, 3 do
+            if ui.status.book_end then break end
+            nextPage()
+        end
+        assert.are.equal(ui.status.book_end, top())
+        assert.is_truthy(find(top(), _("The End")))
+    end)
+
+    it("enters the book end at the last linear page when the appendix is hidden", function()
+        local file = home .. "/hidden.epub"
+        local epub = require("ffi/archiver").Writer:new{}
+        assert.is_true(epub:open(file, "epub"))
+        epub:setZipCompression("store")
+        epub:addFileFromMemory("mimetype", "application/epub+zip", os.time())
+        epub:setZipCompression("deflate")
+        local files = {
+            ["META-INF/container.xml"] = '<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>',
+            ["content.opf"] = '<package version="2.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Hidden appendix</dc:title><dc:identifier id="id">book-end-hidden</dc:identifier><dc:language>en</dc:language></metadata><manifest><item id="body" href="body.xhtml" media-type="application/xhtml+xml"/><item id="appendix" href="appendix.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="body"/><itemref idref="appendix" linear="no"/></spine></package>',
+            ["body.xhtml"] = '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>The last body page.</p></body></html>',
+            ["appendix.xhtml"] = '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Hidden appendix.</p></body></html>',
+        }
+        for name, contents in pairs(files) do epub:addFileFromMemory(name, contents, os.time()) end
+        epub:close()
+        open(file)
+        ui:handleEvent(Event:new("ToggleHideNonlinear"))
+        assert.is_true(ui.document:hasHiddenFlows())
+        ui:handleEvent(Event:new("GotoPage", ui.document:getLastLinearPage()))
+        UIManager:forceRePaint()
         nextPage()
-        assert.is_nil(ui.status.book_end)
-        assert.are.equal(1, ui:getCurrentPage())
-        G_reader_settings:saveSetting("end_document_action", "nothing")
-        lastPage()
-        nextPage()
-        assert.is_nil(ui.status.book_end)
+        assert.are.equal(ui.status.book_end, top())
+        assert.is_truthy(find(top(), _("The End")))
+        assert.is_true(ui:getCurrentPage() < ui.document:getPageCount())
     end)
 end)

@@ -788,7 +788,7 @@ local end_actions_enabled_funcs = {
 }
 for i = 1, #end_actions do
     table.insert(common_settings.document_end_action.sub_item_table,
-        genGenericMenuEntry(end_actions_texts[i], "end_document_action", end_actions[i], "book_end",
+        genGenericMenuEntry(end_actions_texts[i], "end_document_action", end_actions[i], ReaderStatus.DEFAULT_END_ACTION,
             end_actions_enabled_funcs[end_actions[i]]))
 end
 
