@@ -68,6 +68,7 @@ local GUTTER = dp(22) -- at least, on each side of the column
 local PAGE_TOP = dp(12) -- from the title band to the first card
 local BOTTOM_GAP = dp(13) -- at least, from the last card to the bar
 local CARD_R = dp(14)
+local CARD_BORDER = dp(0.94) -- 2px on the Leaf5, as in the reference (1dp rounds up to 3px), like the lookup cards
 local CARD_PAD_X = dp(20)
 local CARD_PAD_Y = dp(18)
 local CARD_GAP = dp(13)
@@ -261,7 +262,8 @@ function NotesPage:init()
     self.list_h = self.content_rect.h - PAGE_TOP - BOTTOM_GAP
     self.text_face = Font:getFace("ui_body", EXCERPT_SIZE)
     self.text_line_h = math.floor((1 + TEXT_LINE) * self.text_face.size + 0.5) -- as TextBoxWidget does
-    self.text_w = self.column_w - 2 * Size.border.default - 2 * CARD_PAD_X - DISC - DISC_GAP
+    self.inner_w = self.column_w - 2 * CARD_BORDER - 2 * CARD_PAD_X -- inside a card's outline and side padding
+    self.text_w = self.inner_w - DISC - DISC_GAP
     self.page_texts = {} -- bookmark => the text its page starts with
     self:collect()
     local left = positions[self.ui.document]
@@ -323,14 +325,14 @@ function NotesPage:height(i)
     if h then return h end
     local entry = self.entries[i]
     if entry.kind == "overview" then
-        h = 2 * Size.border.default + 2 * CARD_PAD_X + COVER_H
+        h = 2 * CARD_BORDER + 2 * CARD_PAD_X + COVER_H
     elseif entry.kind == "empty" then
         h = EMPTY_H
     elseif entry.kind == "heading" then
         h = HEADING_H
     else
         local body = self:cardBody(entry)
-        h = 2 * Size.border.default + 2 * CARD_PAD_Y + body:getSize().h
+        h = 2 * CARD_BORDER + 2 * CARD_PAD_Y + body:getSize().h
         body:free()
     end
     self.heights[i] = h
@@ -427,10 +429,10 @@ function NotesPage:cardBody(entry)
     return body
 end
 
---- A paper card with a 1dp ink outline and 14dp corners, `self.column_w` wide.
+--- A paper card with an ink outline and 14dp corners, `self.column_w` wide when its content is `self.inner_w`.
 function NotesPage:card(content, pad_y, pad_x)
     return FrameContainer:new{
-        radius = CARD_R, bordersize = Size.border.default, color = Palette.ink, background = Palette.paper,
+        radius = CARD_R, bordersize = CARD_BORDER, color = Palette.ink, background = Palette.paper,
         padding = 0, padding_top = pad_y, padding_bottom = pad_y, padding_left = pad_x, padding_right = pad_x,
         content,
     }
@@ -495,8 +497,7 @@ function NotesPage:readingTime()
 end
 
 function NotesPage:buildOverview()
-    local inner_w = self.column_w - 2 * Size.border.default - 2 * CARD_PAD_X
-    local text_w = inner_w - COVER_W - dp(16)
+    local text_w = self.inner_w - COVER_W - dp(16)
     local percent = math.floor(self.ui:getCurrentPage() / self.ui.document:getPageCount() * 100)
     local info = VerticalGroup:new{
         align = "left",
@@ -523,15 +524,14 @@ function NotesPage:buildOverview()
 end
 
 function NotesPage:buildEmpty()
-    local inner_w = self.column_w - 2 * Size.border.default - 2 * CARD_PAD_X
     local message = TextBoxWidget:new{
         -- @translators On the notes page of a book without notes (thoughts, highlights and bookmarks).
         text = _("You can keep your thoughts, highlights and bookmarks on this book here."),
-        face = Font:getFace("ui_body"), width = inner_w, alignment = "center",
+        face = Font:getFace("ui_body"), width = self.inner_w, alignment = "center",
         fgcolor = Palette.ink, bgcolor = Palette.paper,
     }
     return self:card(CenterContainer:new{
-        dimen = Geom:new{ w = inner_w, h = EMPTY_H - 2 * Size.border.default },
+        dimen = Geom:new{ w = self.inner_w, h = EMPTY_H - 2 * CARD_BORDER },
         message,
     }, 0, CARD_PAD_X)
 end
