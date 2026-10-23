@@ -95,35 +95,53 @@ end
 
 local function getExternalFontDir()
     if CanvasContext:hasSystemFonts() then
-        -- Enable Android's offline fonts on first use, keeping an explicit opt-out and the original menu in sync.
-        if CanvasContext:isAndroid() and not G_reader_settings:has("system_fonts") then
-            G_reader_settings:saveSetting("system_fonts", true)
-        end
         return require("ui/elements/font_settings"):getPath()
     else
         return os.getenv("EXT_FONT_DIR")
     end
 end
 
+function FontList:isSystemFont(file)
+    return file and (file:match("^/system/fonts/") or file:match("^/product/fonts/")
+        or file:match("^/system_ext/fonts/")) ~= nil
+end
+
+function FontList:hasChinese(file, index)
+    if not file then return false end
+    local info = self.fontinfo[file] and self.fontinfo[file][index + 1]
+    if info and info.has_chinese ~= nil then return info.has_chinese end
+    local ok, ftsize = pcall(FT.newFaceSize, file, 16, index)
+    if not ok then
+        logger.warn("Unable to check Chinese font coverage:", file, index, ftsize)
+        return false
+    end
+    local has_chinese = ftsize:hasGlyph(0x4E2D) -- 中
+    ftsize:done()
+    if info then info.has_chinese = has_chinese end
+    return has_chinese
+end
+
 function FontList:getSystemFontFace()
-    if self.system_font_face then return self.system_font_face end
     local cre = require("document/credocument"):engineInit()
+    local chosen, priority
     for _, face in ipairs(cre.getFontFaces()) do
         local file, index = cre.getFontFaceFilenameAndFaceIndex(face)
-        if file and file:match("^/system/fonts/") then
-            local ok, ftsize = pcall(FT.newFaceSize, file, 16, index)
-            if ok then
-                local has_chinese = ftsize:hasGlyph(0x4E2D) -- 中
-                ftsize:done()
-                if has_chinese then
-                    self.system_font_face = face
-                    return face
-                end
+        if self:isSystemFont(file) and self:hasChinese(file, index) then
+            local name = face:lower():gsub("[%s%-]", "")
+            local rank = 3
+            if name:find("sanscjksc", 1, true) or name:find("sanssc", 1, true)
+                or name:find("droidsansfallback", 1, true) then
+                rank = 1
+            elseif name:find("cjksc", 1, true) then
+                rank = 2
+            end
+            if not priority or rank < priority then
+                chosen, priority = face, rank
+                if rank == 1 then break end
             end
         end
     end
-    self.system_font_face = "Noto Sans CJK SC"
-    return self.system_font_face
+    return chosen or "Noto Sans CJK SC"
 end
 
 -- Query FreeType/HarfBuzz about font metadata
@@ -145,6 +163,7 @@ local function collectFaceInfo(path)
             local hbface = HB.hb_ft_face_create_referenced(ftsize.face)
             fres.names = hbface:getNames()
             fres.scripts, fres.langs = hbface:getCoverage()
+            fres.has_chinese = ftsize:hasGlyph(0x4E2D) -- 中
             fres.path = path
             fres.index = i
             table.insert(res, fres)

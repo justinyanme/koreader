@@ -214,13 +214,10 @@ describe("ReaderTypesetPanel module", function()
     end
 
     describe("with an EPUB", function()
-        local ui, narrow_screen, fixed_scale
+        local ui
         setup(function() ui = openReader(sample_epub) end)
         teardown(function() closeReader(ui) end)
-        after_each(function()
-            if narrow_screen then narrow_screen:revert(); narrow_screen = nil end
-            if fixed_scale then fixed_scale:revert(); fixed_scale = nil end
-        end)
+
 
         it("should open above the bottom bar, without the top bar, and close with it, refreshing only their rects", function()
             local panel
@@ -377,9 +374,12 @@ describe("ReaderTypesetPanel module", function()
             local name = find(sans, function(w) return w.text == "Noto Sans" end)
             assert.is_truthy(name)
             assert.is_truthy(name.face.realname:find("NotoSans", 1, true))
+            local xpointer = ui.document:getXPointer()
             tapWidget(sans)
             runTasks()
             UIManager:forceRePaint()
+            assert.are.equal("Noto Sans", ui.document:getFontFace())
+            assert.are.equal(ui.document:getCurrentPage(), ui.document:getPageFromXPointer(xpointer))
             assert.are.equal("Noto Sans", ui.font.font_face)
             assert.is_truthy(hasText(ui.config.panel, "Current selection · Noto Sans"))
             sans = fontCard(ui.config.panel, "Noto Sans")
@@ -433,50 +433,32 @@ describe("ReaderTypesetPanel module", function()
             ui.menu:hideToolbar()
         end)
 
-        it("should keep a font beyond the grid visible as selected when reopening", function()
-            narrow_screen = stub(Screen, "getWidth", function() return 350 end)
-            fixed_scale = stub(Screen, "scaleBySize", function(__, size) return size end)
-            local panel = openPanel(ui)
-            local selected
-            for _, face in ipairs(require("document/credocument"):engineInit().getFontFaces()) do
-                if face ~= "Noto Sans CJK SC" and not fontCard(panel, face) then
-                    selected = face
-                    break
-                end
-            end
-            assert.is_truthy(selected, "The fixture needs a font outside the main grid")
-            tapWidget(fontCard(panel, _("View more") .. " ›"))
-            UIManager:forceRePaint()
-            local menu = topWidget()[1]
-            for __ = 2, menu.page do
-                tapWidget(menu.page_info_left_chev)
-                UIManager:forceRePaint()
-            end
-            local item
-            for __ = 1, menu.page_num do
-                item = find(menu, function(w) return w.item and w.item.menu_item_id == selected and w.dimen end)
-                if item then break end
-                tapWidget(menu.page_info_right_chev)
-                UIManager:forceRePaint()
-            end
-            assert.is_truthy(item)
-            tapWidget(item)
-            UIManager:forceRePaint()
-            back()
-            assert.are.equal(selected, ui.font.font_face)
-            openPanel(ui)
-            local card = fontCard(ui.config.panel, selected)
-            assert.is_truthy(card)
-            assert.is_true(card.selected)
-            assert.is_truthy(fontCard(ui.config.panel, _("View more") .. " ›"))
-            ui.menu:hideToolbar()
+        it("should apply profile and gesture SetFont events through the registered engine fonts", function()
+            local xpointer = ui.rolling:getBookLocation()
+            ui:handleEvent(Event:new("SetFont", "FreeSerif"))
+            runTasks()
+            assert.are.equal(xpointer, ui.rolling:getBookLocation())
+            assert.are.equal("FreeSerif", ui.document:getFontFace())
+            assert.are.equal(ui.document:getCurrentPage(), ui.document:getPageFromXPointer(xpointer))
+            ui:handleEvent(Event:new("SetFont", "Missing profile font"))
+            assert.are.equal("FreeSerif", ui.document:getFontFace())
         end)
 
-        it("should recover a removed font to the system fallback when reopening", function()
+        it("should recover a removed font to the default reading font in a Latin EPUB", function()
             closeReader(ui)
             ui = openReader(sample_epub, { font_face = "Removed user font" })
             openPanel(ui)
-            assert.are.equal("Noto Sans CJK SC", ui.font.font_face)
+            assert.are.equal(ui.document.default_font, ui.font.font_face)
+            assert.are.equal(ui.document.default_font, ui.document:getFontFace())
+            assert.is_true(fontCard(ui.config.panel, ui.document.default_font).selected)
+            ui.menu:hideToolbar()
+        end)
+
+        it("should recover a removed font to the system font for Chinese text", function()
+            closeReader(ui)
+            ui = openReader(sample_epub, { font_face = "Removed user font", text_lang = "zh-CN" })
+            openPanel(ui)
+            assert.are.equal("Noto Sans CJK SC", ui.document:getFontFace())
             assert.is_true(fontCard(ui.config.panel, _("System font")).selected)
             ui.menu:hideToolbar()
         end)

@@ -555,16 +555,29 @@ function ReaderTypesetPanel:fontCards(width)
     end
     local faces, seen = {}, {}
     local function add(face)
-        if not seen[face] and util.arrayContains(available, face) then
-            seen[face] = true
-            table.insert(faces, face)
+        if not face or seen[face] or not util.arrayContains(available, face) then return end
+        local name = face:lower()
+        for _, pattern in ipairs{ "clock", "emoji", "symbol", "dancing", "coming soon", "cutive", "script", "dingbat" } do
+            if name:find(pattern, 1, true) then return end
         end
+        seen[face] = true
+        table.insert(faces, face)
     end
     add(system_face)
-    -- Keep the common Latin faces within reach alongside the CJK system face.
-    add("Noto Sans")
-    add("Noto Serif")
-    for _, face in ipairs(available) do add(face) end
+    for _, face in ipairs(G_reader_settings:readSetting("cre_fonts_recently_selected", {})) do add(face) end
+    local groups = { {}, {}, {}, {} } -- Chinese, user, bundled, other system fonts
+    for _, face in ipairs(available) do
+        if not seen[face] then
+            local __, file, index = fontDetails(face)
+            local group = FontList:hasChinese(file, index) and 1
+                or FontList:isSystemFont(file) and 4
+                or (file and file:sub(1, #FontList.fontdir + 1) == FontList.fontdir .. "/") and 3 or 2
+            table.insert(groups[group], face)
+        end
+    end
+    for _, group in ipairs(groups) do
+        for _, face in ipairs(group) do add(face) end
+    end
     local count = math.min(#faces + 1, columns * 3)
     local current_index = util.arrayContains(faces, current)
     if current_index and current_index >= count then faces[count - 1] = current end

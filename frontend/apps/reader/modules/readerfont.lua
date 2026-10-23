@@ -165,7 +165,8 @@ function ReaderFont:onReadSettings(config)
                   or G_reader_settings:readSetting("cre_font")
                   or self.ui.document.default_font
     if not util.arrayContains(cre.getFontFaces(), self.font_face) then
-        self.font_face = FontList:getSystemFontFace()
+        self.font_face = self.ui.document.default_font
+        self.missing_font = true
     end
     self.ui.document:setFontFace(self.font_face)
 
@@ -299,6 +300,18 @@ function ReaderFont:onSetFontGamma(gamma)
     self.ui:handleEvent(Event:new("RedrawCurrentView"))
     Notification:notify(T(_("Font gamma set to: %1."), gamma_level))
     return true
+end
+
+function ReaderFont:onTypographyLanguageChanged()
+    if not self.missing_font then return end
+    local lang = self.ui.typography.text_lang_tag or ""
+    local face = lang:lower():match("^zh") and FontList:getSystemFontFace() or self.ui.document.default_font
+    self.font_face = face
+    self.ui.document:setFontFace(face)
+end
+
+function ReaderFont:onReaderReady()
+    self.missing_font = nil
 end
 
 function ReaderFont:onSaveSettings()
