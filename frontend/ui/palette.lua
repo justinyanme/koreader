@@ -20,9 +20,9 @@ return {
     ink_2 = Blitbuffer.COLOR_GRAY_5, -- secondary text
     ink_3 = Blitbuffer.COLOR_GRAY_9, -- disabled, chevrons, fine print
     rule = Blitbuffer.COLOR_GRAY_D, -- row dividers, disabled outlines
+    confirm_rule = Blitbuffer.COLOR_GRAY_B, -- dividers of a confirm layer: DESIGN.md's rule gray, darker than the wash
+    wash = Blitbuffer.COLOR_GRAY_D, -- where ink lands on the page washed behind a confirm layer
     mark = Blitbuffer.COLOR_LIGHT_GRAY, -- marker highlight fill
-    bubble_rule = Blitbuffer.COLOR_GRAY_4, -- dividers inside the black selection bubble
-    marker_on_ink = Blitbuffer.COLOR_DARK_GRAY, -- marker swatch on the black bubble
     -- typographic covers only
     cover_stock = Blitbuffer.COLOR_GRAY_D,
     cover_tint = Blitbuffer.COLOR_GRAY_B,

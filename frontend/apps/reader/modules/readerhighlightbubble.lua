@@ -1,21 +1,23 @@
 --[[--
-Selection and highlight bubbles of the e-ink redesign (see DESIGN.md, Selection
-bubble and Highlights).
+Selection and highlight popovers of the e-ink redesign (see DESIGN.md, Selection
+popover and Highlights).
 
 Replaces ReaderHighlight (apps/replacements reader_highlight slot):
-- a long-press selects a word, dragging extends it, and releasing shows a black
-  bubble: copy, highlight, write note, look up, search;
-- tapping a highlight shows its styles (marker, line, wave) and write or edit
+- a long-press selects a word, dragging extends it, and releasing shows the
+  white selection popover: copy, highlight, write note, look up, search, each an
+  icon over its label;
+- tapping a highlight shows its styles (marker, line, wave) over write or edit
   note, copy, look up, delete;
 - a note is written in a bottom sheet; highlights with a note get a small mark
   after their last character.
 
 The style last picked is used for new highlights in every book.
 
-Refreshes: the selection bubble shows and closes with "fast" on its own rect
-(it is black and white). The highlight bubble shows a gray marker swatch, so it
-uses "ui" on its rect. Saving, restyling or deleting a highlight refreshes its
-own lines with "ui"; nothing here refreshes the whole screen.
+Refreshes: the selection popover shows and closes with "fast" on its own rect
+(it is black and white). The highlight popover shows a gray marker swatch and a
+gray line between its rows, so it uses "ui" on its rect. Saving, restyling or
+deleting a highlight refreshes its own lines with "ui"; nothing here refreshes
+the whole screen.
 ]]
 
 local BottomSheet = require("ui/widget/bottomsheet")
@@ -51,13 +53,13 @@ local C_ = _.pgettext
 -- marker, line, wave (doc/adr/0003-wavy-highlight-style.md)
 local STYLES = { "lighten", "underscore", "wave" }
 
---- Style swatch on the bubble: a serif 文 drawn in the style, paper on ink.
+--- Style swatch on the popover: a serif 文 drawn in the style, ink on paper.
 local StyleSwatch = Widget:extend{
     drawer = nil,
 }
 
 function StyleSwatch:init()
-    self.glyph = TextWidget:new{ text = "文", face = Font:getFace("ui_excerpt"), fgcolor = Palette.paper }
+    self.glyph = TextWidget:new{ text = "文", face = Font:getFace("ui_excerpt"), fgcolor = Palette.ink }
     local g = self.glyph:getSize()
     self.pad = Screen:scaleBySize(3)
     self.glyph_h = g.h
@@ -67,14 +69,14 @@ end
 function StyleSwatch:paintTo(bb, x, y)
     local w = self.dimen.w
     if self.drawer == "lighten" then
-        bb:paintRect(x, y, w, self.glyph_h, Palette.marker_on_ink)
+        bb:paintRect(x, y, w, self.glyph_h, Palette.mark)
     end
     self.glyph:paintTo(bb, x + self.pad, y)
     local line_y = y + self.glyph_h + Screen:scaleBySize(2)
     if self.drawer == "underscore" then
-        bb:paintRect(x, line_y, w, Screen:scaleBySize(2), Palette.paper)
+        bb:paintRect(x, line_y, w, Screen:scaleBySize(2), Palette.ink)
     elseif self.drawer == "wave" then
-        ReaderView.paintWave(bb, x, line_y, w, Palette.paper)
+        ReaderView.paintWave(bb, x, line_y, w, Palette.ink)
     end
 end
 
@@ -300,7 +302,7 @@ function ReaderHighlightBubble:onHoldRelease()
     return true
 end
 
---- Selection bubble: copy, highlight, write note, look up, search.
+--- Selection popover: copy, highlight, write note, look up, search.
 function ReaderHighlightBubble:onShowHighlightMenu(index)
     if not self.selected_text then return end
     local rects = self:selectionRects()
@@ -310,12 +312,12 @@ function ReaderHighlightBubble:onShowHighlightMenu(index)
     local text = util.cleanupSelectedText(self.selected_text.text)
     local bubble = SelectionBubble:new{
         rows = { {
-            { text = C_("Text", "Copy"), callback = function()
+            { icon = "eink/copy", text = C_("Text", "Copy"), callback = function()
                 Device.input.setClipboardText(text)
                 self:dismiss()
                 UIManager:show(Notification:new{ text = _("Selection copied to clipboard.") })
             end },
-            { text = C_("Highlight bubble", "Highlight"), callback = function()
+            { icon = "eink/highlight", text = C_("Highlight bubble", "Highlight"), callback = function()
                 -- a selection across pages turns back to its first page when cleared: wait for the repaint
                 local turns_back = self.restore_page_mode_func ~= nil
                 local index = self:saveSelection()
@@ -326,11 +328,11 @@ function ReaderHighlightBubble:onShowHighlightMenu(index)
                     self:showHighlightBubble(index, rects)
                 end
             end },
-            { text = C_("Highlight bubble", "Write note"), callback = function()
+            { icon = "eink/thought", text = C_("Highlight bubble", "Write note"), callback = function()
                 local index = self:saveSelection()
                 if index then self:showNoteSheet(index, true) end
             end },
-            { text = C_("Highlight bubble", "Look up"), callback = function()
+            { icon = "eink/search", text = C_("Highlight bubble", "Look up"), callback = function()
                 self:closeBubble()
                 -- the dictionary popup clears the selection
                 if self.selected_text.text == "" and self.selected_text.sboxes then
@@ -339,16 +341,15 @@ function ReaderHighlightBubble:onShowHighlightMenu(index)
                     self:lookupDict()
                 end
             end },
-            { text = _("Search"), callback = function()
+            { icon = "eink/search-text", text = _("Search"), callback = function()
                 self:dismiss()
                 self.ui.search:searchCallback(nil, text) -- all results, paginated
             end },
         } },
         anchor_rects = rects,
-        rule_color = Palette.paper, -- the bubble is black and white, so "fast" renders it right
         tap_close_callback = function() self:dismiss() end,
     }
-    bubble.refresh_type = "fast"
+    bubble.refresh_type = "fast" -- black and white
     self:showBubble(bubble)
 end
 
@@ -365,7 +366,7 @@ function ReaderHighlightBubble:showHighlightNoteOrDialog(index)
     self:showHighlightBubble(index)
 end
 
---- Highlight bubble: styles, then write or edit note, copy, look up, delete.
+--- Highlight popover: styles, then write or edit note, copy, look up, delete.
 -- rects: screen rects of the highlight when it has not been painted yet
 function ReaderHighlightBubble:showHighlightBubble(index, rects)
     local item = self.ui.annotation.annotations[index]
@@ -388,22 +389,23 @@ function ReaderHighlightBubble:showHighlightBubble(index, rects)
         rows = {
             styles,
             {
-                { text = item.note and C_("Highlight bubble", "Edit note") or C_("Highlight bubble", "Write note"),
+                { icon = "eink/thought",
+                  text = item.note and C_("Highlight bubble", "Edit note") or C_("Highlight bubble", "Write note"),
                   callback = function()
                     self:closeBubble()
                     self:showNoteSheet(index)
                 end },
-                { text = C_("Text", "Copy"), callback = function()
+                { icon = "eink/copy", text = C_("Text", "Copy"), callback = function()
                     Device.input.setClipboardText(item.text)
                     self:closeBubble()
                     UIManager:show(Notification:new{ text = _("Selection copied to clipboard.") })
                 end },
-                { text = C_("Highlight bubble", "Look up"), callback = function()
+                { icon = "eink/search", text = C_("Highlight bubble", "Look up"), callback = function()
                     self:closeBubble()
                     self.selected_text = util.tableDeepCopy(item)
                     self:lookupDict(index)
                 end },
-                { text = _("Delete"), callback = function()
+                { icon = "eink/highlight-off", text = _("Delete"), callback = function()
                     self:closeBubble()
                     self:deleteHighlight(index)
                 end },
@@ -412,7 +414,7 @@ function ReaderHighlightBubble:showHighlightBubble(index, rects)
         anchor_rects = rects,
         tap_close_callback = function() self:closeBubble() end,
     }
-    bubble.refresh_type = "ui" -- the marker swatch is gray
+    bubble.refresh_type = "ui" -- the marker swatch and the line between the rows are gray
     self:showBubble(bubble)
 end
 
