@@ -172,6 +172,7 @@ local ReaderToolbar = ReaderMenu:extend{
     panel = nil, -- ui/widget/panel open between the page and the bottom bar
     panel_name = nil, -- the entry of that panel: "progress", "brightness", "more" or "font"
     drawer = nil, -- the full-screen page shown over the book: the contents page or the notes page
+    notes_return = nil, -- filter to restore on the first notes entry after a card jump
     hint = nil, -- ReaderToolbarHint while the open-book hint shows
 }
 
@@ -218,14 +219,48 @@ end
 
 --- Reading page footer, as in WeChat Read: the time at the left, the current page / pages at the right.
 -- Only replaces a footer the user never customized, i.e. absent or still equal to upstream's defaults
--- (the one-time migration saves the default footer on first start) or to the first round's.
+-- (the one-time migration saves the default footer on first start) or to the first round's. A footer holding only
+-- the time, which the settings' 阅读时显示时间 saves when there is no footer yet, gets this one with that time.
 function ReaderToolbar.applyFooterDefaults()
     local util = require("util")
     local footer = G_reader_settings:readSetting("footer")
-    if footer == nil or util.tableEquals(footer, require("apps/reader/modules/readerfooter").default_settings)
+    local only_time = footer ~= nil and next(footer) == "time" and next(footer, "time") == nil
+    if footer == nil or only_time
+            or util.tableEquals(footer, require("apps/reader/modules/readerfooter").default_settings)
             or util.tableEquals(footer, footerSettings(FOOTER_V1)) then
-        G_reader_settings:saveSetting("footer", footerSettings(FOOTER))
+        local settings = footerSettings(FOOTER)
+        if only_time then
+            settings.time = footer.time
+        end
+        G_reader_settings:saveSetting("footer", settings)
     end
+end
+
+--- The settings' 阅读时显示时间 toggle (WeChat Read's 13-reading-preferences/02-settings.png): the footer's time
+-- item, the same setting as its checkbox in the status bar menu. With `ui` a reader, its footer follows at once;
+-- elsewhere, the next book's footer does. Without a footer setting yet, it saves the time alone, for
+-- applyFooterDefaults() to complete with the default footer, which a full footer would count as the user's own.
+function ReaderToolbar.genTimeMenuItem(ui)
+    local footer = ui and ui.view and ui.view.footer
+    local function settings()
+        if footer then return footer.settings end
+        return G_reader_settings:readSetting("footer") or footerSettings(FOOTER)
+    end
+    return {
+        text = _("Show time while reading"),
+        checked_func = function()
+            return settings().time == true
+        end,
+        callback = function()
+            if footer then
+                footer:toggleItem("time")
+            else
+                local saved = G_reader_settings:readSetting("footer") or {}
+                saved.time = not settings().time
+                G_reader_settings:saveSetting("footer", saved)
+            end
+        end,
+    }
 end
 
 function ReaderToolbar:initGesListener()
@@ -307,13 +342,54 @@ function ReaderToolbar:onReaderFooterVisibilityChange()
     end
 end
 
+-- Whether page turn taps go to the sides of the page (the default thirds, or custom zones side by side) rather than
+-- to its top and bottom.
+local function turnsPagesOnSides()
+    local zones = G_reader_settings:readSetting("page_turns_tap_zones", "default")
+    return zones == "default" or zones == "left_right"
+end
+
 --[[--
 Where taps go on the page, as screen-ratio rects: { x, y, w, h, kind } with kind
 "backward", "forward", "toolbar" or "none" (page turn taps disabled), first match wins.
 Default: thirds. Custom page turn zones keep their size; the toolbar gets the band
-left between them, or the screen's center when they leave none.
+left between them, or the screen's center when they leave none. With 点击左侧翻到下一页
+(see genLeftTapForwardMenuItem) and zones on the sides, the backward side goes forward
+too, so that both sides turn to the next page.
 ]]
 function ReaderToolbar:getTapLayout()
+    local layout = self:getPageTurnTapLayout()
+    if G_reader_settings:isTrue("page_turns_left_tap_forward") and turnsPagesOnSides() then
+        -- not a swap: the side going forward keeps going forward (the right, or the left with inverted page turns)
+        for _, z in ipairs(layout) do
+            if z[5] == "backward" then
+                z[5] = "forward"
+            end
+        end
+    end
+    return layout
+end
+
+--- The settings' 点击左侧翻到下一页 toggle (WeChat Read's 13-reading-preferences/02-settings.png): taps on both sides
+-- of the page turn to the next page. Dimmed while taps don't turn pages, or turn them with zones stacked top and
+-- bottom, which have no sides.
+function ReaderToolbar.genLeftTapForwardMenuItem()
+    return {
+        text = _("Tap left side for next page"),
+        enabled_func = function()
+            return G_reader_settings:nilOrFalse("page_turns_disable_tap") and turnsPagesOnSides()
+        end,
+        checked_func = function()
+            return G_reader_settings:isTrue("page_turns_left_tap_forward")
+        end,
+        callback = function()
+            G_reader_settings:flipNilOrFalse("page_turns_left_tap_forward")
+        end,
+    }
+end
+
+--- The tap layout of the page turn settings alone, before 点击左侧翻到下一页.
+function ReaderToolbar:getPageTurnTapLayout()
     local third = 1/3
     if G_reader_settings:isTrue("page_turns_disable_tap") then
         return { { 0, 0, third, 1, "none" }, { third, 0, third, 1, "toolbar" }, { 2 * third, 0, third, 1, "none" } }
@@ -425,6 +501,7 @@ function ReaderToolbar:onSetDimensions(dimen)
 end
 
 function ReaderToolbar:onCloseWidget()
+    self.notes_return = nil
     self:dismissHint()
     self:hideToolbar(true)
     self:closeDrawer()
@@ -434,6 +511,7 @@ end
 -- the original table of contents stays in the original menu, which calls ReaderToc directly.
 function ReaderToolbar:onShowToc()
     if not Device:isTouchDevice() then return end -- no D-pad navigation here: ReaderToc handles it
+    self.notes_return = nil
     self:hideToolbar(true) -- the page covers the bars
     self:closeDrawer()
     self.drawer = require("apps/reader/modules/readertocpage"):new{
@@ -445,10 +523,12 @@ function ReaderToolbar:onShowToc()
     return true
 end
 
---- "ShowNotes" opens the notes page (笔记页) of the book: every note, from the bottom bar (and any other
--- entry), or only its bookmarks (`filter` "bookmarks"), from the contents page's 书签.
+--- "ShowNotes" opens all notes from the bottom bar, or bookmarks from the contents page's 书签.
+-- The first toolbar entry after a card jump restores the previous filter and list page once.
 function ReaderToolbar:onShowNotes(filter)
     if not Device:isTouchDevice() then return end
+    if filter == nil and self.notes_return then filter = self.notes_return.filter end
+    self.notes_return = nil
     self:hideToolbar(true) -- the page covers the bars
     self:closeDrawer()
     local page
@@ -458,6 +538,7 @@ function ReaderToolbar:onShowNotes(filter)
         on_close = function()
             if self.drawer == page then self.drawer = nil end
         end,
+        on_jump = function() self.notes_return = { filter = page.filter } end,
     }
     self.drawer = page
     UIManager:show(page, "ui", page.dimen)

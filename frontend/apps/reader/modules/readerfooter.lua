@@ -1067,6 +1067,71 @@ function ReaderFooter:textOptionTitles(option)
     return option_titles[option]
 end
 
+--- Switches the footer item `option` on or off, as its checkbox in the status bar menu does, and refreshes the footer.
+-- `callback(self)`, if any, updates the footer in place of the default and returns whether to refresh it.
+function ReaderFooter:toggleItem(option, callback)
+    self.settings[option] = not self.settings[option]
+    -- We only need to send a SetPageBottomMargin event when we truly affect the margin
+    local should_signal = false
+    -- only case that we don't need a UI update is enable/disable
+    -- non-current mode when all_at_once is disabled.
+    local should_update = false
+    local prev_has_no_mode = self.has_no_mode
+    local first_enabled_mode_num = self:set_has_no_mode()
+    local prev_reclaim_height = self.reclaim_height
+    self.reclaim_height = self.settings.reclaim_height
+    -- refresh margins position
+    if self.has_no_mode then
+        self.footer_text.height = 0
+        should_signal = true
+        self.genFooterText = footerTextGeneratorMap.empty
+        self.mode = self.mode_list.off
+    elseif prev_has_no_mode then
+        if self.settings.all_at_once then
+            self.mode = self.mode_list.page_progress
+            self:applyFooterMode()
+            G_reader_settings:saveSetting("reader_footer_mode", self.mode)
+        else
+            G_reader_settings:saveSetting("reader_footer_mode", first_enabled_mode_num)
+        end
+        should_signal = true
+    elseif self.reclaim_height ~= prev_reclaim_height then
+        should_signal = true
+        should_update = true
+    end
+    if callback then
+        should_update = callback(self)
+    elseif self.settings.all_at_once then
+        should_update = self:updateFooterTextGenerator()
+    elseif (self.mode_list[option] == self.mode and self.settings[option] == false)
+            or (prev_has_no_mode ~= self.has_no_mode) then
+        -- current mode got disabled, redraw footer with other
+        -- enabled modes. if all modes are disabled, then only show
+        -- progress bar
+        if not self.has_no_mode then
+            self.mode = first_enabled_mode_num
+        else
+            -- If we've just disabled our last mode, first_enabled_mode_num is nil
+            -- If the progress bar is enabled,
+            -- fake an innocuous mode so that we switch to showing the progress bar alone, instead of nothing,
+            -- This is exactly what the "Show progress bar" toggle does.
+            self.mode = self.settings.disable_progress_bar and self.mode_list.off or self.mode_list.page_progress
+        end
+        should_update = true
+        self:applyFooterMode()
+        G_reader_settings:saveSetting("reader_footer_mode", self.mode)
+    end
+    if should_update or should_signal then
+        -- Under a window that covers the footer (the e-ink redesign's settings page), the footer is only updated, not
+        -- painted over that window: it shows when the reader is repainted.
+        local top_wg = UIManager:getTopmostVisibleWidget() or {}
+        local covered = top_wg.name ~= "ReaderUI" and (top_wg.covers_fullscreen or top_wg.covers_footer)
+        self:refreshFooter(should_update and not covered, should_signal)
+    end
+    -- The absence or presence of some items may change whether auto-refresh should be ensured
+    self:rescheduleFooterAutoRefreshIfNeeded()
+end
+
 function ReaderFooter:addToMainMenu(menu_items)
     local sub_items = {}
     menu_items.status_bar = {
@@ -1106,62 +1171,7 @@ function ReaderFooter:addToMainMenu(menu_items)
                 return self.settings[option] == true
             end,
             callback = function()
-                self.settings[option] = not self.settings[option]
-                -- We only need to send a SetPageBottomMargin event when we truly affect the margin
-                local should_signal = false
-                -- only case that we don't need a UI update is enable/disable
-                -- non-current mode when all_at_once is disabled.
-                local should_update = false
-                local prev_has_no_mode = self.has_no_mode
-                local first_enabled_mode_num = self:set_has_no_mode()
-                local prev_reclaim_height = self.reclaim_height
-                self.reclaim_height = self.settings.reclaim_height
-                -- refresh margins position
-                if self.has_no_mode then
-                    self.footer_text.height = 0
-                    should_signal = true
-                    self.genFooterText = footerTextGeneratorMap.empty
-                    self.mode = self.mode_list.off
-                elseif prev_has_no_mode then
-                    if self.settings.all_at_once then
-                        self.mode = self.mode_list.page_progress
-                        self:applyFooterMode()
-                        G_reader_settings:saveSetting("reader_footer_mode", self.mode)
-                    else
-                        G_reader_settings:saveSetting("reader_footer_mode", first_enabled_mode_num)
-                    end
-                    should_signal = true
-                elseif self.reclaim_height ~= prev_reclaim_height then
-                    should_signal = true
-                    should_update = true
-                end
-                if callback then
-                    should_update = callback(self)
-                elseif self.settings.all_at_once then
-                    should_update = self:updateFooterTextGenerator()
-                elseif (self.mode_list[option] == self.mode and self.settings[option] == false)
-                        or (prev_has_no_mode ~= self.has_no_mode) then
-                    -- current mode got disabled, redraw footer with other
-                    -- enabled modes. if all modes are disabled, then only show
-                    -- progress bar
-                    if not self.has_no_mode then
-                        self.mode = first_enabled_mode_num
-                    else
-                        -- If we've just disabled our last mode, first_enabled_mode_num is nil
-                        -- If the progress bar is enabled,
-                        -- fake an innocuous mode so that we switch to showing the progress bar alone, instead of nothing,
-                        -- This is exactly what the "Show progress bar" toggle does.
-                        self.mode = self.settings.disable_progress_bar and self.mode_list.off or self.mode_list.page_progress
-                    end
-                    should_update = true
-                    self:applyFooterMode()
-                    G_reader_settings:saveSetting("reader_footer_mode", self.mode)
-                end
-                if should_update or should_signal then
-                    self:refreshFooter(should_update, should_signal)
-                end
-                -- The absence or presence of some items may change whether auto-refresh should be ensured
-                self:rescheduleFooterAutoRefreshIfNeeded()
+                self:toggleItem(option, callback)
             end,
         }
     end

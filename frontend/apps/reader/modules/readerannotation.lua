@@ -1,9 +1,11 @@
 local DocSettings = require("docsettings")
+local Event = require("ui/event")
 local LuaSettings = require("luasettings")
 local Notification = require("ui/widget/notification")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
+local util = require("util")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -524,6 +526,49 @@ function ReaderAnnotation:addItem(item)
     local index = self:getInsertionIndex(item)
     table.insert(self.annotations, index, item)
     return index
+end
+
+-- A direct thought is saved only on submission; its drawer keeps the range compatible with old readers.
+function ReaderAnnotation:addNote(selection, text)
+    local item = {
+        pos0 = selection.pos0, pos1 = selection.pos1,
+        page = self.ui.rolling and selection.pos0 or selection.pos0.page,
+        text = util.cleanupSelectedText(selection.text), note = text, origin = "note",
+        drawer = self.view.highlight.saved_drawer, color = self.view.highlight.saved_color,
+        pboxes = selection.pboxes, ext = selection.ext,
+    }
+    item.chapter = self.ui.toc:getTocTitleByPage(item.page)
+    if self.ui.rolling then
+        item.epubcfi = self.document:getEPubCFIRangeFromXPointers(item.pos0, item.pos1)
+    end
+    local index = self:addItem(item)
+    self.ui:handleEvent(Event:new("AnnotationsModified", { item, nb_notes_added = 1, index_modified = index }))
+    self.view.footer:maybeUpdateFooter()
+    return index
+end
+
+-- The same lifecycle for the thought editor and the original bookmark/highlight dialogs.
+function ReaderAnnotation:setNote(index, text)
+    local item = self.annotations[index]
+    local value = text ~= "" and text or nil
+    if not value and item.origin == "note" then
+        self.ui.bookmark:removeItemByIndex(index)
+        return nil, true, true
+    end
+    local type_before = self.ui.bookmark.getBookmarkType(item)
+    if (item.note or "") == (value or "") then return type_before, false, false end
+    item.note = value
+    if item.drawer then
+        self.ui.highlight:writePdfAnnotation("content", item, value or "")
+    end
+    local type_after = self.ui.bookmark.getBookmarkType(item)
+    local changes = { item }
+    if type_before ~= type_after then
+        changes.nb_highlights_added = type_before == "highlight" and -1 or 1
+        changes.nb_notes_added = -changes.nb_highlights_added
+    end
+    self.ui:handleEvent(Event:new("AnnotationsModified", changes))
+    return type_after, false, true
 end
 
 function ReaderAnnotation:onAnnotationsModified(items)
