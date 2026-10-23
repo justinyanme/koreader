@@ -31,6 +31,7 @@ local Event = require("ui/event")
 local Font = require("ui/font")
 local FontList = require("fontlist")
 local FrameContainer = require("ui/widget/container/framecontainer")
+local FullscreenPage = require("ui/widget/fullscreenpage")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
@@ -571,10 +572,8 @@ function ReaderTypesetPanel:showSerifMissing()
     })
 end
 
-function ReaderTypesetPanel:fontCards(width)
-    local gap = Screen:scaleBySize(6)
-    local columns = math.max(2, math.min(5, math.floor((width + gap) / Screen:scaleBySize(100))))
-    local card_w = math.floor((width - (columns - 1) * gap) / columns)
+-- The full catalog keeps every registered face; only the main grid filters families and decorative fonts.
+function ReaderTypesetPanel:fontChoices(all)
     local cre = require("document/credocument"):engineInit()
     local available = cre.getFontFaces()
     local language = (_.current_lang or "en"):lower():gsub("-", "_")
@@ -607,7 +606,6 @@ function ReaderTypesetPanel:fontCards(width)
         FZWeiBei = _("Fangzheng Wei Bei"),
     }
     local system_face = FontList:getSystemFontFace()
-    local current = self.ui.font.font_face
     local function fontDetails(face)
         local file, index = cre.getFontFaceFilenameAndFaceIndex(face)
         if not file then file, index = cre.getFontFaceFilenameAndFaceIndex(face, nil, true) end
@@ -615,17 +613,22 @@ function ReaderTypesetPanel:fontCards(width)
         local name = display_names[family] or display_names[family:match("^(FZ%a+)")]
             or (file and FontList:getLocalizedFontName(file, index, true)) or family
         name = fontFamily(name)
-        if face == system_face then name = _("System font") end
+        if face == system_face then
+            name = _("System font")
+        elseif all then
+            local __, variant = fontFamily(face)
+            if variant then name = name .. " · " .. variant end
+        end
         return name, file, index
     end
     local faces, seen = {}, {}
     local function add(face)
         if not face or seen[face] or not util.arrayContains(available, face) then return end
         -- The system-font shortcut retains its device source; named family cards follow the UI language.
-        if face ~= system_face and representatives[families[face]] ~= face then return end
+        if not all and face ~= system_face and representatives[families[face]] ~= face then return end
         local name = face:lower()
         for _, pattern in ipairs{ "clock", "emoji", "symbol", "dancing", "coming soon", "cutive", "script", "dingbat" } do
-            if name:find(pattern, 1, true) then return end
+            if not all and name:find(pattern, 1, true) then return end
         end
         seen[face] = true
         table.insert(faces, face)
@@ -648,6 +651,15 @@ function ReaderTypesetPanel:fontCards(width)
     for _, group in ipairs(groups) do
         for _, face in ipairs(group) do add(face) end
     end
+    return faces, fontDetails
+end
+
+function ReaderTypesetPanel:fontCards(width)
+    local gap = Screen:scaleBySize(6)
+    local columns = math.max(2, math.min(5, math.floor((width + gap) / Screen:scaleBySize(100))))
+    local card_w = math.floor((width - (columns - 1) * gap) / columns)
+    local faces, fontDetails = self:fontChoices()
+    local current = self.ui.font.font_face
     local count = math.min(#faces + 1, columns * 3)
     local current_index = util.arrayContains(faces, current)
     if current_index and current_index >= count then faces[count - 1] = current end
@@ -809,18 +821,121 @@ function ReaderTypesetPanel:showMenu(item_table)
 end
 
 function ReaderTypesetPanel:closeMenu()
+    if self.font_page then
+        self.font_page:goBack()
+    end
     if self.menu_container then
         UIManager:close(self.menu_container)
         self.menu_container = nil
     end
 end
 
-function ReaderTypesetPanel:showFontMenu()
-    local font = self.ui.font
-    if font.face_table.needs_refresh and font.face_table.refresh_func then
-        font.face_table.refresh_func()
+-- The reference's category strip: a gray outline and an inset round selection, without inner rules.
+local FontCategories = EinkControls.Segmented:extend{ height = Screen:scaleBySize(44) }
+
+function FontCategories:paintTo(bb, x, y)
+    self.dimen.x, self.dimen.y = x, y
+    local h = Screen:scaleBySize(34)
+    local top = y + math.floor((self.height - h) / 2)
+    local inset = Screen:scaleBySize(3)
+    bb:paintBorder(x, top, self.width, h, Size.border.default, Palette.rule, math.floor(h / 2), true)
+    bb:paintRoundedRect(x + (self.value - 1) * self.seg_w + inset, top + inset,
+        self.seg_w - 2 * inset, h - 2 * inset, Palette.ink, math.floor((h - 2 * inset) / 2))
+    for i, label in ipairs(self.texts) do
+        local size = label:getSize()
+        label:paintTo(bb, x + (i - 1) * self.seg_w + math.floor((self.seg_w - size.w) / 2),
+            y + math.floor((self.height - size.h) / 2))
     end
-    self:showMenu(font.face_table)
+end
+
+local FontPage = FullscreenPage:extend{ category = 1 }
+
+function FontPage:init()
+    self.title = _("Font")
+    FullscreenPage.init(self)
+    local faces
+    faces, self.fontDetails = self.config:fontChoices(true)
+    self.categories = { faces, {}, {} }
+    for _, face in ipairs(faces) do
+        local __, file, index = self.fontDetails(face)
+        table.insert(self.categories[FontList:hasChinese(file, index) and 2 or 3], face)
+    end
+    self:build()
+end
+
+function FontPage:buildTitle()
+    return CenterContainer:new{
+        dimen = Geom:new{ w = self.title_rect.w, h = self.title_rect.h },
+        VerticalGroup:new{
+            TextWidget:new{ text = self.title, face = Font:getFace("ui_title"), bold = true, padding = 0 },
+            TextWidget:new{
+                text = T(_("Current selection · %1"), self.fontDetails(self.config.ui.font.font_face)),
+                face = Font:getFace("ui_label"), padding = 0, max_width = self.title_rect.w - Screen:scaleBySize(44),
+            },
+        },
+    }
+end
+
+function FontPage:buildContent(rect)
+    local gap, gutter = Screen:scaleBySize(6), Screen:scaleBySize(21)
+    local width = rect.w - 2 * gutter
+    local labels = { C_("Font category", "All"), _("Chinese"), _("Western") }
+    for i, label in ipairs(labels) do
+        labels[i] = T(_("%1 (%2)"), label, #self.categories[i])
+    end
+    local column = VerticalGroup:new{ align = "left" }
+    self.tabs = FontCategories:new{
+        width = width, labels = labels, value = self.category,
+        on_change = function(category)
+            self.category, self.page = category, 1
+            self:build()
+            UIManager:setDirty(self, "ui", self.body_rect)
+        end,
+    }
+    table.insert(column, self.tabs)
+    table.insert(column, VerticalSpan:new{ width = Screen:scaleBySize(15) })
+    local columns = math.max(2, math.min(5, math.floor((width + gap) / Screen:scaleBySize(100))))
+    local card_w = math.floor((width - (columns - 1) * gap) / columns)
+    local rows = math.max(1, math.floor((rect.h - self.tabs:getSize().h - Screen:scaleBySize(15) + gap) / (Screen:scaleBySize(44) + gap)))
+    local per_page = columns * rows
+    local faces = self.categories[self.category]
+    local pages = math.max(1, math.ceil(#faces / per_page))
+    self.page = math.max(1, math.min(self.page, pages))
+    local row
+    for i = (self.page - 1) * per_page + 1, math.min(self.page * per_page, #faces) do
+        if (i - 1) % columns == 0 then
+            if row then table.insert(column, VerticalSpan:new{ width = gap }) end
+            row = HorizontalGroup:new{}
+            table.insert(column, row)
+        else
+            table.insert(row, HorizontalSpan:new{ width = gap })
+        end
+        local face = faces[i]
+        local name, file, index = self.fontDetails(face)
+        table.insert(row, FontCard:new{
+            width = card_w, name = name, font_face = face,
+            face = file and Font:getFace(file, 14 * Font.ui_scale, index), face_index = index,
+            selected = self.config.ui.font.font_face == face,
+            callback = function()
+                self.config.ui.font:onSetFont(face)
+                self.config.ui.font:addToRecentlySelectedList(face)
+                self:build()
+                UIManager:setDirty(self, "ui", self.dimen)
+            end,
+        })
+    end
+    return HorizontalGroup:new{ HorizontalSpan:new{ width = gutter }, column }, pages
+end
+
+function FontPage:onCloseWidget()
+    self.config.font_page = nil
+end
+
+function ReaderTypesetPanel:showFontMenu()
+    self:closeWithToolbar()
+    self:closeMenu()
+    self.font_page = FontPage:new{ config = self }
+    UIManager:show(self.font_page, "ui", self.font_page.dimen)
 end
 
 --- The style tweaks submenu holding the tweak `tweak_id`, or all style tweaks.
