@@ -52,6 +52,7 @@ local function dp(n) return Screen:scaleBySize(n) end
 local GUTTER = dp(24)
 local TITLE_H = dp(14) + dp(29) + dp(6) -- top padding + 22dp headline + bottom padding
 local CRUMBS_H = dp(26)
+-- both grow with the interface font size: see FilesChooser:_recalculateDimen()
 local PAGER_H = dp(44)
 local GAP = dp(14)
 
@@ -137,8 +138,13 @@ function FilesChooser:_recalculateDimen()
         local probe = TextWidget:new{ text = "A", face = Font:getFace("ui_body") }:getSize().h
             + dp(2) + TextWidget:new{ text = "A", face = Font:getFace("ui_caption") }:getSize().h
         self.row_h = math.max(dp(56), probe + 2 * dp(8) + Size.border.default)
+        -- the title (after its 10dp top span) and the crumbs (over their underline), at the interface font size
+        local title_probe = TextWidget:new{ text = "A", face = Font:getFace("ui_headline") }:getSize().h
+        local crumb_probe = TextWidget:new{ text = "A", face = Font:getFace("ui_caption") }:getSize().h
+        self.title_h = math.max(TITLE_H, dp(14) - dp(4) + title_probe)
+        self.crumbs_h = math.max(CRUMBS_H, crumb_probe + Size.border.default)
     end
-    self.list_h = self.dimen.h - TITLE_H - CRUMBS_H - PAGER_H
+    self.list_h = self.dimen.h - self.title_h - self.crumbs_h - PAGER_H
     self.perpage = math.max(1, math.floor(self.list_h / self.row_h))
     self.page_num = self:getPageNumber(#self.item_table)
     if self.page > self.page_num then
@@ -166,7 +172,7 @@ function FilesChooser:updateItems(select_number)
     if #self.item_table == 0 then
         list = self:buildEmpty()
     end
-    self.title_row = WidgetContainer:new{ dimen = Geom:new{ w = self.dimen.w, h = TITLE_H }, self:buildTitle() }
+    self.title_row = WidgetContainer:new{ dimen = Geom:new{ w = self.dimen.w, h = self.title_h }, self:buildTitle() }
     self[1] = FrameContainer:new{
         padding = 0,
         bordersize = 0,
@@ -196,7 +202,7 @@ end
 function FilesChooser:updateTitle()
     if not self.title_row then return end
     self.title_row[1] = self:buildTitle()
-    UIManager:setDirty(self.show_parent, "ui", Geom:new{ x = self.dimen.x, y = self.dimen.y, w = self.dimen.w, h = TITLE_H })
+    UIManager:setDirty(self.show_parent, "ui", Geom:new{ x = self.dimen.x, y = self.dimen.y, w = self.dimen.w, h = self.title_h })
 end
 
 function FilesChooser:buildTitle()
@@ -210,7 +216,7 @@ function FilesChooser:buildTitle()
         align = "center",
         HorizontalSpan:new{ width = GUTTER },
         LeftContainer:new{
-            dimen = Geom:new{ w = title_w, h = TITLE_H },
+            dimen = Geom:new{ w = title_w, h = self.title_h },
             VerticalGroup:new{
                 align = "left",
                 VerticalSpan:new{ width = dp(14) - dp(4) },
@@ -256,7 +262,7 @@ function FilesChooser:buildCrumbs()
                 table.insert(group, ShelfWidgets.Tappable:new{
                     callback = function() self:changeToPath(crumb.path) end,
                     CenterContainer:new{
-                        dimen = Geom:new{ w = w, h = CRUMBS_H },
+                        dimen = Geom:new{ w = w, h = self.crumbs_h },
                         VerticalGroup:new{
                             text,
                             LineWidget:new{ background = Palette.ink_2, dimen = Geom:new{ w = w, h = Size.border.default } },
@@ -278,7 +284,7 @@ function FilesChooser:buildCrumbs()
         group = widgets(from)
     end
     return LeftContainer:new{
-        dimen = Geom:new{ w = self.dimen.w, h = CRUMBS_H },
+        dimen = Geom:new{ w = self.dimen.w, h = self.crumbs_h },
         HorizontalGroup:new{ HorizontalSpan:new{ width = GUTTER }, group },
     }
 end
