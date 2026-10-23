@@ -36,6 +36,10 @@ describe("ReaderNotesPage module", function()
         DocSettings:open(sample_pdf):purge()
     end)
 
+    -- These fixtures save selections from the popover with the explicit legacy Ask action.
+    before_each(function() G_reader_settings:saveSetting("default_highlight_action", "ask") end)
+    after_each(function() G_reader_settings:delSetting("default_highlight_action") end)
+
     local function openReader(file)
         DocSettings:open(file):purge()
         local ui = ReaderUI:new{

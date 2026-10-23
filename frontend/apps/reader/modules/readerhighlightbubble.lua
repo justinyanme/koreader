@@ -10,8 +10,8 @@ Replaces ReaderHighlight (apps/replacements reader_highlight slot):
 - the selection is an ink underline with an ink drop handle under each end (not
   the engine's gray); dragging a handle moves that end across lines, and across
   pages from the page corners as a long-press drag does, the popover hidden
-  meanwhile; on release it is still a selection, with its popover at its new
-  place;
+  meanwhile; expanding either way saves one highlight on release and shows
+  Delete highlight, unless an explicit legacy action is configured;
 - a tap on a highlight, or a long-press on a word of it, shows the same four
   actions with "Delete highlight" in the first place; after a long-press, the
   look-up is for the word pressed;
@@ -533,6 +533,7 @@ end
 
 function ReaderHighlightBubble:onHold(arg, ges)
     local handled = ReaderHighlight.onHold(self, arg, ges)
+    self.selection_before_drag = self.selected_text
     if self.hold_pos and self.selected_text then -- a word: its underline and handles
         self:hideEngineSelection()
         self.shown_selection_region = nil
@@ -603,6 +604,7 @@ end
 -- through ReaderHighlight:onHoldPan(), for its selection across pages from the corners. The popover hides
 -- meanwhile.
 function ReaderHighlightBubble:startHandleDrag(side, pos)
+    self.selection_before_drag = self.selected_text
     local rects = self:selectionRects()
     local ends = self:selectionEnds(rects)
     -- points in the first and the last character, next to the edge of the selection
@@ -641,16 +643,15 @@ function ReaderHighlightBubble:dragHandleTo(pos)
     } })
 end
 
---- The finger lifted: the text up to there is still a selection, not a highlight, and its popover shows again
--- at its new place.
+--- The finger lifted: use the same save/preference path as a continuous long-press drag.
 function ReaderHighlightBubble:endHandleDrag(pos)
     if pos then
         self:dragHandleTo(pos)
     end
     self.handle_drag = nil
-    self:_resetHoldTimer(true)
     if self.selected_text then
-        self:onShowHighlightMenu()
+        self:closeBubble()
+        self:onHoldRelease()
     else
         self:dismiss()
     end
@@ -667,6 +668,7 @@ function ReaderHighlightBubble:clear(clear_id, fast)
     local region = not self.restore_page_mode_func and self:selectionRegion()
     self.hold_pos = nil
     self.handle_drag = nil
+    self.selection_before_drag = nil
     self.shown_selection_region = nil
     ReaderHighlight.clear(self, clear_id)
     self.selected_text = nil
@@ -719,6 +721,25 @@ function ReaderHighlightBubble:onHoldRelease()
     end
     if self.clear_id or self.select_mode or not self.hold_pos or not self.selected_text then
         return ReaderHighlight.onHoldRelease(self)
+    end
+    if (G_reader_settings:has("default_highlight_action") and not self.is_word_selection)
+            or (self.is_word_selection and G_reader_settings:has("highlight_action_on_single_word"))
+            or self.ui.keyselection:isActive() then
+        return ReaderHighlight.onHoldRelease(self)
+    end
+    local before = self.selection_before_drag
+    local changed = before and (not util.tableEquals(before.pos0, self.selected_text.pos0)
+        or not util.tableEquals(before.pos1, self.selected_text.pos1))
+    if before and self.ui.paging then
+        -- PDF positions are raw touch points: compare the selected words, not finger jitter within them.
+        changed = before.pos0.page ~= self.selected_text.pos0.page
+            or before.pos1.page ~= self.selected_text.pos1.page
+            or not util.tableEquals(before.pboxes, self.selected_text.pboxes)
+    end
+    if changed and not self.is_word_selection then
+        self:_resetHoldTimer(true)
+        self:saveAndShowHighlight()
+        return true
     end
     self:_resetHoldTimer(true)
     -- a long-press on a word of a highlight (no drag) shows that highlight's popover, as a tap does
@@ -810,15 +831,7 @@ function ReaderHighlightBubble:onShowHighlightMenu(index)
     local bubble = SelectionPopover:new{
         rows = { {
             { icon = "eink/highlight", text = C_("Highlight bubble", "Highlight"), callback = function()
-                -- a selection across pages turns back to its first page when cleared: wait for the repaint
-                local turns_back = self.restore_page_mode_func ~= nil
-                local index = self:saveSelection()
-                if not index then return end
-                if turns_back then
-                    UIManager:nextTick(function() self:showHighlightBubble(index) end)
-                else
-                    self:showHighlightBubble(index, anchors) -- in the same place
-                end
+                self:saveAndShowHighlight()
             end },
             self:lookupCell(text, function()
                 self:closeBubble()
@@ -843,6 +856,21 @@ function ReaderHighlightBubble:onShowHighlightMenu(index)
         page_gesture = function(ges) return self:pageGesture(ges) end,
     }
     self:showBubble(bubble)
+end
+
+--- Saves once on release or on the Highlight action, keeping Delete highlight immediately available.
+function ReaderHighlightBubble:saveAndShowHighlight()
+    local rects = self:selectionRects()
+    local anchors = #rects > 0 and self:popoverAnchors(rects) or nil
+    -- Clearing a selection across pages turns back: position the popover after that repaint.
+    local turns_back = self.restore_page_mode_func ~= nil
+    local index = self:saveSelection()
+    if not index then return end
+    if turns_back then
+        UIManager:nextTick(function() self:showHighlightBubble(index) end)
+    else
+        self:showHighlightBubble(index, anchors)
+    end
 end
 
 --- Saves the selection as a highlight in the default style; returns its index.
