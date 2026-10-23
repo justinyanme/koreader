@@ -26,6 +26,8 @@ describe("ReaderFulltextSearch module", function()
         _ = require("gettext")
         Replacements.reader_menu = ReaderToolbar
         Replacements.reader_search = ReaderFulltextSearch
+        -- the emulator has a physical keyboard: the on-screen one only shows when enabled, as on such devices
+        G_reader_settings:saveSetting("virtual_keyboard_enabled", true)
         -- the search runs in this process, at once (a subprocess needs the UI loop)
         orig_wrap, orig_run = Trapper.wrap, Trapper.dismissableRunInSubprocess
         Trapper.wrap = function(_, fn) return fn() end
@@ -35,6 +37,7 @@ describe("ReaderFulltextSearch module", function()
     teardown(function()
         Replacements.reader_menu = nil
         Replacements.reader_search = nil
+        G_reader_settings:delSetting("virtual_keyboard_enabled")
         Trapper.wrap, Trapper.dismissableRunInSubprocess = orig_wrap, orig_run
     end)
 
@@ -159,16 +162,44 @@ describe("ReaderFulltextSearch module", function()
         return page, contents
     end
 
-    local function key(page, char)
-        local k = find(page.input.keyboard, function(w) return w.key == char and w.dimen ~= nil end)
+    local function keyOn(keyboard, char)
+        local k = find(keyboard, function(w) return w.key == char and w.dimen ~= nil end)
         assert.is_truthy(k, "no key for " .. char)
         return k
     end
 
-    local function typeText(page, str)
+    local function key(page, char)
+        return keyOn(page.input.keyboard, char)
+    end
+
+    local function typeOn(keyboard, str)
         for _, char in ipairs(util.splitToChars(str)) do
-            tapWidget(key(page, char))
+            tapWidget(keyOn(keyboard, char))
         end
+    end
+
+    local function typeText(page, str)
+        typeOn(page.input.keyboard, str)
+    end
+
+    -- Runs fn and returns the texts of the widgets it showed (notifications among them).
+    local function shownTexts(fn)
+        local texts = {}
+        local orig = UIManager.show
+        UIManager.show = function(self, widget, ...)
+            if type(widget) == "table" and widget.text then table.insert(texts, widget.text) end
+            return orig(self, widget, ...)
+        end
+        local ok, err = pcall(fn)
+        UIManager.show = orig
+        assert(ok, err)
+        return texts
+    end
+
+    local function button(dialog, text)
+        local b = find(dialog, function(w) return w.text == text and w.callback and w.dimen end)
+        assert.is_truthy(b, "no button " .. text)
+        return b
     end
 
     -- The enter key, which acts a little later.
@@ -622,16 +653,89 @@ describe("ReaderFulltextSearch module", function()
             local search_icon = find(ui.menu.bars, function(w) return w.icon == "eink/search" and w.dimen end)
             assert.is_truthy(search_icon)
             tapWidget(search_icon)
-            assert.is_truthy(ui.search.input_dialog)
-            assert.are.equal(ui.search.input_dialog, topWidget())
+            local dialog = ui.search.input_dialog
+            assert.is_truthy(dialog)
+            assert.is_true(UIManager:isWidgetShown(dialog))
+            assert.are.equal(dialog._input_widget.keyboard, topWidget())
             assert.is_nil(ui.search.search_page)
+            -- ▷ finds the next hit: the first page with "verona" from here on
+            local start = ui.document:getCurrentPage()
+            local expected
+            for _, item in ipairs(ui.document:findAllText("verona", true, 5, 5000, false, 0x00FF)) do
+                local p = ui.document:getPageFromXPointer(item.start)
+                if p >= start and (not expected or p < expected) then expected = p end
+            end
+            assert.is_truthy(expected)
+            typeOn(dialog._input_widget.keyboard, "verona")
+            local forward = select(2, require("ui/bidi").getArrowLabels())
+            local texts = shownTexts(function() tapWidget(button(dialog, forward)) end)
+            assert.is_falsy(util.arrayContains(texts, _("No results on following pages")))
+            assert.are.equal(expected, ui.document:getCurrentPage())
+            assert.is_truthy(ui.search.search_dialog)
+            assert.is_true(UIManager:isWidgetShown(ui.search.search_dialog))
+        end)
+
+        it("should leave the highlight menu's search to the original dialog", function()
+            ui.rolling:onGotoPage(12)
+            UIManager:forceRePaint()
+            ui.highlight:onHold(nil, { pos = Geom:new{ x = 260, y = 70 } })
+            ui.highlight:onHoldPan(nil, { pos = Geom:new{ x = 260, y = 100 } })
+            ui.highlight:onHoldRelease()
+            UIManager:forceRePaint()
+            local menu = ui.highlight.highlight_dialog
+            assert.is_truthy(menu)
+            local texts = shownTexts(function() tapWidget(button(menu, _("Search"))) end)
+            -- the selection itself is found, on this page
+            assert.is_falsy(util.arrayContains(texts, _("No results on following pages")))
+            assert.are.equal(12, ui.document:getCurrentPage())
+            assert.is_truthy(ui.search.search_dialog)
+            assert.is_true(UIManager:isWidgetShown(ui.search.search_dialog))
+            assert.is_nil(ui.search.search_page)
+        end)
+
+        it("should group a frequent word's thousands of hits by chapter, looking up each page's chapter once", function()
+            local page = openSearch(ui)
+            local lookups = 0
+            local orig = ui.toc.getAccurateTocIndexByXPointer
+            ui.toc.getAccurateTocIndexByXPointer = function(...)
+                lookups = lookups + 1
+                return orig(...)
+            end
+            local ok, err = pcall(function() search(page, "the") end)
+            ui.toc.getAccurateTocIndexByXPointer = orig
+            assert(ok, err)
+            local results = ui.search.results
+            assert.is_true(#results > 1000)
+            -- only the hits on a page where a scene starts are placed by their position; the others by their page
+            local starts, on_start_pages = {}, 0
+            for _, entry in ipairs(ui.toc.toc) do starts[entry.page] = true end
+            for _, item in ipairs(results) do
+                if starts[ui.document:getPageFromXPointer(item.start)] then on_start_pages = on_start_pages + 1 end
+            end
+            assert.are.equal(on_start_pages, lookups)
+            assert.is_true(lookups < #results / 2)
+            local toc, chapter = ui.toc, nil
+            for _, rows in ipairs(page.pages) do
+                for _, row in ipairs(rows) do
+                    if row.title then
+                        chapter = row.title
+                    else
+                        local index = toc:getTocIndexByPage(results[row.index].start)
+                        assert.are.equal(index and toc:cleanUpTocTitle(toc.toc[index].title, true), chapter)
+                    end
+                end
+            end
         end)
     end)
 
     describe("with a PDF", function()
-        it("should mark a hit with the page's boxes, and clear them with ×", function()
+        -- Opens the PDF at page width, and the search page's first hit of a word of its first page; also returns
+        -- whether the view scrolled before.
+        local function openHitAtPageWidth()
             local ui = openReader(sample_pdf)
-            -- a word of the first page
+            ui:handleEvent(Event:new("SetZoomMode", "pagewidth"))
+            UIManager:forceRePaint()
+            local scroll = ui.view.page_scroll
             local word
             for _, line in ipairs(ui.document:getPageTextBoxes(1)) do
                 for _, w in ipairs(line) do
@@ -644,21 +748,40 @@ describe("ReaderFulltextSearch module", function()
             local row = hitRows(page)[1]
             local item = ui.search.results[row.hit_index]
             tapWidget(row)
-            assert.are.equal(item.start, ui.paging.current_page)
             hideToolbar(ui)
+            return ui, item, scroll
+        end
+
+        it("should mark a hit at the book's own zoom, in view, and clear the mark with ×", function()
+            local ui, item, scroll = openHitAtPageWidth()
+            assert.are.equal(item.start, ui.paging.current_page)
+            assert.are.equal("pagewidth", ui.zooming.zoom_mode)
+            assert.are.equal(scroll, ui.view.page_scroll)
             assert.is_true(share(barBlank(ui), isInk) > 0.95)
-            -- the mark: the word's paper turned hit gray
+            -- the mark, on the screen: the word's paper turned hit gray
             local rects = ui.search:markRects()
             assert.is_true(#rects > 0)
+            local screen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = ui.search.bar:getRect().y }
+            for _, r in ipairs(rects) do
+                assert.is_true(screen:contains(r))
+            end
             local function paper() local n = 0 for _, r in ipairs(rects) do n = n + share(r, isPaper) end return n / #rects end
             local marked = paper()
             assert.is_true(marked < 0.2)
             tapRect(ui.search.bar:getCloseRect())
             assert.is_nil(ui.search.hit)
-            assert.is_nil(ui.search.skim_mode)
             assert.is_true(paper() > marked + 0.3)
             assert.is_true(share(barBlank(ui), isInk) < 0.5) -- the page shows there again
+            assert.are.equal("pagewidth", ui.zooming.zoom_mode)
             closeReader(ui)
+        end)
+
+        it("should leave the book's zoom alone when it is closed with the bar up", function()
+            local ui = openHitAtPageWidth()
+            assert.is_truthy(ui.search:barQuery())
+            ui:onClose()
+            UIManager:forceRePaint()
+            assert.are.equal("pagewidth", DocSettings:open(sample_pdf):readSetting("zoom_mode"))
         end)
     end)
 end)

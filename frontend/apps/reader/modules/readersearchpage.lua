@@ -280,9 +280,27 @@ end
 --- Rows of the hits: each chapter's heading (none for hits before the first entry), then its hits.
 function SearchPage:paginate()
     local toc = self.ui.toc
+    local document = self.ui.document
+    -- The chapter of a hit is the one of its page, looked up once per page (there may be thousands of hits),
+    -- except on a page where a chapter starts: there it depends on where the hit is.
+    toc:fillToc()
+    local starts, by_page = {}, {}
+    for _, entry in ipairs(toc.toc) do
+        starts[entry.page] = true
+    end
+    local function chapterOf(item)
+        local page = self.ui.rolling and document:getPageFromXPointer(item.start) or item.start
+        if starts[page] and self.ui.rolling then
+            return toc:getTocIndexByPage(item.start)
+        end
+        if by_page[page] == nil then
+            by_page[page] = toc:getTocIndexByPage(page) or false
+        end
+        return by_page[page] or nil
+    end
     local rows, chapter = {}, false
     for i, item in ipairs(self.results) do
-        local index = toc:getTocIndexByPage(item.start)
+        local index = chapterOf(item)
         if index ~= chapter then
             chapter = index
             if index then
@@ -440,12 +458,14 @@ function SearchPage:refreshField()
     end
 end
 
---- Shows the keyboard, with the cursor in the field.
+--- Shows the keyboard (unless a physical one is used instead, as InputText decides), with the cursor in the field.
 function SearchPage:startTyping()
     if self.typing or self.closed then return end
     self.typing = true
     self.input:focus()
-    self.input:onShowKeyboard()
+    if not ((Device:hasKeyboard() or Device:hasScreenKB()) and G_reader_settings:nilOrFalse("virtual_keyboard_enabled")) then
+        self.input:onShowKeyboard()
+    end
     self:refreshField()
 end
 

@@ -8,8 +8,9 @@ search page (apps/reader/modules/readersearchpage), over the contents page when 
 or with a query to search at once. The page searches with the default options, ignoring case, in a
 subprocess that a tap cancels, and lists the hits by chapter.
 
-A hit opens in the book with its text marked in hit gray and the toolbar up, as in WeChat Read; under the
-toolbar the search bar docks at the bottom of the page: an ink band with the keyword and ×. The keyword
+A hit opens in the book with its text marked in hit gray and the toolbar up, as in WeChat Read; a PDF keeps
+its zoom, scroll and reflow, and pans to the hit. Under the toolbar the search bar docks at the bottom of the
+page: an ink band with the keyword and ×. The keyword
 leads back to its hits, on the page of hits left, over the contents page as in WeChat Read (so 取消 goes to
 the contents page and 书签 works there); × ends the search and clears the mark, and nothing else:
 highlights and notes stay. Until then the search stays (the bar, the mark and the hits) while the book is
@@ -183,7 +184,7 @@ end
 function ReaderFulltextSearch:onShowSearchPage(query, contents)
     self:showPage{ contents = contents, query = query or "" }
     if query then
-        self:search(query)
+        self:searchForPage(query)
     else
         self.search_page:startTyping()
     end
@@ -195,7 +196,7 @@ function ReaderFulltextSearch:showPage(args)
     self:closePage()
     local page
     args.ui = self.ui
-    args.on_submit = function(query) self:search(query) end
+    args.on_submit = function(query) self:searchForPage(query) end
     args.on_hit = function(index) self:openHit(index) end
     args.on_close = function()
         if self.hit and page.results == self.hit.results then
@@ -229,8 +230,8 @@ function ReaderFulltextSearch:closePage()
 end
 
 --- Searches the book for `query` with the default options, in a subprocess that a tap cancels, and shows the
--- hits on the search page.
-function ReaderFulltextSearch:search(query)
+-- hits on the search page. (Not search(): ReaderSearch:search() serves the original dialog's searches.)
+function ReaderFulltextSearch:searchForPage(query)
     local page = self.search_page
     -- the keyboard may give diacritics in any order: the book's text is expected normalized
     query = Utf8Proc.normalize_NFC(query)
@@ -260,19 +261,21 @@ function ReaderFulltextSearch:openHit(index)
     local item = self.results[index]
     self.hit = { item = item, query = self.query, results = self.results }
     self.search_page:leave("partial") -- which keeps the page of hits left
+    self.ui.link:addCurrentLocationToStack()
     if self.ui.rolling then
-        self.ui.link:addCurrentLocationToStack()
         self.ui.rolling:onGotoXPointer(item.start)
     else
-        if not self.skim_mode then
-            self.skim_mode = true
-            self.ui.paging:enterSkimMode() -- the whole page, so that the hit shows
-        end
         self.hit.boxes = {}
         for i, box in ipairs(item.boxes) do
-            self.hit.boxes[i] = self.ui.document:nativeToPageRectTransform(item.start, box)
+            self.hit.boxes[i] = self.ui.document:nativeToPageRectTransform(item.start, box) -- reflowed too
         end
-        self.ui.link:onGotoLink({ page = item.start - 1 }, false) -- also remembers the position left
+        -- the reader's own zoom, scroll and reflow, panned so that the hit is in the middle of the view
+        local box, view = self.hit.boxes[1], self.view
+        local pos = box and {
+            x = box.x + (box.w - view.visible_area.w / view.state.zoom) / 2,
+            y = box.y + (box.h - view.visible_area.h / view.state.zoom) / 2,
+        }
+        self.ui:handleEvent(Event:new("GotoPage", item.start, pos))
     end
     if self.ui.menu.showToolbar then -- the toolbar of the redesign
         self.ui.menu:showToolbar()
@@ -314,10 +317,6 @@ function ReaderFulltextSearch:closeBar()
     end
     self.hit = nil
     self.bar:free()
-    if self.skim_mode then
-        self.skim_mode = nil
-        self.ui.paging:exitSkimMode() -- which repaints the page
-    end
     UIManager:setDirty(self.dialog, "ui", region)
 end
 
