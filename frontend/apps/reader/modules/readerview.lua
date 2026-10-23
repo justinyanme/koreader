@@ -238,6 +238,9 @@ function ReaderView:paintTo(bb, x, y)
 
     -- draw saved highlight (will return true if any of them are in color)
     local colorful
+    self.highlight.line_tops = nil -- fork: see ReaderView:drawLineHighlights()
+    -- fork: what view modules draw over the page can tell a page painted anew from one repainted over
+    self.highlight.page_paints = (self.highlight.page_paints or 0) + 1
     if self.highlight_visible then
         colorful = self:drawSavedHighlight(bb, x, y)
     end
@@ -695,7 +698,8 @@ end
 
 --- Fork: draws the line highlights (straight lines and waves) of reflowable text deferred by
 -- drawXPointerSavedHighlight(), each line of text under its glyphs (see ReaderView:underlineY()). They
--- come last, so that no line is measured with a line highlight already drawn on it.
+-- come last, so that no line is measured with a line highlight already drawn on it. Their tops stay in
+-- highlight.line_tops, by line ("y:h" of its box), for what is drawn on those lines afterwards.
 function ReaderView:drawLineHighlights(bb, x, y)
     local lines = self.highlight.lines
     self.highlight.lines = nil
@@ -709,6 +713,7 @@ function ReaderView:drawLineHighlights(bb, x, y)
     for key, rects in pairs(by_line) do
         line_ys[key] = self:underlineY(bb, rects)
     end
+    self.highlight.line_tops = line_ys
     for _, l in ipairs(lines) do
         self:drawHighlightRect(bb, x, y, l.rect, l.drawer, l.color, l.draw_note_mark, line_ys[l.key])
     end
@@ -732,7 +737,7 @@ function ReaderView:underlineY(bb, rects)
     local box = rects[1]
     local bottom = box.y + box.h - 1
     local bb_w, bb_h = bb:getWidth(), bb:getHeight()
-    if bottom >= bb_h then return bottom end
+    if bottom < 0 or bottom >= bb_h then return bottom end -- out of the screen (scroll mode): nothing to read
     local cols, seen = {}, {} -- of all the segments, which may overlap
     for _, r in ipairs(rects) do
         for col = math.max(r.x, 0), math.min(r.x + r.w, bb_w) - 1, 2 do
