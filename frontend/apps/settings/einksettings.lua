@@ -396,47 +396,64 @@ function EinkSettings:buildRow(spec)
     }
 end
 
---- The rows of the shown list page, fitting `rect`, and the number of pages; `self.shown` gets their specs, each with its screen rect.
-function EinkSettings:buildContent(rect)
+--- The shown list page, without widgets: its row specs, each with its screen rect, the page and the page count.
+function EinkSettings:layout()
     local specs = self:rowSpecs()
+    local rect = self.content_rect
     self.pages = TocDrawer.paginate(specs, rect.h)
     self.page = math.max(1, math.min(self.page, #self.pages))
-    local list = VerticalGroup:new{ align = "left" }
     local shown = { title = self.title, page = self.page, page_count = #self.pages }
     local y = rect.y
     for _, i in ipairs(self.pages[self.page] or {}) do
         local spec = specs[i]
-        table.insert(list, self:buildRow(spec))
         spec.rect = Geom:new{ x = 0, y = y, w = self.dimen.w, h = spec.h }
-        if spec.toggle then
-            local size = spec.toggle:getSize()
-            spec.toggle_rect = Geom:new{ x = GUTTER + self.content_w - size.w, y = y + math.floor((ROW_H - Size.border.default - size.h) / 2),
-                w = size.w, h = size.h }
-        end
         y = y + spec.h
         table.insert(shown, spec)
     end
-    self.shown = shown
-    return list, #self.pages
+    return shown
 end
 
---- Rebuilds after a change and refreshes what changed: the toggle of `toggled` ("fast"), other changed rows ("ui").
+--- The rows of the shown list page and the number of pages; `self.shown` gets their specs.
+function EinkSettings:buildContent()
+    local shown = self:layout()
+    local list = VerticalGroup:new{ align = "left" }
+    for _, spec in ipairs(shown) do
+        table.insert(list, self:buildRow(spec))
+        if spec.toggle then
+            local size = spec.toggle:getSize()
+            spec.toggle_rect = Geom:new{ x = GUTTER + self.content_w - size.w,
+                y = spec.rect.y + math.floor((ROW_H - Size.border.default - size.h) / 2), w = size.w, h = size.h }
+        end
+    end
+    self.shown = shown
+    return list, shown.page_count
+end
+
+--- After a change, rebuilds and refreshes what changed: the toggle of `toggled` ("fast"), other changed rows ("ui"),
+-- or the whole list when its rows moved. When nothing shown changed, it keeps the page as painted: rebuilt widgets
+-- only take their place (and their gesture ranges) when repainted, and a repaint always refreshes the screen.
 function EinkSettings:refreshChanged(toggled)
     if self.closed then return end
-    local old = self.shown
-    self:build()
-    local new = self.shown
+    local old, new = self.shown, self:layout()
     if #old ~= #new or old.title ~= new.title or old.page ~= new.page or old.page_count ~= new.page_count then
+        self:build()
         UIManager:setDirty(self, "ui", old.title ~= new.title and self.dimen or self.body_rect)
         return
     end
+    local changed = {}
     for i, spec in ipairs(new) do
         if spec.sig ~= old[i].sig then
-            if spec.item == toggled and spec.toggle_rect then
-                UIManager:setDirty(self, "fast", spec.toggle_rect)
-            else
-                UIManager:setDirty(self, "ui", spec.rect)
-            end
+            table.insert(changed, i)
+        end
+    end
+    if #changed == 0 then return end
+    self:build()
+    for _, i in ipairs(changed) do
+        local spec = self.shown[i]
+        if spec.item == toggled and spec.toggle_rect then
+            UIManager:setDirty(self, "fast", spec.toggle_rect)
+        else
+            UIManager:setDirty(self, "ui", spec.rect)
         end
     end
 end

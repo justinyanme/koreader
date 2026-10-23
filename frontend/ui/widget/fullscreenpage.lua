@@ -7,12 +7,20 @@ the right. Lists are paginated, never scrolled.
 A page extends it and implements buildContent(rect), which returns the widget of `self.page`,
 fitting `rect`, and the number of pages. Its init sets `title` (the band exists only if there is
 one by then), calls FullscreenPage.init(), sets up its own state, then calls build(), which puts
-the page together; goToPage() turns pages. The back arrow and the Back key call goBack(), which
-closes the page unless overridden.
+the page together; goToPage() turns pages. buildBarParts() may return the bar's own parts: a
+widget in place of the back arrow (the shelf's tabs) and widgets just left of the capsule (a
+书签 pill); it is called on every build and must return new widgets, as the old ones are freed
+with the old page. The back arrow and the Back key call goBack(), which closes the page (once)
+unless overridden.
+
+Widgets only take their place, and their gesture ranges, when painted, so a build() must be
+followed by a setDirty() with a refresh of what changed; when nothing changed, don't rebuild
+(a repaint with no refresh still refreshes the whole screen, with "partial").
 
 Showing and closing the page repaint it whole, and turning a page repaints the content and the
 bar (`body_rect`), all with "ui". Taps never reach what is under the page. A swipe west or north,
-or a page-forward key, turns to the next page; east or south, or a page-back key, to the previous one.
+or a page-forward key, turns to the next page; east or south, or a page-back key, to the previous
+one. Diagonal swipes go on to what is below (a long one takes a screenshot).
 
 @usage
     local NotesPage = FullscreenPage:extend{ title = _("Notes") }
@@ -34,10 +42,7 @@ local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
-local HorizontalGroup = require("ui/widget/horizontalgroup")
-local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
-local LeftContainer = require("ui/widget/container/leftcontainer")
 local Palette = require("ui/palette")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
@@ -48,8 +53,7 @@ local Screen = Device.screen
 local GUTTER = Screen:scaleBySize(24)
 
 local FullscreenPage = InputContainer:extend{
-    title = nil, -- shown in the title band; without one at init, the page has no band
-    title_align = "center", -- or "left"
+    title = nil, -- centered in the title band; without one at init, the page has no band
     page = 1,
     page_count = 1,
 }
@@ -77,18 +81,16 @@ function FullscreenPage:buildContent(rect) -- luacheck: ignore 212
     return VerticalGroup:new{}, 1
 end
 
+--- Returns new widgets for the bottom bar: one in place of the back arrow, and an array set just left of the
+-- capsule; nil for the back arrow alone.
+function FullscreenPage:buildBarParts() end
+
 function FullscreenPage:buildTitle()
     local rect = self.title_rect
     local title = TextWidget:new{
         text = self.title, face = Font:getFace("ui_title"), bold = true, fgcolor = Palette.ink,
         max_width = rect.w - 2 * GUTTER,
     }
-    if self.title_align == "left" then
-        return LeftContainer:new{
-            dimen = Geom:new{ w = rect.w, h = rect.h },
-            HorizontalGroup:new{ HorizontalSpan:new{ width = GUTTER }, title },
-        }
-    end
     return CenterContainer:new{ dimen = Geom:new{ w = rect.w, h = rect.h }, title }
 end
 
@@ -102,8 +104,9 @@ function FullscreenPage:build()
     end
     table.insert(column, content)
     table.insert(column, VerticalSpan:new{ width = math.max(0, self.content_rect.h - content:getSize().h) })
+    local left, actions = self:buildBarParts()
     self.bar = EinkControls.BottomBar:new{
-        width = self.dimen.w, page = self.page, pages = page_count,
+        width = self.dimen.w, page = self.page, pages = page_count, left = left, actions = actions,
         on_change = function(page) self:goToPage(page) end,
         on_back = function() self:goBack() end,
     }
@@ -123,6 +126,8 @@ end
 
 --- The back arrow and the Back key: closes the page.
 function FullscreenPage:goBack()
+    if self.closed then return end
+    self.closed = true
     UIManager:close(self, "ui", self.dimen)
 end
 
@@ -147,6 +152,8 @@ function FullscreenPage:onSwipe(_, ges)
         self:goToPage(self.page + 1)
     elseif direction == "east" or direction == "south" then
         self:goToPage(self.page - 1)
+    else -- diagonal: let it through, a long one takes a screenshot
+        return false
     end
     return true
 end
