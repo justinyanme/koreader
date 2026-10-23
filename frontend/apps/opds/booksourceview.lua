@@ -102,6 +102,14 @@ local function isUnder(path, dir)
     return path == dir or path:sub(1, #dir + 1) == dir .. "/"
 end
 
+--- A download folder as the prototype names it: 主目录, 主目录/sub, or the full path outside the home folder.
+local function folderLabel(path)
+    local home = Shelf.homeDir()
+    if not isUnder(path, home) then return path end
+    local rel = (ffiUtil.realpath(path) or path):sub(#(ffiUtil.realpath(home) or home) + 2)
+    return rel == "" and _("Home folder") or _("Home folder") .. "/" .. rel
+end
+
 -- Bytes the child process wrote to `fd` so far, without blocking.
 local function readAvailable(fd)
     local n = ffiUtil.getNonBlockingReadSize(fd) or 0
@@ -1177,7 +1185,7 @@ function BookSourceView:showSourceSheet(source)
     self:openSheet(source.title or BookSource.host(source), {
         sheetRow(w, _("Edit source"), nil, self:action(function() self:showEditSheet(source) end)),
         sheetRow(w, _("Manage sources"), nil, self:action(function() self:push{ kind = "manage" } end)),
-        sheetRow(w, _("Download folder"), filemanagerutil.abbreviate(folder),
+        sheetRow(w, _("Download folder"), folderLabel(folder),
             self:action(function() self:chooseFolder(source) end)),
     })
 end
@@ -1193,7 +1201,7 @@ function BookSourceView:chooseFolder(source)
             source.download_dir = path
             BookSource.save(self.opds)
             UIManager:show(Notification:new{
-                text = isUnder(path, Shelf.homeDir()) and T(_("Books will be downloaded to %1"), filemanagerutil.abbreviate(path))
+                text = isUnder(path, Shelf.homeDir()) and T(_("Books will be downloaded to %1"), folderLabel(path))
                     or _("This folder is outside the home folder: books downloaded here won't show up on the shelf."),
             })
         end,
