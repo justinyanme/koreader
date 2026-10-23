@@ -408,7 +408,7 @@ function ReaderUI:init()
         view = self.view,
     })
     -- fulltext search
-    self:registerModule("search", ReaderSearch:new{
+    self:registerModule("search", (Replacements.reader_search or ReaderSearch):new{
         dialog = self.dialog,
         view = self.view,
         ui = self

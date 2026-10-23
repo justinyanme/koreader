@@ -191,6 +191,7 @@ require("apps/reader/modules/readertoolbar").register()
 require("apps/reader/modules/readerhighlightbubble").register()
 require("apps/reader/modules/readertypesetpanel").register()
 require("apps/reader/modules/readerdictsheet").register()
+require("apps/reader/modules/readerfulltextsearch").register()
 
 -- Apply developer patches
 userpatch.applyPatches(userpatch.late)
