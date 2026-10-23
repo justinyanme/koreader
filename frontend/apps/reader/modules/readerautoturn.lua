@@ -10,6 +10,7 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconButton = require("ui/widget/iconbutton")
 local IconWidget = require("ui/widget/iconwidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local RightContainer = require("ui/widget/container/rightcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local Palette = require("ui/palette")
 local Panel = require("ui/widget/panel")
@@ -68,6 +69,76 @@ end
 function Pill:paintTo(bb, x, y)
     if not self.autoturn:isActive() or self.autoturn.suspended then return end
     self[1]:paintTo(bb, x + self.dimen.x, y + self.dimen.y)
+end
+
+------------------------------------------------------------------------
+
+local Guide = InputContainer:extend{ autoturn = nil }
+
+function Guide:reset()
+    self.lines = {}
+    self.needs_baselines = true
+    local ui = self.autoturn.ui
+    local text = ui.document:getTextFromPositions({ x = 0, y = 0 }, { x = Screen:getWidth(), y = Screen:getHeight() }, true)
+    local column_w = Screen:getWidth() / ui.document:getVisiblePageCount()
+    for _, box in ipairs(text and text.sboxes or {}) do
+        -- Superscripts and inline images can give one visual line different segment heights.
+        local column = math.floor(box.x / column_w)
+        local last = self.lines[#self.lines]
+        local bottom = box.y + box.h
+        local overlap = last and math.min(last.bottom, bottom) - math.max(last.top, box.y) or 0
+        if last and last.column == column and overlap > math.min(last.bottom - last.top, box.h) / 2 then
+            local right = math.max(last.rect.x + last.rect.w, box.x + box.w)
+            last.rect.x = math.min(last.rect.x, box.x)
+            last.rect.w = right - last.rect.x
+            last.top = math.min(last.top, box.y)
+            last.bottom = math.max(last.bottom, bottom)
+            table.insert(last.segments, box)
+        else
+            table.insert(self.lines, { top = box.y, bottom = bottom, column = column, segments = { box }, rect = Geom:new{
+                x = box.x, y = box.y + box.h - 1, w = box.w, h = Size.border.default,
+            } })
+        end
+    end
+    for i = #self.lines, 1, -1 do
+        if self.lines[i].top < 0 or self.lines[i].bottom > Screen:getHeight() then
+            table.remove(self.lines, i)
+        end
+    end
+end
+
+function Guide:setLine(index)
+    local rect = index and self.lines[index] and self.lines[index].rect
+    if rect == self.rect then return end
+    local old = self.rect
+    self.rect = rect
+    -- Restore the old strip from the reader, then draw only the new strip.
+    if old then UIManager:setDirty(self.autoturn.ui.view.dialog, "fast", old) end
+    if rect then
+        UIManager:setDirty(self.autoturn.ui.view.dialog, function() return "fast", rect end)
+    end
+end
+
+function Guide:paintTo(bb, x, y)
+    if self.rect then
+        if self.needs_baselines then
+            local view = self.autoturn.ui.view
+            for _, line in ipairs(self.lines) do
+                local saved_y
+                for _, box in ipairs(line.segments) do
+                    local top = view.highlight.line_tops and view.highlight.line_tops[box.y .. ":" .. box.h]
+                    if top then saved_y = math.max(saved_y or top, top) end
+                end
+                -- Saved underlines are already painted here; only measure lines without them.
+                line.rect.y = saved_y or view:underlineY(bb, {{
+                    x = line.rect.x, y = line.top, w = line.rect.w, h = line.bottom - line.top,
+                }})
+                line.rect.y = math.min(line.rect.y, Screen:getHeight() - line.rect.h)
+            end
+            self.needs_baselines = false
+        end
+        bb:paintRect(x + self.rect.x, y + self.rect.y, self.rect.w, self.rect.h, Palette.ink)
+    end
 end
 
 ------------------------------------------------------------------------
@@ -142,6 +213,40 @@ end
 
 ------------------------------------------------------------------------
 
+local GuideToggle = InputContainer:extend{ autoturn = nil, width = nil }
+
+function GuideToggle:init()
+    local label = TextWidget:new{
+        text = _("Reading guide"), face = Font:getFace("ui_label"), fgcolor = Palette.ink, max_width = self.width,
+    }
+    self.toggle = EinkControls.Toggle:new{
+        checked = self.autoturn.guide_enabled, width = Screen:scaleBySize(34), height = Screen:scaleBySize(17),
+        callback = function(checked)
+            self.autoturn.guide_enabled = checked
+            G_reader_settings:saveSetting("autoturn_reading_guide", checked)
+            self.autoturn:_resetGuide()
+            UIManager:setDirty(self.autoturn.settings, "fast", self.touch_dimen)
+        end,
+    }
+    self.dimen = Geom:new{ w = label:getSize().w + Screen:scaleBySize(42), h = Screen:scaleBySize(35) }
+    self[1] = CenterContainer:new{
+        dimen = self.dimen:copy(),
+        HorizontalGroup:new{ label, HorizontalSpan:new{ width = Screen:scaleBySize(8) }, self.toggle },
+    }
+    self.touch_dimen = Geom:new{ w = self.dimen.w, h = Screen:scaleBySize(44) }
+    self.ges_events = { TapGuide = { GestureRange:new{ ges = "tap", range = self.touch_dimen } } }
+end
+
+function GuideToggle:paintTo(bb, x, y)
+    self.touch_dimen.x = x
+    self.touch_dimen.y = y - math.floor((self.touch_dimen.h - self.dimen.h) / 2)
+    InputContainer.paintTo(self, bb, x, y)
+end
+
+function GuideToggle:onTapGuide()
+    return self.toggle:onTapSelect()
+end
+
 local Settings = InputContainer:extend{ autoturn = nil }
 
 function Settings:init()
@@ -162,6 +267,15 @@ function Settings:init()
         fold,
     }
     header_content.dimen = Geom:new{ w = w, h = row_h }
+    if autoturn.ui.rolling then
+        header_content[#header_content + 1] = RightContainer:new{
+            dimen = Geom:new{ w = w, h = row_h },
+            GuideToggle:new{
+                autoturn = autoturn,
+                width = math.max(0, math.floor((w - title:getSize().w) / 2) - Screen:scaleBySize(50)),
+            },
+        }
+    end
     local header = OverlapGroup:new(header_content)
     local panel = Panel:new{
         content = VerticalGroup:new{
@@ -201,6 +315,7 @@ end
 
 function Settings:close()
     UIManager:close(self, "ui", self.panel:getRefreshRegion())
+    self.autoturn:_resetGuide() -- CloseWidget runs before the settings leave the window stack.
 end
 
 Settings.onClose = Settings.close
@@ -211,4 +326,4 @@ function Settings:onCloseWidget()
     self.autoturn:_start(true)
 end
 
-return { Button = QuickButton, Pill = Pill, Settings = Settings }
+return { Button = QuickButton, Pill = Pill, Settings = Settings, Guide = Guide }
