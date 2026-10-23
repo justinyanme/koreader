@@ -54,9 +54,14 @@ function ReaderStatus:onEndOfBook()
 
     local collate = G_reader_settings:readSetting("collate")
     local next_file_enabled = collate ~= "access" and collate ~= "date"
-    local settings = G_reader_settings:readSetting("end_document_action") or "pop-up"
+    local settings = G_reader_settings:readSetting("end_document_action") or "book_end"
     local top_widget = UIManager:getTopmostVisibleWidget() or {}
-    if settings == "pop-up" and top_widget.name ~= "end_document" then
+    if settings == "book_end" then
+        if not self.book_end then
+            self.book_end = require("apps/reader/modules/readerbookend"):new{ ui = self.ui, status = self }
+            UIManager:show(self.book_end, "ui", self.book_end.dimen)
+        end
+    elseif settings == "pop-up" and top_widget.name ~= "end_document" then
         local button_dialog
         local buttons = {
             {
@@ -166,6 +171,22 @@ function ReaderStatus:onEndOfBook()
     end
 end
 
+function ReaderStatus:closeBookEnd()
+    if self.book_end then
+        UIManager:close(self.book_end, "ui", self.book_end.dimen)
+        self.book_end = nil
+    end
+end
+
+function ReaderStatus:onAnnotationsModified()
+    if self.book_end then self.book_end:refresh() end
+end
+
+ReaderStatus.onPageUpdate = ReaderStatus.closeBookEnd
+ReaderStatus.onPosUpdate = ReaderStatus.closeBookEnd
+ReaderStatus.onCloseDocument = ReaderStatus.closeBookEnd
+ReaderStatus.onSetDimensions = ReaderStatus.closeBookEnd
+
 function ReaderStatus:openFileBrowser()
     local file = self.document.file
     self.ui:onClose()
@@ -217,6 +238,7 @@ function ReaderStatus:markBook(mark_read)
 end
 
 local end_actions = {
+    "book_end",
     "pop-up",
     "nothing",
     "book_status",
@@ -228,6 +250,7 @@ local end_actions = {
     "book_status_file_browser",
 }
 local end_actions_texts = {
+    _("Book end page"),
     _("Ask with popup dialog"),
     _("Do nothing"),
     _("Book status"),
