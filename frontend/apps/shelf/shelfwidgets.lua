@@ -4,7 +4,7 @@ Small redesign widgets used by the shelf home (DESIGN.md, Components).
 They take plain data so they can move to ui/widget once the other redesign
 screens need them:
 
-    Chip{ text, count, selected, callback }
+    Chip{ text, selected, callback }
     TabBar{ tabs = { { id, icon } }, current, height, on_change } -- the tab icons of the bottom band
     ActionBar{ items = { { icon, callback } }, enabled, height } -- actions in their place (selection mode)
     BottomSheet{ title, header, rows = { { text, callback, checked } } } -- shown with BottomSheet:show()
@@ -204,7 +204,7 @@ local function finishedBadge()
     local size = label:getSize()
     return FrameContainer:new{
         bordersize = border,
-        color = Palette.confirm_rule, -- DESIGN.md's rule gray
+        color = Palette.rule,
         background = Palette.paper,
         padding = 0,
         CenterContainer:new{
@@ -317,23 +317,13 @@ end
 
 local Chip = Tappable:extend{
     text = nil,
-    count = nil,
     selected = false,
 }
 
 function Chip:init()
     Tappable.init(self)
-    local fg = self.selected and Palette.paper or Palette.ink
-    local face = Font:getFace("ui_label")
-    local label = HorizontalGroup:new{
-        TextWidget:new{ text = self.text, face = face, fgcolor = fg },
-    }
-    if self.count then
-        table.insert(label, HorizontalSpan:new{ width = dp(4) })
-        -- the prototype's 75% opacity count, as the nearest gray on each ground
-        table.insert(label, TextWidget:new{ text = tostring(self.count), face = face,
-            fgcolor = self.selected and Palette.rule or Palette.ink_2 })
-    end
+    local label = TextWidget:new{ text = self.text, face = Font:getFace("ui_label"),
+        fgcolor = self.selected and Palette.paper or Palette.ink }
     local h = dp(30)
     self[1] = pill(label, label:getSize().w + 2 * dp(13), h, Size.border.default, Palette.ink,
         self.selected and Palette.ink or Palette.paper)

@@ -9,6 +9,7 @@ leave refreshing to their owner.
     local button = EinkControls.PillButton:new{ text = _("Next chapter"), callback = ... }
 ]]
 
+local Blitbuffer = require("ffi/blitbuffer")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local CenterContainer = require("ui/widget/container/centercontainer")
@@ -30,6 +31,27 @@ local function tapEvents(dimen)
     return { TapSelect = { GestureRange:new{ ges = "tap", range = dimen } } }
 end
 
+--- An icon that turns rule gray unless `enabled`, like a disabled outline. Only its ink changes, whatever the ground
+-- (IconWidget's `dim` lightens its whole rect, ground included, and stops at half gray).
+local Glyph = IconWidget:extend{
+    enabled = true,
+}
+
+function Glyph:paintTo(bb, x, y)
+    if self.enabled then
+        return IconWidget.paintTo(self, bb, x, y)
+    end
+    -- the icon drawn on paper and inverted is how much ink each pixel has: the mask rule gray goes through
+    local size = self:getSize()
+    local mask = Blitbuffer.new(size.w, size.h, Blitbuffer.TYPE_BB8)
+    mask:fill(Blitbuffer.COLOR_WHITE)
+    IconWidget.paintTo(self, mask, 0, 0)
+    mask:invertRect(0, 0, size.w, size.h)
+    self.dimen.x, self.dimen.y = x, y
+    bb:colorblitFrom(mask, x, y, 0, 0, size.w, size.h, Palette.rule)
+    mask:free()
+end
+
 --- Pill button: 1.5dp ink outline, or ink fill when `solid`. Shows `text` or an `icon` from resources/icons.
 local PillButton = InputContainer:extend{
     text = nil,
@@ -49,11 +71,10 @@ function PillButton:init()
     local fg = not self.enabled and Palette.ink_3 or self.solid and Palette.paper or Palette.ink
     local label
     if self.icon then
-        label = IconWidget:new{
+        label = Glyph:new{
             icon = self.icon, width = self.icon_size, height = self.icon_size, alpha = true,
-            rotation_angle = self.icon_rotation_angle,
+            rotation_angle = self.icon_rotation_angle, enabled = self.enabled,
         }
-        if not self.enabled then label.dim = true end
     else
         label = TextWidget:new{ text = self.text, face = self.face or Font:getFace("ui_label_large"), fgcolor = fg }
     end
@@ -223,8 +244,8 @@ function Track:init()
     local icon_size = Screen:scaleBySize(22)
     self.icons = {}
     for direction, icon in pairs{ [-1] = "eink/minus", [1] = "eink/plus" } do
-        self.icons[direction] = IconWidget:new{
-            icon = icon, width = icon_size, height = icon_size, alpha = true, dim = not self.can_step[direction] or nil,
+        self.icons[direction] = Glyph:new{
+            icon = icon, width = icon_size, height = icon_size, alpha = true, enabled = self.can_step[direction],
         }
     end
     local touch = Screen:scaleBySize(44)
@@ -523,10 +544,10 @@ function PageCapsule:init()
     self.prev_enabled = self.page > 1
     self.next_enabled = self.page < self.pages
     local size = Screen:scaleBySize(24)
-    self.prev_icon = IconWidget:new{ icon = "eink/chev.up", width = size, height = size, alpha = true,
-        dim = not self.prev_enabled or nil }
-    self.next_icon = IconWidget:new{ icon = "eink/chev.up", width = size, height = size, alpha = true,
-        rotation_angle = 180, dim = not self.next_enabled or nil }
+    self.prev_icon = Glyph:new{ icon = "eink/chev.up", width = size, height = size, alpha = true,
+        enabled = self.prev_enabled }
+    self.next_icon = Glyph:new{ icon = "eink/chev.up", width = size, height = size, alpha = true,
+        rotation_angle = 180, enabled = self.next_enabled }
     local touch_h = math.max(self.touch_h or 0, Screen:scaleBySize(44))
     self.prev_rect = Geom:new{ w = self.half_w, h = touch_h }
     self.next_rect = Geom:new{ w = self.width - self.half_w, h = touch_h }
@@ -661,6 +682,7 @@ end
 return {
     BackArrow = BackArrow,
     BottomBar = BottomBar,
+    Glyph = Glyph,
     PageCapsule = PageCapsule,
     Pager = Pager,
     PillButton = PillButton,

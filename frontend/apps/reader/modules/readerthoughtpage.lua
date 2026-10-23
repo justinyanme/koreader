@@ -76,7 +76,7 @@ function ThoughtPage:buildContent(rect)
         table.insert(column, VerticalSpan:new{ width = dp(12) })
     else
         table.insert(footer, VerticalSpan:new{ width = dp(16) })
-        table.insert(footer, LineWidget:new{ dimen = Geom:new{ w = width, h = dp(0.94) }, background = Palette.rule })
+        table.insert(footer, LineWidget:new{ dimen = Geom:new{ w = width, h = dp(0.94) }, background = Palette.light_rule })
         table.insert(footer, VerticalSpan:new{ width = dp(12) })
         table.insert(footer, quote_link)
         table.insert(footer, VerticalSpan:new{ width = dp(12) })
@@ -92,7 +92,7 @@ function ThoughtPage:buildContent(rect)
             },
         })
         table.insert(footer, VerticalSpan:new{ width = dp(18) })
-        table.insert(footer, LineWidget:new{ dimen = Geom:new{ w = width, h = dp(0.94) }, background = Palette.rule })
+        table.insert(footer, LineWidget:new{ dimen = Geom:new{ w = width, h = dp(0.94) }, background = Palette.light_rule })
         table.insert(footer, VerticalSpan:new{ width = dp(16) })
         table.insert(footer, HorizontalGroup:new{
             IconWidget:new{ icon = "eink/lock", width = dp(12), height = dp(14), alpha = true },
