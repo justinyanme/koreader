@@ -258,6 +258,8 @@ Generated typographic covers draw from three extra fills: **Cover Stock** (cover
 - **Caption** (400, 12dp, tabular figures): labels inside tracks (700).
 - **Page header and footer** (Noto Serif 400, tabular figures; CJK falls back to Noto Sans CJK SC): the reference sets them in a serif, smaller than Caption: the header at 10dp, the footer at 11dp. The open-book hint uses the UI sans at 11dp.
 
+Named font tiles use localized family names, with one regional variant per family chosen for the interface language; Mono variants remain in the full font list. The separate 系统字体 shortcut retains the device's system CJK face (or bundled fallback), even when its region differs from the interface language; a user-installed regional variant never becomes the system shortcut. Long names shrink to 12dp (scaled by the interface font-size setting) before ellipsis, without reducing the tile's touch target.
+
 The interface font-size setting (小 / 默认 / 大 / 较大 / 特大 = 0.9 / 1.0 / 1.1 / 1.2 / 1.35) scales every role above except Reading and Reading chapter. It never changes the page or the DPI. Layouts must keep their touch targets when it is at 特大.
 
 ### Named Rules
