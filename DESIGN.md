@@ -187,7 +187,7 @@ Scope: this system governs every screen the redesign draws in KOReader: the shel
 
 **Creative North Star: "Ink on Paper, Chrome on Request"**
 
-The page owns the screen. A swipe up, or a tap in the middle, brings two quiet bands: a top bar of icons on the right and a bottom bar that starts with a back arrow. Typesetting and progress open as panels that slot between the page and the bottom bar, with both toolbars still in place, so the reader can switch panels or leave without closing anything first. Everything longer than a panel (contents, notes, search results, lookup, settings) is a full-screen page with a back arrow at the bottom left and a joined pager at the bottom right. Overlays are white with an ink outline. The world is white paper and black ink. Grays appear only where they do a named job: rules, tracks, resting tiles, temporary marks, disabled states. Structure comes from 1dp rules and outlines, never from shadow or motion.
+The page owns the screen. A swipe up, or a tap in the middle, brings two quiet bands: a top bar of icons on the right and a bottom bar that starts with a back arrow. Typesetting and progress open as panels that slot between the page and the bottom bar, with the bottom bar still in place (and the top bar too, except over typesetting), so the reader can switch panels or leave without closing anything first. Everything longer than a panel (contents, notes, search results, lookup, settings) is a full-screen page with a back arrow at the bottom left and a joined pager at the bottom right. Overlays are white with an ink outline. The world is white paper and black ink. Grays appear only where they do a named job: rules, tracks, resting tiles, temporary marks, disabled states. Structure comes from 1dp rules and outlines, never from shadow or motion.
 
 WeChat Read's e-ink edition is the pinned look and interaction model. A deviation is a defect, unless the owner ruled a local substitute (see Local substitutes) or KOReader has a capability that WeChat Read lacks, which then moves to a secondary entry instead of being dropped.
 
@@ -346,10 +346,10 @@ A swipe up, or a tap in the middle, brings two paper bands; while they show, a t
 **Open-book hint:** each time a book opens, ↑ 上滑显示工具栏 sits centered on the footer line in 13dp pencil gray. It goes away the first time the toolbars show, or after about a minute; turning pages does not bring it back.
 
 ### Panels
-The 排版面板 and the 进度面板 are paper bands between the page and the bottom bar, with a 1dp rule-gray top edge and square corners. There is no title bar and no close button. Back leaves one layer at a time, starting with the panel, and another bottom icon switches to its panel in place. The page above stays readable and live.
+The 排版面板 and the 进度面板 are paper bands between the page and the bottom bar, with a 1dp rule-gray top edge and square corners. There is no title bar and no close button. The bottom bar always stays. The top bar stays over the 进度面板 (and the brightness and 更多 panels) and hides over the 排版面板, as the references show. Back leaves one layer at a time, starting with the panel, and another bottom icon switches to its panel in place. The page above stays readable and live.
 
 - **排版面板:** a title row (字体设置 in headline at the left; at the right an outline pill naming the current paragraph mode, 首行顶格 › or 首行缩进 ›), then four track rows about 44dp apart: 字号, 字重, 行距, 边距. Below them, 当前选择 · font name (16dp bold), then the font grid in three rows. 查看更多 › opens the full-screen font page.
-- **Paragraph panel:** opened from the pill. The top bar hides and the bottom bar shows only the back arrow. The panel holds the two paragraph cards.
+- **Paragraph panel:** opened from the pill. The top bar stays hidden and the bottom bar shows only the back arrow. The panel holds the two paragraph cards.
 - **进度面板:** three columns split by 1dp rule-gray vertical rules: the position (figure and %) over 约 N 小时后读完, the reading time over 阅读时长, and the note count over 笔记. The estimate line is left out when there are no statistics. Tapping the note count opens the notes page. Below are the progress track and 开启自动翻页.
 - **返回原进度:** after the first jump from the progress panel, an outline pill ‹ 返回原进度 (about 95 × 34dp, 13dp) sits centered just above the panel, and a gray dot marks the origin on the track: marker gray over the passed ink part, and outlined in 1dp ink over the gray part so it stays visible. The dot is not tappable. Tapping the pill returns to the 原进度 and closes the panel and the toolbars.
 - **Auto page turn** (`03-progress/02-auto-page-turn.png`, `03-auto-page-turn-settings.png`): 开启自动翻页 starts it. While it runs, an outline pill with a sliders icon and 自动翻页设置 (13dp) sits at the page's bottom left. The pill opens the settings panel: a ∨ at the left that only folds the panel away, 自动阅读 centered, and a 划线导读 toggle at the right (reflowable books only). Below is a speed scale from 慢 to 快 with the five speeds 1.0 / 1.5 / 2.0 / 3.0 / 4.0 (60 / 40 / 30 / 20 / 15 s per page), the current one circled in ink. Last is a full-width outline pill 关闭自动翻页, the only control that stops it. The 划线导读 line is a short ink rule under the current line that steps down line by line, splitting the page interval evenly.
@@ -442,7 +442,7 @@ KOReader capabilities that WeChat Read lacks stay reachable from a secondary ent
 ### Do:
 - **Do** separate structure with 1dp rule-gray rules and outline touchable units in 1dp ink.
 - **Do** show the current choice as an ink fill with paper text.
-- **Do** open typesetting and progress as panels between the page and the bottom bar, with both toolbars still showing.
+- **Do** open typesetting and progress as panels between the page and the bottom bar, with the bottom bar still showing; the top bar stays over progress and hides over typesetting.
 - **Do** put contents, notes, search results, lookup and settings on full-screen pages with the back arrow at the bottom left and the joined pager at the bottom right.
 - **Do** use icons without labels in the tab bar and the reader toolbars, and labels under icons in the selection popover.
 - **Do** confirm destructive or hiding actions with the confirm layer over the wash.
@@ -457,7 +457,7 @@ KOReader capabilities that WeChat Read lacks stay reachable from a secondary ent
 - **Don't** use drop shadows, blur or gradients for depth, or any scrim other than the wash.
 - **Don't** animate anything on the product surface.
 - **Don't** make lists scroll.
-- **Don't** put new adjustments in a rounded sheet with a close button, or hide the toolbars when a panel opens.
+- **Don't** put new adjustments in a rounded sheet with a close button, or hide the bottom bar when a panel opens.
 - **Don't** gray secondary text that the reference sets in ink.
 - **Don't** set controls or excerpts in the serif, or book text in the UI sans unless the reader chose it.
 - **Don't** draw a button for a service the fork does not have, not even disabled.
