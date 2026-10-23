@@ -55,9 +55,10 @@ describe("书源 (OPDS as a remote shelf)", function()
     end
 
     local SEARCH_LINKS = '<link rel="search" href="/opds/osd" type="application/opensearchdescription+xml"/>'
+    -- as Calibre-Web's index.xml: no entry carries a rel or a kind
     local ROOT_NAVS = {
         navEntry("Alphabetical Books", "/opds/books"),
-        navEntry("Recently added Books", "/opds/new", "http://opds-spec.org/sort/new"),
+        navEntry("Recently added Books", "/opds/new"),
         navEntry("Authors", "/opds/author"),
     }
 
@@ -84,6 +85,11 @@ describe("书源 (OPDS as a remote shelf)", function()
                 return 200, atom, xmlFeed("Calibre-Web", "", {
                     navEntry("Elsewhere", "https://other.example/opds/x"),
                     navEntry("Plain", "http://nas.example/opds/plain"),
+                })
+            elseif mode == "sort_new" then
+                return 200, atom, xmlFeed("Calibre-Web", "", {
+                    navEntry("Alphabetical Books", "/opds/books", "http://opds-spec.org/sort/new"),
+                    navEntry("Recently added Books", "/opds/new"),
                 })
             elseif mode == "categories" then
                 return 200, atom, xmlFeed("Calibre-Web", "", { navEntry("Authors", "/opds/author") })
@@ -501,9 +507,14 @@ describe("书源 (OPDS as a remote shelf)", function()
             for _, r in ipairs(refreshes) do assert.are.equal("ui", r.type) end
         end)
 
-        it("falls back to the first book list, then to the categories", function()
-            server.mode = "no_new"
+        it("prefers the sort/new link, falls back to the first book list, then to the categories", function()
+            server.mode = "sort_new"
             local view = openSources(openFM())
+            assert.are.equal(ROOT .. "/books", view:top().result.url)
+            view:close(true)
+
+            server.mode = "no_new"
+            view = openSources(FileManager.instance)
             assert.are.equal(ROOT .. "/books", view:top().result.url)
             assert.are.same({ "Book 1", "Book 2", "Book 3" }, bookTitles(view))
             view:close(true)

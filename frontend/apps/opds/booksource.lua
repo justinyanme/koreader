@@ -279,6 +279,10 @@ end
 -- nil when the root has neither: the root is then shown as a list of categories.
 function BookSource.homeUrl(root)
     if root.sort_new then return root.sort_new end
+    -- Calibre-Web marks its "Recently added" entry with neither rel nor kind: known by its address
+    for _, nav in ipairs(root.navs) do
+        if nav.url:match("/new/?$") then return nav.url end
+    end
     if #root.books > 0 then return root.url end
     for _, nav in ipairs(root.navs) do
         if nav.acquisition then return nav.url end
