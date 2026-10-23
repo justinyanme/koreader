@@ -705,6 +705,11 @@ local INDENT_TWEAK, NARROW_INDENT_TWEAK = "paragraph_indent_2em", "paragraph_ind
 local FOLLOWING_FLUSH_TWEAK = "paragraph_following_no_indent"
 local SPACING_TWEAK, HALF_SPACING_TWEAK = "paragraph_whitespace", "paragraph_whitespace_half"
 local NO_SPACING_TWEAK = "paragraph_no_whitespace"
+-- What each paragraph mode turns on and off, in this order: { { id, on }, ... }
+local MODE_TWEAKS = {
+    flush = { { INDENT_TWEAK, false }, { NARROW_INDENT_TWEAK, false }, { FLUSH_TWEAK, true } },
+    indent = { { FLUSH_TWEAK, false }, { FOLLOWING_FLUSH_TWEAK, false }, { NARROW_INDENT_TWEAK, false }, { INDENT_TWEAK, true } },
+}
 
 -- Whether the book's own style tweak (its CSS, last in the style sheet) sets `property`, over the tweaks of the panel.
 local function bookTweakSets(styletweak, property)
@@ -712,18 +717,76 @@ local function bookTweakSets(styletweak, property)
     return css and css:find(property, 1, true) ~= nil or false
 end
 
+-- The paragraph mode of style tweaks, `is_on(id)` telling which are on: "flush" or "indent", or nil when they
+-- leave the first lines to the book's styles or indent only some of them.
+local function tweaksMode(is_on)
+    if is_on(FLUSH_TWEAK) then
+        return "flush" -- also over an indent set elsewhere, later in the style sheet
+    end
+    if (is_on(INDENT_TWEAK) or is_on(NARROW_INDENT_TWEAK)) and not is_on(FOLLOWING_FLUSH_TWEAK) then
+        return "indent"
+    end
+end
+
+-- The paragraph mode of an open book's style tweaks, its own over the global defaults.
+local function bookParagraphMode(styletweak)
+    if not styletweak.enabled or bookTweakSets(styletweak, "text-indent") then return end
+    return tweaksMode(function(id) return styletweak:isTweakEnabled(id) end)
+end
+
 --- The paragraph mode the style tweaks set: "flush" or "indent", or nil when they leave the first lines to the book's
 -- styles or indent only some of them.
 function ReaderTypesetPanel:paragraphMode()
-    local styletweak = self.ui.styletweak
-    if not styletweak.enabled or bookTweakSets(styletweak, "text-indent") then return end
-    if styletweak:isTweakEnabled(FLUSH_TWEAK) then
-        return "flush" -- also over an indent set elsewhere, later in the style sheet
+    return bookParagraphMode(self.ui.styletweak)
+end
+
+--- The settings' 正文首行缩进 toggle (WeChat Read's 13-reading-preferences/02-settings.png): 首行缩进 as the global
+-- default of the paragraph style tweaks, which the paragraph panel sets for one book. On, it is the 首行缩进 card's
+-- tweak, made global over any other global first-line tweak; off, books without their own take their first lines
+-- from their own styles again. A book whose own tweaks (set from its paragraph panel) or style tweak set its first
+-- lines keeps them. With `ui` a reader, the open book follows once the settings page over it (`menu`, which runs
+-- that after it closes) closes, or says at once that it keeps its own.
+function ReaderTypesetPanel.genGlobalIndentMenuItem(ui)
+    local styletweak = ui and ui.styletweak
+    local function globalTweaks()
+        if styletweak then return styletweak.global_tweaks end
+        return G_reader_settings:readSetting("style_tweaks") or require("ui/data/css_tweaks").DEFAULT_GLOBAL_STYLE_TWEAKS
     end
-    if (styletweak:isTweakEnabled(INDENT_TWEAK) or styletweak:isTweakEnabled(NARROW_INDENT_TWEAK))
-            and not styletweak:isTweakEnabled(FOLLOWING_FLUSH_TWEAK) then
-        return "indent"
+    local function isOn()
+        local tweaks = globalTweaks()
+        return tweaksMode(function(id) return tweaks[id] end) == "indent"
     end
+    return {
+        text = _("Indent first lines of body text"),
+        help_text = _("A book whose first lines you set in its paragraph panel keeps that setting."),
+        checked_func = isOn,
+        callback = function(menu)
+            local on = not isOn()
+            -- a copy: the defaults of new installations stay as they are
+            local tweaks = require("util").tableDeepCopy(globalTweaks())
+            -- On, the indent card's tweaks; off (from indent), none of them. The global table only holds the tweaks
+            -- that are on (see ReaderStyleTweak:updateCssText()): the card's off ones are removed, never saved false.
+            for __, tweak in ipairs(MODE_TWEAKS.indent) do
+                if on and tweak[2] then
+                    tweaks[tweak[1]] = true
+                else
+                    tweaks[tweak[1]] = nil
+                end
+            end
+            G_reader_settings:saveSetting("style_tweaks", tweaks)
+            if not styletweak then return end
+            styletweak.global_tweaks = tweaks
+            local css = styletweak.css_text
+            styletweak:updateCssText()
+            if styletweak.css_text ~= css then
+                menu:runAfterClose("ApplyStyleSheet", function() ui:handleEvent(Event:new("ApplyStyleSheet")) end)
+            end
+            if (bookParagraphMode(styletweak) == "indent") ~= on then
+                UIManager:show(Toast:new{ text = styletweak.enabled and _("This book keeps its own first-line setting.")
+                    or _("Style tweaks are disabled for this book.") })
+            end
+        end,
+    }
 end
 
 --- Whether the style tweaks add space between paragraphs: a line, or half a line.
@@ -745,13 +808,7 @@ end
 
 --- Sets the paragraph mode, "flush" or "indent", turning off the tweaks that go against it.
 function ReaderTypesetPanel:setParagraphMode(mode)
-    if mode == "flush" then
-        self:setStyleTweaks{ { INDENT_TWEAK, false }, { NARROW_INDENT_TWEAK, false }, { FLUSH_TWEAK, true } }
-    else
-        self:setStyleTweaks{
-            { FLUSH_TWEAK, false }, { FOLLOWING_FLUSH_TWEAK, false }, { NARROW_INDENT_TWEAK, false }, { INDENT_TWEAK, true },
-        }
-    end
+    self:setStyleTweaks(MODE_TWEAKS[mode])
 end
 
 function ReaderTypesetPanel:setParagraphSpacing(on)
