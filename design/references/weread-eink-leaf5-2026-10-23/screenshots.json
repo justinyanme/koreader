@@ -1,0 +1,1834 @@
+{
+  "date": "2026-10-23",
+  "timezone": "Asia/Singapore",
+  "device": "BOOX Leaf5",
+  "android": "13",
+  "app": "微信读书墨水屏版",
+  "package": "com.tencent.weread.eink",
+  "version": "2.1.2",
+  "version_code": 10245900,
+  "screenshot_count": 185,
+  "capture": "adb exec-out screencap -p",
+  "groups": [
+    {
+      "folder": "00-entry",
+      "title": "书架、打开与最终位置",
+      "entry": "微信读书启动后进入书架。",
+      "screenshots": [
+        {
+          "file": "00-entry/01-bookshelf.png",
+          "title": "书架",
+          "route": "启动应用 → 书架",
+          "observation": "采集开始时的书架。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "c89945c65af1f62fade71b802053c18b42e4344ee4d287fba82b4d9eae34cba1"
+        },
+        {
+          "file": "00-entry/02-book-open.png",
+          "title": "打开书籍",
+          "route": "书架 →《蘋果之道》",
+          "observation": "无工具栏的原始阅读位置，第7章“選單”。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "a84bf45945ba9b6e5d1f25ce60b573df2f5eb70aa6c5bc024df830e527fb1554"
+        },
+        {
+          "file": "00-entry/03-final-reading-position.png",
+          "title": "最终阅读位置",
+          "route": "清理测试数据 → 重新打开《蘋果之道》",
+          "observation": "恢复到与02相同的正文段落；重排后页码发生变化。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "6b31ff0eac1057daf4cc5155007faf9f557da6c2d330235bf6fcd57db9f66439"
+        }
+      ]
+    },
+    {
+      "folder": "01-reader-navigation",
+      "title": "阅读导航与工具栏",
+      "entry": "《蘋果之道》正文。不同动作截图取自采集期间不同的阅读位置。",
+      "screenshots": [
+        {
+          "file": "01-reader-navigation/01-toolbars.png",
+          "title": "上下工具栏",
+          "route": "正文 → 上滑显示工具栏",
+          "observation": "上方为书籍动作，下方为返回、目录、笔记、进度、字体、听书。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "ab0f442db8037c1176a087dfcc8fd34cf29731a0391ddc9eac4d4cde75d1d86c"
+        },
+        {
+          "file": "01-reader-navigation/02-tap-next-page.png",
+          "title": "点击翻到下一页",
+          "route": "正文 → 点击右侧翻页区域",
+          "observation": "翻页后的插图页。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "28ab055147f56bc3137efa40fb8b7064576c70cfea3b2e71c263b9b5df68c1d0"
+        },
+        {
+          "file": "01-reader-navigation/03-tap-previous-page.png",
+          "title": "点击翻到上一页",
+          "route": "正文 → 点击左侧翻页区域",
+          "observation": "翻页后的文字页；全局“点击左侧翻到下一页”关闭。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "b3b3de832d13475676522c683a3eef1c665849afb7a3275a60786470fcced31e"
+        },
+        {
+          "file": "01-reader-navigation/04-swipe-next-page.png",
+          "title": "滑动翻页",
+          "route": "正文 → 横向滑动翻页",
+          "observation": "翻页后的插图页。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "28ab055147f56bc3137efa40fb8b7064576c70cfea3b2e71c263b9b5df68c1d0"
+        },
+        {
+          "file": "01-reader-navigation/05-swipe-up-toolbars.png",
+          "title": "上滑唤出工具栏",
+          "route": "正文 → 向上滑动",
+          "observation": "正文下方保留操作栏。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "356578c123bcf5d86e6b2c55f8e8378e8d6bfe5e041b019fb2893da52e50a53c"
+        }
+      ]
+    },
+    {
+      "folder": "02-typography",
+      "title": "字体、版式与段落",
+      "entry": "正文 → 上滑显示工具栏 → 底部 A。调整会重新分页，截图中的其他参数可能处于中间测试值。",
+      "screenshots": [
+        {
+          "file": "02-typography/01-font-panel.png",
+          "title": "字体面板",
+          "route": "底部 A",
+          "observation": "字号、字重、行距、边距四行控制，以及字体卡片。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "80f52bd9df0f63ee18b59f686967b8add0abdd8efd25e53deb8ca638efcc0ebd"
+        },
+        {
+          "file": "02-typography/02-font-size-increased.png",
+          "title": "增大字号",
+          "route": "字体面板 → 字号加号",
+          "observation": "滑块显示24，正文实时重排。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "f97a1d0b9b1b022f6274fe080e7db002f8b07bff94661324321d0b82920dacf7"
+        },
+        {
+          "file": "02-typography/03-font-weight-increased.png",
+          "title": "增大字重",
+          "route": "字体面板 → 字重加号",
+          "observation": "滑块显示3。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "f972332ea2bf7a54827390b9d0227d2122b476404c294582d2d1bec19f570612"
+        },
+        {
+          "file": "02-typography/04-line-spacing-increased.png",
+          "title": "增大行距",
+          "route": "字体面板 → 行距加号",
+          "observation": "行距滑块位置及正文排版反馈。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "32a8ab7d63cfa253f03093cee5930978c178edc8a182a171504dc200b544c363"
+        },
+        {
+          "file": "02-typography/05-margins-increased.png",
+          "title": "增大边距",
+          "route": "字体面板 → 边距加号",
+          "observation": "正文宽度发生变化。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "9a8116091c292b36c2064f200b0cacb6c450ca7bd35ddc0b239783ed2c061639"
+        },
+        {
+          "file": "02-typography/06-paragraph-indent.png",
+          "title": "段落设置入口",
+          "route": "字体面板 → 右上“首行顶格”",
+          "observation": "首行顶格与首行缩进两个大卡片。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "ccff699d656a381d3a977c1a66e0b2105400493483943f77c9af12747c3bb29b"
+        },
+        {
+          "file": "02-typography/07-paragraph-indent-selected.png",
+          "title": "选择首行缩进",
+          "route": "段落设置 → 首行缩进",
+          "observation": "选中卡片以黑底白字表示。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "a35b53509261526714a7a64573b07e4e514ef7842d3c450ea8fc2ddeb886375a"
+        },
+        {
+          "file": "02-typography/08-paragraph-spacing-enabled.png",
+          "title": "开启段间距",
+          "route": "段落设置 → 首行缩进 → 段间距开关",
+          "observation": "开关开启状态。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "7abc490e4fc38e7fa4ed47554c47e0d178974d86623dc2f5004c71156c3378eb"
+        },
+        {
+          "file": "02-typography/09-more-fonts.png",
+          "title": "全部字体",
+          "route": "字体面板 → 查看更多",
+          "observation": "全部29、仓耳12、方正7、其他9的分类标签。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "2409c6794216557476d86d475f516a54614474d3a076ca83f36c056644701cbf"
+        },
+        {
+          "file": "02-typography/10-fonts-canger.png",
+          "title": "仓耳字体",
+          "route": "查看更多 → 仓耳",
+          "observation": "分类筛选及字体名称的字形预览。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "166fb7a8acc6cc51f3a75a3611b9357e335db99b3ccb7936378ca9c9aaca6968"
+        },
+        {
+          "file": "02-typography/11-fonts-founder.png",
+          "title": "方正字体",
+          "route": "查看更多 → 方正",
+          "observation": "分类筛选。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "35eaf9a6467ba756b9742a9fdcfbd1def19e03d1228f984ec06fb3ee1b2336ef"
+        },
+        {
+          "file": "02-typography/12-fonts-other.png",
+          "title": "其他字体",
+          "route": "查看更多 → 其他",
+          "observation": "分类筛选，当前字体为黑底卡片。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "cfbfa2d3e795386185745c4922b5033ad94d06de6eda721e2f122d5af45a916c"
+        },
+        {
+          "file": "02-typography/13-system-font-selected.png",
+          "title": "选择系统字体",
+          "route": "查看更多 → 全部 → 系统字体",
+          "observation": "字体选中状态及正文变化。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "fe99ff403cb2066b4bb705919871058b4d571a9540a69a50039b65b2b1a3ccbc"
+        },
+        {
+          "file": "02-typography/14-original-settings-restored.png",
+          "title": "字体设置恢复",
+          "route": "恢复寒蝉活宋体、字号22、字重2及原行距边距 → 重新打开字体面板",
+          "observation": "最终核对：行距与边距滑块均回到初始靠左位置。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "be55c3ce91eebd0c8f7da05c6f2b487df3e290a8cf8eef1b9258f4b33a6b8f37"
+        },
+        {
+          "file": "02-typography/15-paragraph-settings-restored.png",
+          "title": "段落设置恢复",
+          "route": "字体面板 → 段落设置",
+          "observation": "最终核对：首行顶格，段间距关闭。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "b97ea47ec5907934e89187fd59ece6b363715d43d12a9e7c008aae525fd343ed"
+        }
+      ]
+    },
+    {
+      "folder": "03-progress",
+      "title": "进度、章节跳转与自动翻页",
+      "entry": "正文 → 上滑显示工具栏 → 底部进度图标（外观类似太阳）。",
+      "screenshots": [
+        {
+          "file": "03-progress/01-progress-panel.png",
+          "title": "进度面板",
+          "route": "底部进度图标",
+          "observation": "百分比、剩余阅读时长、已读时长、笔记数、滑块及自动翻页入口。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "a31dce07eafd0def7ee80bba83f1096ee4889c7f0e8d290aa871a031551a9567"
+        },
+        {
+          "file": "03-progress/02-auto-page-turn.png",
+          "title": "开启自动翻页",
+          "route": "进度面板 → 开启自动翻页",
+          "observation": "正文左下出现自动翻页设置胶囊。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "8b05ebf43d6eb378eabee591474d8db04400b4d59c97eecae2bf4c9de8ade5ad"
+        },
+        {
+          "file": "03-progress/03-auto-page-turn-settings.png",
+          "title": "自动翻页设置",
+          "route": "自动翻页 → 左下设置胶囊",
+          "observation": "速度刻度、划线导读开关、关闭自动翻页按钮。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "154a54027f1dae94e142581db7f89f851d32b536cfb7f404fa507adc41ab62e0"
+        },
+        {
+          "file": "03-progress/04-auto-reading-guide-enabled.png",
+          "title": "开启划线导读",
+          "route": "自动翻页设置 → 划线导读",
+          "observation": "正文出现导读线；采集后恢复关闭。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "bc1426d49a02e708e89fefde23c31593dfe9ec25b53c72ddf9b125760a0dc9f9"
+        },
+        {
+          "file": "03-progress/05-progress-panel-after-navigation.png",
+          "title": "重新打开进度面板",
+          "route": "关闭自动翻页 → 导航到其他位置 → 进度图标",
+          "observation": "按钮恢复为“开启自动翻页”。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "bbc990f844a5e977525629f90c135ea6f68abd9a88a9e93fc9ac6de391e5f2fd"
+        },
+        {
+          "file": "03-progress/07-progress-drag-preview.png",
+          "title": "拖动进度预览",
+          "route": "按住进度滑块 → 向右拖动，尚未松手",
+          "observation": "显示目标百分比，正文暂时保留原位置；另有旧位置灰色标记。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "a66d264ba48a2a5f77288b4ee4c450c50dea62393a256a4ec9ed06c69c5fd853"
+        },
+        {
+          "file": "03-progress/08-progress-jump-loading.png",
+          "title": "跳转加载",
+          "route": "拖动进度 → 松手",
+          "observation": "中部出现“加载中…”的过渡状态。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "3e3770ca2a09c53f2ed03b6cd57b36c3bde6b88efb27f6c4c1c89d19a6eda1ac"
+        },
+        {
+          "file": "03-progress/09-progress-jump-result.png",
+          "title": "跳转完成",
+          "route": "松手后等待加载",
+          "observation": "目标正文与进度滑块。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "010770ca79640ecc7441e9f83ce77876c62cfa5c304a63030ff49e4ca854ee11"
+        },
+        {
+          "file": "03-progress/10-tap-progress-track.png",
+          "title": "点击进度轨道",
+          "route": "进度面板 → 点击轨道靠左位置",
+          "observation": "跳到另一正文位置；未据此认定灰色点具有“返回”功能。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "3ec4eab8aeb255304a4383ca5e18199686f241ef4812216dbbe0d179eea60a9f"
+        },
+        {
+          "file": "03-progress/11-next-chapter.png",
+          "title": "下一章",
+          "route": "进度面板 → 滑块右侧箭头",
+          "observation": "正文跳到“麥金塔辦公室系統”。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "278f3baf8a0703ff2db10c31d1a6023254fee5cf5eb429b340755bc741d78bea"
+        },
+        {
+          "file": "03-progress/12-previous-chapter.png",
+          "title": "上一章",
+          "route": "进度面板 → 滑块左侧箭头",
+          "observation": "正文跳到“瘋狂般偉大”。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "2a986ae35d9deca942d0a292cd0c593216d42787d0da2589aaecc5f1bfa4c9b1"
+        }
+      ]
+    },
+    {
+      "folder": "04-contents-and-search",
+      "title": "目录与全文搜索",
+      "entry": "正文 → 上滑显示工具栏 → 底部目录。",
+      "screenshots": [
+        {
+          "file": "04-contents-and-search/01-contents.png",
+          "title": "目录首页",
+          "route": "底部目录",
+          "observation": "全屏目录，含搜索框、层级、页码和右下分页按钮。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "45c664e6f476e73a76aa35f20d530200cff70bffea690dd9acd908621a7b82e7"
+        },
+        {
+          "file": "04-contents-and-search/02-contents-section-collapsed.png",
+          "title": "折叠目录分组",
+          "route": "目录 → 点 PART 1 分组箭头",
+          "observation": "折叠后可看到后续分组。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "92be6d613013235d4267afdd53513efed1816b4db582a66c140ccc5c1b6a913b"
+        },
+        {
+          "file": "04-contents-and-search/03-contents-bottom.png",
+          "title": "目录底部",
+          "route": "目录 → 右上“去底部”",
+          "observation": "尾部章节、致谢、资料来源、注释、附录等条目。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "f9330480701977d103174b9d2d0f9192fb1710b91f5e63363cdbf11db6c31a92"
+        },
+        {
+          "file": "04-contents-and-search/04-search-input.png",
+          "title": "搜索输入",
+          "route": "目录 → 搜索框",
+          "observation": "键盘展开，全书搜索输入状态。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "4b53d40905fd06a5c7cbe6e5a5a90dcc16cfc2d39986774d523a65f6f396496d"
+        },
+        {
+          "file": "04-contents-and-search/05-search-results.png",
+          "title": "搜索结果",
+          "route": "输入 PARC → 提交",
+          "observation": "按章节列出命中内容，关键词黑底反白。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "642e43f642d4940ba79e534875abc4112ed9c23489b1a6ede6be2f4f1b17d318"
+        },
+        {
+          "file": "04-contents-and-search/06-search-hit-in-book.png",
+          "title": "跳转到命中正文",
+          "route": "搜索结果 → 点击一条结果",
+          "observation": "命中正文及阅读工具栏。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "72926c68c13b4a145a538fcc06d7d32157c42b3ded9b76a6b73c9b5be7b80d55"
+        },
+        {
+          "file": "04-contents-and-search/07-search-return-bar.png",
+          "title": "搜索导航条",
+          "route": "命中正文 → 收起工具栏",
+          "observation": "底部黑色搜索条包含关键词、返回结果列表及关闭入口。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "a0b975642f17acd211443e1388344132790470d5be626a0c212d66fc07da6d6f"
+        },
+        {
+          "file": "04-contents-and-search/08-search-no-results.png",
+          "title": "搜索无结果",
+          "route": "返回搜索 → 输入 qzxw987654321 → 提交",
+          "observation": "空结果提示“没有找到相关内容”。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "19f70114ace1e9ab94284688a72aace22900c34987dc86a3c8209c1abefe9dd0"
+        },
+        {
+          "file": "04-contents-and-search/09-search-exited.png",
+          "title": "退出搜索",
+          "route": "返回命中正文 → 关闭底部搜索条",
+          "observation": "恢复普通正文。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "0f9865d846ab95f51c8bb54b27c805f0ed9cf9e4d02bead4685f7d0ac3dc6213"
+        }
+      ]
+    },
+    {
+      "folder": "05-bookmarks",
+      "title": "书签及混合筛选",
+      "entry": "正文工具栏右上书签入口；笔记列表也可从目录底部“书签”按钮进入。",
+      "screenshots": [
+        {
+          "file": "05-bookmarks/01-bookmarks-before.png",
+          "title": "添加前的笔记列表",
+          "route": "底部笔记",
+          "observation": "初始共42条，未见仅书签筛选入口。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "b64c736f8cc3f53de35cced82bfe285170cb03573ec867040316ed348246ce05"
+        },
+        {
+          "file": "05-bookmarks/02-bookmark-added.png",
+          "title": "添加书签",
+          "route": "返回正文 → 顶部书签",
+          "observation": "右上黑色折角及“书签已添加”提示。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "d6ded02777a0d1abd0821c8e8d15b5e6556938a9ebdf141abeb9f7bd3e7814a4"
+        },
+        {
+          "file": "05-bookmarks/03-remove-bookmark-toolbar.png",
+          "title": "已加书签的工具栏",
+          "route": "有书签的正文 → 上滑工具栏",
+          "observation": "顶部图标下有“删除书签”动作状态。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "99dd342e2a5d5ee131e42351c0681019e513fa0e6abf29d800fdfea89f3e1785"
+        },
+        {
+          "file": "05-bookmarks/04-bookmark-in-notes.png",
+          "title": "仅显示书签",
+          "route": "打开笔记 → 仅显示书签",
+          "observation": "只有新加书签卡片，总数43。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "f0423355875023d70a96dad0d9d090bc70110f176619ce8394603563eb2de79e"
+        },
+        {
+          "file": "05-bookmarks/05-bookmarks-and-highlights-filter.png",
+          "title": "显示全部笔记",
+          "route": "右上筛选 → 显示全部",
+          "observation": "书签与原划线混排，并使用不同类型图标。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "007e58f8c17b9811ead210310fa34cafc2fcd082b8fa21413135b157884f9d8e"
+        },
+        {
+          "file": "05-bookmarks/06-bookmark-delete-confirmation.png",
+          "title": "删除书签确认",
+          "route": "仅书签列表 → 长按测试书签",
+          "observation": "底部“确认删除该笔记吗？”确认层。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "908a70f01171dd949bbb8b129f6d7bf6e561944f4b274df844a2e327cc4146de"
+        },
+        {
+          "file": "05-bookmarks/07-temporary-bookmark-removed.png",
+          "title": "测试书签已删除",
+          "route": "确认删除 → 笔记列表",
+          "observation": "恢复42条；该测试书签已清除。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "016a8bbe417eaca45ece82600cd7a9d6696e9c37327fe03c9015da2aef001a3c"
+        }
+      ]
+    },
+    {
+      "folder": "06-notes",
+      "title": "笔记列表与空状态",
+      "entry": "正文 → 上滑显示工具栏 → 底部笔记。",
+      "screenshots": [
+        {
+          "file": "06-notes/01-notes-list.png",
+          "title": "笔记首页",
+          "route": "底部笔记",
+          "observation": "书籍概况卡、章节标题、圆角笔记卡片与分页按钮。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "7e5e67c76ecba897ef29a1083414dc1cb4e9e2633bfe133df2cb8606b454dbf7"
+        },
+        {
+          "file": "06-notes/02-notes-next-page.png",
+          "title": "笔记下一页",
+          "route": "笔记 → 右下下一页",
+          "observation": "使用分页按钮浏览列表。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "9f42f49066d5c1c70e84166e59fd3c2c521362d9a9b0997bd4546f7fa580e663"
+        },
+        {
+          "file": "06-notes/03-existing-note-long-press.png",
+          "title": "笔记长按确认层",
+          "route": "笔记 → 长按一条原有笔记",
+          "observation": "只查看删除确认，随后取消，未删除原有笔记。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "f9f9cd806fdddc8f2744dc012f6715c2a62222cb687f4eff825c169defc129cc"
+        },
+        {
+          "file": "06-notes/04-note-jump-to-text.png",
+          "title": "笔记跳回正文",
+          "route": "笔记列表 → 点击笔记卡片",
+          "observation": "跳到正文，并短暂以灰色标示对应内容。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "ab9b772a1a451a5cd1e05f947b9b99a9ee2c49a1116fb423b427c4b1e187201e"
+        },
+        {
+          "file": "06-notes/05-notes-last-page.png",
+          "title": "笔记最后一页",
+          "route": "连续点下一页至底部",
+          "observation": "下一页按钮禁用；末页可能与上一页重叠。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "1bb4e3d10fcd36e479f3b990107e2725753b05536b9b0d526f75b6fc116a9e31"
+        },
+        {
+          "file": "06-notes/06-empty-notes-completed-book.png",
+          "title": "没有笔记",
+          "route": "《正念的奇迹》正文 → 底部笔记",
+          "observation": "0条，提示可记录想法、划线与书签。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "3ee2ee13f23750812f403bba845f9d43d4db2307ad5502d4b7c9d336ba5d7453"
+        },
+        {
+          "file": "06-notes/07-final-note-count-restored.png",
+          "title": "最终笔记数量核对",
+          "route": "删除本次测试手写笔记 → 回笔记首页",
+          "observation": "最终恢复42条，与采集前一致。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "6d30bb8aa911ad47db62a4481fa91a4d2276c04be5acbb1284ed161b2ceb39f4"
+        }
+      ]
+    },
+    {
+      "folder": "07-selection-and-lookup",
+      "title": "选词、查询、划线与想法",
+      "entry": "《蘋果之道》正文 → 长按文字。测试想法使用英文标记“UI walkthrough temporary note”，仅自己可见，已删除。",
+      "screenshots": [
+        {
+          "file": "07-selection-and-lookup/01-english-word-selected.png",
+          "title": "英文选词菜单",
+          "route": "长按英文 PARC",
+          "observation": "白底描边浮层，动作是划线、翻译、写想法、复制、听当前；黑色拖动手柄。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "e1c864323ac958e2926ec22c0266bb8cf17c65c16a4166098da1b82f81a6102c"
+        },
+        {
+          "file": "07-selection-and-lookup/02-translation-result.png",
+          "title": "没有词条的翻译结果",
+          "route": "PARC 选词 → 翻译",
+          "observation": "只显示词语、全书繁转简、去书城搜索入口，未返回词义。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "2293f241cc7237b07c68137008853942b1e0f126a0676abba0b5305fe79a3958"
+        },
+        {
+          "file": "07-selection-and-lookup/03-selected-text-bookstore-search.png",
+          "title": "按选词搜书城",
+          "route": "翻译结果 → 去书城搜索",
+          "observation": "以 PARC 为关键词的书城结果页。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "f62265c3770664933a0d0a1b76f3b8c248f827ec26af82b1812053a4631a78ca"
+        },
+        {
+          "file": "07-selection-and-lookup/04-write-thought-editor.png",
+          "title": "写想法编辑器",
+          "route": "返回正文 → 长按 PARC → 写想法",
+          "observation": "下方编辑区、引用、键盘和发表按钮。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "13bd1c9543713a14c73e653fae7bdbd574c8800489519c77bb9c5d5da1b57513"
+        },
+        {
+          "file": "07-selection-and-lookup/05-private-visibility-indicator.png",
+          "title": "私密状态指示",
+          "route": "想法编辑器 → 查看“私密”标记",
+          "observation": "本次该标记不可点击，未打开可见范围菜单。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "13bd1c9543713a14c73e653fae7bdbd574c8800489519c77bb9c5d5da1b57513"
+        },
+        {
+          "file": "07-selection-and-lookup/06-private-thought-draft.png",
+          "title": "私密想法草稿",
+          "route": "想法编辑器 → 输入测试标记",
+          "observation": "草稿输入状态。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "bdf231acf4de8b70c59a793d5c67c55fb5a5881ffebe4300ba18743eed535bee"
+        },
+        {
+          "file": "07-selection-and-lookup/07-private-test-thought-saved.png",
+          "title": "测试想法保存",
+          "route": "点击发表",
+          "observation": "页面提示保存成功；这是私密测试想法。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "093d2a4b281f4badb7ece021af084a75745ca74761b3e95fc69f63f7622bd1ef"
+        },
+        {
+          "file": "07-selection-and-lookup/08-private-thought-detail.png",
+          "title": "正文上的想法卡片",
+          "route": "点击已保存想法所在词语",
+          "observation": "引用和作者内容卡，带赞与评论图标。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "5c8a280fec832286b43c6eaa96925330d787e80aaf2e93a16b2f458d41597599"
+        },
+        {
+          "file": "07-selection-and-lookup/09-private-thought-full-detail.png",
+          "title": "自己的想法详情",
+          "route": "想法卡片 → 点击内容",
+          "observation": "全屏详情，明确显示“仅自己可见”，有删除入口。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "253a1e788f0ae00f18b38bacb6302d3017c8b11a6238e5b140f9c71aebac66a1"
+        },
+        {
+          "file": "07-selection-and-lookup/10-thought-likes-tab.png",
+          "title": "想法的赞标签",
+          "route": "想法详情 → 赞",
+          "observation": "查看空列表，未点赞。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "2c1b4b6a3cab92436827e4e1b9201c16daeb00a4bdecb44962fb061f5b271312"
+        },
+        {
+          "file": "07-selection-and-lookup/11-test-thought-delete-confirmation.png",
+          "title": "删除测试想法确认",
+          "route": "自己的想法详情 → 删除",
+          "observation": "删除确认层。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "0f8981ac40ea56002aea579ce3c6832e96cad2d4b19eaec2dea4bfb0d00122f8"
+        },
+        {
+          "file": "07-selection-and-lookup/12-test-thought-deleted.png",
+          "title": "测试想法已删除",
+          "route": "确认删除 → 回到正文",
+          "observation": "测试词语不再带该想法卡片。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "5167da300a67bac518cd1ab96c3445e670520a8af2e23a621ec8e13244b47b4b"
+        },
+        {
+          "file": "07-selection-and-lookup/13-highlight-added.png",
+          "title": "添加划线",
+          "route": "长按 PARC → 划线",
+          "observation": "选中菜单的第一项切换为“删除划线”。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "60e04b4685f738ba22cc4b16eccce64a912e6ff452fbee7850d8ba41b5dbc94b"
+        },
+        {
+          "file": "07-selection-and-lookup/14-highlight-actions.png",
+          "title": "已有划线菜单",
+          "route": "再次长按测试划线",
+          "observation": "已有划线上的操作菜单。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "60e04b4685f738ba22cc4b16eccce64a912e6ff452fbee7850d8ba41b5dbc94b"
+        },
+        {
+          "file": "07-selection-and-lookup/15-test-highlight-removed.png",
+          "title": "测试划线已移除",
+          "route": "点击删除划线 → 关闭菜单",
+          "observation": "测试单词划线已清除，原有其他划线保留。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "5167da300a67bac518cd1ab96c3445e670520a8af2e23a621ec8e13244b47b4b"
+        },
+        {
+          "file": "07-selection-and-lookup/16-copy-confirmation.png",
+          "title": "复制确认",
+          "route": "长按 PARC → 复制",
+          "observation": "黑底提示“已复制到剪贴板”。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "f15d09535671e2836ddfb9309b132cde9e7a21c8b06cfb1a39ca7f04d9e9970f"
+        },
+        {
+          "file": "07-selection-and-lookup/17-chinese-text-selected.png",
+          "title": "中文选词菜单",
+          "route": "长按“史丹佛”附近文字",
+          "observation": "识别出的选词为“丹佛”；中文菜单使用“查询”。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "a77fc39b17331ba92af63a9e17f82582ae1e4c3804d354d6199c3cf46f6fa8b5"
+        },
+        {
+          "file": "07-selection-and-lookup/18-chinese-lookup-result.png",
+          "title": "查询加载",
+          "route": "中文选词 → 查询",
+          "observation": "“查询中…”状态。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "05f79f12bf7c13bfb32a58cbbcda491d91f3596875ef6e6567e730b353e41a8f"
+        },
+        {
+          "file": "07-selection-and-lookup/19-chinese-lookup-settled.png",
+          "title": "百科摘要",
+          "route": "等待查询完成",
+          "observation": "丹佛百科释义与外部详情箭头。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "5d819a5ce5649f61f3a5525754a56684c58162739bcaa5fb1ca7fdee80f2e428"
+        },
+        {
+          "file": "07-selection-and-lookup/20-encyclopedia-webview.png",
+          "title": "百科详情网页",
+          "route": "点击百科释义卡片",
+          "observation": "内嵌搜狗百科网页。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "b2723a2923b36ce27750c76b43e07369c56a40310943632b464022b75665cec4"
+        },
+        {
+          "file": "07-selection-and-lookup/21-bottom-of-page-selection.png",
+          "title": "页底选词",
+          "route": "在正文页底长按 Copy",
+          "observation": "浮层放在选词上方，手柄位于页底。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "478fa40a56789824f7e008f4bd50604cf8d801f2c8ef14279d3c3e88dad4cb36"
+        },
+        {
+          "file": "07-selection-and-lookup/22-english-translation-result.png",
+          "title": "英文翻译有词义",
+          "route": "Copy 选词 → 翻译",
+          "observation": "显示“复制”及百科释义摘要。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "714e8be019bec4ddf96980ae95c1b63103b7186e39efa81425cd8fa3d1230a0d"
+        },
+        {
+          "file": "07-selection-and-lookup/23-drag-to-highlight.png",
+          "title": "拖动扩大选区",
+          "route": "返回正文 → 拖动选词手柄",
+          "observation": "多行文本下方出现持久划线；本次操作产生了一条测试划线。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "7d74c5a120472c2066287c37445865b5c61704db6adb87c60236fa9f7f003bed"
+        },
+        {
+          "file": "07-selection-and-lookup/24-expanded-test-highlight-removed.png",
+          "title": "扩大选区的测试划线已删除",
+          "route": "长按新划线 → 删除划线",
+          "observation": "测试“用 X 代表剪下…”段落划线已清除。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "3968ed2064ee8c2fb73f5248c9a90b0e0c497f906aaf7ee6ecaaec82e1e856df"
+        },
+        {
+          "file": "07-selection-and-lookup/25-listen-from-selection.png",
+          "title": "从选词开始听",
+          "route": "选词菜单 → 听当前",
+          "observation": "打开听书播放器，截图为三点加载状态。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "ea75c781c95e24082b9ecb34280ba217414dd37c1964250d7a55528b1ab6457b"
+        }
+      ]
+    },
+    {
+      "folder": "08-listening",
+      "title": "听书与后台播放器",
+      "entry": "正文 → 底部“听”，或长按文字 →“听当前”。播放器中的三点表示加载，三角表示可播放，两竖线表示正在播放。",
+      "screenshots": [
+        {
+          "file": "08-listening/01-listening-player-paused.png",
+          "title": "听书暂停状态",
+          "route": "底部听 → 暂停",
+          "observation": "封面、章节、定时、音色、语速、进度、原文、切集与集列表。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "8730eb4b1c1de7bc613b9a7fdd541e625344465de47d4155d4f1c332a5ee40ca"
+        },
+        {
+          "file": "08-listening/02-sleep-timer.png",
+          "title": "定时关闭面板",
+          "route": "播放器 → 定时关闭",
+          "observation": "关闭、30、60、90分钟和本集结束后关闭入口。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "6b736a1fd0e55f1e493a2e187315197d03df99b3ccee1aaac59bb5e2e7a8c77e"
+        },
+        {
+          "file": "08-listening/03-sleep-timer-30-minutes.png",
+          "title": "设置30分钟",
+          "route": "定时关闭 → 30",
+          "observation": "面板出现剩余倒计时；随后恢复关闭。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "422cdfc15db41f321392cb2fa0e58feb06d8db3d2c2b1ffa099093cceff7b0bc"
+        },
+        {
+          "file": "08-listening/04-voice-selection.png",
+          "title": "音色选择",
+          "route": "播放器 → 当前音色",
+          "observation": "初始 AI男声2025A，包含更多音色入口。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "3406b889830d8aa4084fef14de117ae25746227daa5b4a82ab8df6aa6b4542fd"
+        },
+        {
+          "file": "08-listening/05-more-voices.png",
+          "title": "更多音色",
+          "route": "音色选择 → 更多音色",
+          "observation": "扩展后的分页音色列表。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "1d8ecfc828eeda9b29939e927049a522ab6e1c6af2a5126235e6ea9e035d0534"
+        },
+        {
+          "file": "08-listening/06-more-voices-next-page.png",
+          "title": "音色列表下一页",
+          "route": "更多音色 → 下一页",
+          "observation": "更多音色；未切换当前音色。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "bd0eed6647433fbf32452d8c20f71a5249b9f938ff91b5f06755ed6f9ac5904f"
+        },
+        {
+          "file": "08-listening/07-playback-speed.png",
+          "title": "语速设置",
+          "route": "播放器 → 语速",
+          "observation": "初始1.0x，以及“仅应用到当前专辑”开关。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "ba2a0c1b5728a64b9f960304c6487e746ca849ec76ca1267404e9d3dba0ce549"
+        },
+        {
+          "file": "08-listening/08-speed-and-album-scope.png",
+          "title": "1.5倍与专辑范围",
+          "route": "语速 → 1.5x → 开启仅应用到当前专辑",
+          "observation": "测试后恢复1.0x和范围开关关闭。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "269e0e09f173d95b5b9dd4c6b3262c2d25be4f8b9f8fc369dd8cfe0c9bfff5d4"
+        },
+        {
+          "file": "08-listening/09-episode-list.png",
+          "title": "集列表",
+          "route": "播放器 → 66集",
+          "observation": "章节可拆分为多个音频分集，并显示各集时长。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "4148362b52174114bb4165231c4a01f73624d502bc2006cbd45d4e7741af1e20"
+        },
+        {
+          "file": "08-listening/10-episode-list-bottom.png",
+          "title": "集列表底部",
+          "route": "集列表 → 去底部",
+          "observation": "尾部各集及页码按钮。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "b703cbbf87b609ed70607e7af91872d6022b46aa4effb86eb44e2f1ade148f96"
+        },
+        {
+          "file": "08-listening/11-playback-loading.png",
+          "title": "播放请求加载",
+          "route": "播放器 → 播放/暂停测试",
+          "observation": "中心为三点加载态，不能据此判断已播放或已暂停。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "5c851d25f7115829260ea8fec987c92854fd4e002d808b6470a2b15a42c22e26"
+        },
+        {
+          "file": "08-listening/13-return-to-original-text.png",
+          "title": "返回原文",
+          "route": "播放器 → 原文",
+          "observation": "回到文字阅读；保留采集时的搜索导航条，返回原文本身不负责关闭后台播放。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "532aa3b947a83f00af1ba0eabcb62c157e39dea2b6637b4b985294bc47311c76"
+        },
+        {
+          "file": "08-listening/14-background-mini-player.png",
+          "title": "后台迷你播放器",
+          "route": "播放器收起 → 返回书架",
+          "observation": "底部迷你条含播放状态、时间与关闭按钮。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "563c2768ad82c09eca1080075f3603897df89cb7db0271bfd4e57e3d74a252b0"
+        },
+        {
+          "file": "08-listening/15-mini-player-paused.png",
+          "title": "迷你播放器暂停",
+          "route": "迷你条 → 暂停",
+          "observation": "按钮显示播放三角。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "ff1aa0de6cf18f30391d2ff70051584231028954cdc60461bb1c0b6755767b0f"
+        },
+        {
+          "file": "08-listening/16-listen-from-selection-playing.png",
+          "title": "从选词位置播放",
+          "route": "选词 → 听当前 → 等待加载",
+          "observation": "中心暂停图标，显示当前朗读文字。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "8cc632767adfd9bc84dbf6049759565cc81bfb502229369c2323173763e4cc07"
+        },
+        {
+          "file": "08-listening/17-selection-playback-paused.png",
+          "title": "暂停朗读",
+          "route": "正在播放 → 中心暂停",
+          "observation": "中心播放三角。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "860750c1f9d8609787495d24ed824024e5493bdecef6d4c90390cf49d92123b8"
+        },
+        {
+          "file": "08-listening/18-rewind-15-seconds.png",
+          "title": "后退15秒",
+          "route": "暂停后 → 左侧15秒按钮",
+          "observation": "位置改变，并恢复播放。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "3cb1ef54c8081e49c35c4a1bd040cdddc4348b6ecff13db76155c14ef36aff83"
+        },
+        {
+          "file": "08-listening/19-forward-15-seconds.png",
+          "title": "前进15秒",
+          "route": "播放器 → 右侧15秒按钮",
+          "observation": "位置前进，处于播放状态。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "d3210a4536c6637ccc0b39cab27927fb43fd47d139071696627f861bb70aa8ae"
+        },
+        {
+          "file": "08-listening/20-next-episode.png",
+          "title": "下一集",
+          "route": "播放器 → 下一集",
+          "observation": "标题从“第7章 麗莎”变成“第7章 麗莎_1”，开始播放。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "9ab519f59efa93127aa3625a25c0592ea7d66a03e67500821e4ff3e73122d046"
+        },
+        {
+          "file": "08-listening/21-previous-episode.png",
+          "title": "上一集",
+          "route": "播放器 → 上一集",
+          "observation": "返回“第7章 麗莎”，开始播放。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "a1a3df5ebf49e68947af685a1cbb8f01ce53a36567194397202ef67fc125de1f"
+        },
+        {
+          "file": "08-listening/22-seek-drag-preview.png",
+          "title": "拖动听书进度",
+          "route": "暂停 → 按住进度条 → 拖到中部但不松手",
+          "observation": "白底时间气泡，上方另显示目标时间，仍为暂停图标。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "b44a20ee0e429f18a64548b43969fc52546f41818cda876cf4a60de6984711a3"
+        },
+        {
+          "file": "08-listening/23-seek-result.png",
+          "title": "听书进度跳转",
+          "route": "进度拖动 → 松手",
+          "observation": "跳转到55分钟附近，并恢复播放。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "0607e0f3900c3d6a89275e13463a720bb9dacd9aafd9f8f4b5ed7f39c7cac35f"
+        },
+        {
+          "file": "08-listening/24-expand-mini-player.png",
+          "title": "展开迷你播放器",
+          "route": "暂停 → 收起 → 返回书架 → 点击迷你条正文",
+          "observation": "展开为完整播放器，保留暂停状态。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "eebdf50fb374189ee5a34ed0514b07e7ef0bdae541cc1560496c966cc5c5896e"
+        },
+        {
+          "file": "08-listening/25-mini-player-closed.png",
+          "title": "关闭后台播放器",
+          "route": "收起至书架 → 点击迷你条 X",
+          "observation": "迷你条消失；最终没有后台播放。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "28e2a928ef39da25f1dec072769825b4c87becfdabe4db5763041780f6027d37"
+        }
+      ]
+    },
+    {
+      "folder": "09-images",
+      "title": "书内图片",
+      "entry": "正文内的插图。",
+      "screenshots": [
+        {
+          "file": "09-images/01-image-long-press.png",
+          "title": "长按图片菜单",
+          "route": "长按书内电脑插图",
+          "observation": "仅显示划线与写想法，动作少于文字选词。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "d8228f3aa3a0ed2073e426cb370d042ae953660230c1216bcc7e1ed2004ca69c"
+        },
+        {
+          "file": "09-images/02-image-preview.png",
+          "title": "全屏图片预览",
+          "route": "点击正文中的 Widths 插图",
+          "observation": "黑色背景，图片居中显示。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "11020c7cd3457186c69541969fa9fb08ad9196d684fa1c14746bcf27e9195bbd"
+        },
+        {
+          "file": "09-images/03-image-preview-zoom.png",
+          "title": "图片放大",
+          "route": "预览中双击图片",
+          "observation": "局部放大并超出屏幕边缘。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "b969c274d5ebae6759be56f7d3606a7fd7b17dfbbfc8023dc23195c4ff108e44"
+        }
+      ]
+    },
+    {
+      "folder": "10-conversion-and-book-actions",
+      "title": "繁简转换、书架与下载",
+      "entry": "《蘋果之道》正文顶部工具栏。",
+      "screenshots": [
+        {
+          "file": "10-conversion-and-book-actions/01-convert-to-simplified.png",
+          "title": "转为简体",
+          "route": "顶部“简”",
+          "observation": "正文变为简体，字体选择保持不变。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "f9050321b590a8e9fb5bfc75d4eeb1b49734295356163dd4224a8390c97bff96"
+        },
+        {
+          "file": "10-conversion-and-book-actions/02-traditional-restored.png",
+          "title": "恢复繁体",
+          "route": "顶部“繁”",
+          "observation": "正文恢复原繁体；已核对文本。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "3fe0ffa147b8787ecf8fa9560c7b41cb66e248f87ce293ff0237ba08f983d330"
+        },
+        {
+          "file": "10-conversion-and-book-actions/03-bookshelf-action.png",
+          "title": "书架动作确认",
+          "route": "顶部已加入书架图标",
+          "observation": "出现“将…移出书架吗？”确认层，随后取消，未移除书籍。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "604e4b0b35e779e992f7169bd5564b38e874501d35e76bcfadb1a5ef4f2948d5"
+        },
+        {
+          "file": "10-conversion-and-book-actions/04-offline-download-action.png",
+          "title": "离线下载",
+          "route": "顶部云下载图标",
+          "observation": "提示已开始下载所有可阅读内容，右上显示下载状态。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "0bb44ede1dc077176bd2bfafb22a08c029d79a6741340bd8204c6dd3e07ec2a9"
+        }
+      ]
+    },
+    {
+      "folder": "11-handwriting",
+      "title": "手写模式与手写笔记管理",
+      "entry": "正文 → 上滑显示工具栏 → 顶部手写图标。使用 ADB 触摸输入模拟单条笔迹，未使用实体手写笔。",
+      "screenshots": [
+        {
+          "file": "11-handwriting/01-handwriting-mode.png",
+          "title": "手写模式",
+          "route": "顶部手写图标",
+          "observation": "右上退出，底部独立上一页、画笔/橡皮擦、下一页。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "f4ece6e9d098755723d12f908cc9ed305c118b6e74d9348f0221f2e0283a68fc"
+        },
+        {
+          "file": "11-handwriting/02-test-stroke-and-eraser-selected.png",
+          "title": "笔迹与橡皮擦",
+          "route": "画笔模式画一条水平线 → 点击橡皮擦",
+          "observation": "顶部正文留有测试线条，底部橡皮擦选中。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "029952155f41eced81dd600f3403bc68a707e58ea973ab51e714cd8d8296dd65"
+        },
+        {
+          "file": "11-handwriting/05-test-stroke-erased.png",
+          "title": "测试笔迹已擦除",
+          "route": "橡皮擦选中 → 点击测试线条",
+          "observation": "测试线条消失；本次连续擦动未生效，点在线条上成功。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "33157997701f36970dc8b534ac18c48581893cd7882f07c9e73a45c42b187fbe"
+        },
+        {
+          "file": "11-handwriting/06-page-turn-in-handwriting-mode.png",
+          "title": "手写模式翻页",
+          "route": "手写模式 → 下一页",
+          "observation": "底部专用翻页控件保留。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "ec016ae7c9acdd3cb6c50f46bf74369c2673531e8e5eceb200b8dcd7af4845cb"
+        },
+        {
+          "file": "11-handwriting/07-clean-reading-after-test-removal.png",
+          "title": "清理后的普通正文",
+          "route": "退出手写 → 删除测试手写笔记 → 回原阅读段落",
+          "observation": "正文无测试笔迹，与00-entry最终位置相同。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "6b31ff0eac1057daf4cc5155007faf9f557da6c2d330235bf6fcd57db9f66439"
+        },
+        {
+          "file": "11-handwriting/09-erased-stroke-note-remains.png",
+          "title": "擦掉线条仍保留笔记",
+          "route": "擦除笔迹并退出 → 打开笔记列表",
+          "observation": "仍有带页面缩略图的手写笔记卡；擦除笔迹不等于删除笔记。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "f35644bdc17e0d4ec727a80ac0af6f42afcc115f32ade38b8aaeab8337f8ad7a"
+        },
+        {
+          "file": "11-handwriting/10-test-handwriting-delete-confirmation.png",
+          "title": "删除测试手写笔记确认",
+          "route": "长按本次创建的手写缩略图卡片",
+          "observation": "底部删除确认层。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "d3c376b58032db560d52160bb39acc0ea48ad5aac1d4cfc1ea22f150a0b5f30b"
+        },
+        {
+          "file": "11-handwriting/11-test-handwriting-removed.png",
+          "title": "手写笔记已删除",
+          "route": "确认删除",
+          "observation": "缩略图卡片消失；总数恢复见06-notes/07。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "9d4abbd05c8d8cf4709f02311a260e556313bcd26bf1a9ae9e962e6ad8590bcf"
+        }
+      ]
+    },
+    {
+      "folder": "12-book-ending",
+      "title": "书末与读完状态",
+      "entry": "补充样本《正念的奇迹》，在采集前已经标记“读完”。未将主样本标记读完。",
+      "screenshots": [
+        {
+          "file": "12-book-ending/01-completed-book-open.png",
+          "title": "已读完书籍再次打开",
+          "route": "书架 →《正念的奇迹》",
+          "observation": "打开版权页，仍可正常阅读。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "28419a5d2cfbcada1ca4fd64bf430164bad257892812e71b34a8aadec669aaa1"
+        },
+        {
+          "file": "12-book-ending/02-completed-book-contents-bottom.png",
+          "title": "目录尾部",
+          "route": "工具栏 → 目录 → 去底部",
+          "observation": "最后章节与作者简介入口。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "3457f797e81891f465bbc161921ef1c1a6923ad3c5161d71708c705e8da2e7f4"
+        },
+        {
+          "file": "12-book-ending/04-book-end.png",
+          "title": "读完页面",
+          "route": "从尾部章节继续向后翻页至书末",
+          "observation": "“已读完”、第47本、推荐值和评价分布。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "058f282b3e82a6949e29c5d2a191403fec5006989548edc27473847d70c22388"
+        },
+        {
+          "file": "12-book-ending/05-book-end-toolbars.png",
+          "title": "书末工具栏",
+          "route": "读完页面 → 上滑",
+          "observation": "读完状态保留，上下工具栏覆盖于页面。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "89c7245bdf3e263628da47a58f18e145035ab1becfc3726dab0a4b22ec844f77"
+        }
+      ]
+    },
+    {
+      "folder": "13-reading-preferences",
+      "title": "全局阅读偏好",
+      "entry": "返回书架 → 底部“我” → 设置。首轮仅查看；补拍的开关测试及恢复见15-supplement。",
+      "screenshots": [
+        {
+          "file": "13-reading-preferences/01-profile-entry.png",
+          "title": "设置所在页面",
+          "route": "书架 → 我",
+          "observation": "个人页的设置入口。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "172f78d0e903fed0cd94a89e4ca53f1e24883a5127c2a59b45fedda0de44d0cd"
+        },
+        {
+          "file": "13-reading-preferences/02-settings.png",
+          "title": "全局设置首页",
+          "route": "我 → 设置",
+          "observation": "左侧翻到下一页、正文首行缩进关闭；阅读时显示时间开启。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "7a749904de8d466c1ef6b02c21467d63d84da0f107771ad02399a5d1949b121b"
+        },
+        {
+          "file": "13-reading-preferences/03-interface-font-size.png",
+          "title": "界面字号",
+          "route": "设置 → 字体大小",
+          "observation": "明确区分界面字号和正文设置；当前默认，未调整。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "92b83122999f7a441643a7718df5999ce09f1fc15210907598808ed1cc14e635"
+        },
+        {
+          "file": "13-reading-preferences/04-settings-last-page.png",
+          "title": "设置最后一页",
+          "route": "设置 → 下一页",
+          "observation": "缓存、隐私、反馈和退出登录入口；未触发这些动作。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "451e82aadcfd262323c921118c66233c5f93fd6f35a972eda06392e30dc3ee2b"
+        }
+      ]
+    },
+    {
+      "folder": "14-community",
+      "title": "书评、热门划线与书友想法",
+      "entry": "补充样本《正念的奇迹》正文顶部“书友想法”气泡入口，或读完页的推荐值卡片。《蘋果之道》的工具栏没有这组社区入口。",
+      "screenshots": [
+        {
+          "file": "14-community/05-book-reviews-all.png",
+          "title": "全部书评",
+          "route": "读完页面 → 推荐值卡片 → 全部",
+          "observation": "推荐值分布与书评卡片列表。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "f165b598ad7004525d8e8531823d0c473452f604468fe47594c4f67345f647b2"
+        },
+        {
+          "file": "14-community/06-reviews-recommended.png",
+          "title": "推荐书评",
+          "route": "书评 → 推荐",
+          "observation": "筛选状态黑底反白。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "735696fa8a5b87b29c9877c50d46dd55af7eb2d72831b66a9a07930827f68334"
+        },
+        {
+          "file": "14-community/07-reviews-average.png",
+          "title": "一般书评",
+          "route": "书评 → 一般",
+          "observation": "筛选后的列表。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "4f47b6fb22f254d0b9c9eb08f96c3901edde1861fd736d9e78c97b6ea14784e9"
+        },
+        {
+          "file": "14-community/08-reviews-negative.png",
+          "title": "不行书评",
+          "route": "书评 → 不行",
+          "observation": "筛选后的列表。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "72f0c7bd4a926c3585ac9d2a5eca6ebb158df347af5e594e22abe8209b72fed4"
+        },
+        {
+          "file": "14-community/09-review-detail.png",
+          "title": "书评详情",
+          "route": "书评列表 → 点击正文",
+          "observation": "全屏书评，底部有赞入口；未点赞或评论。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "f25431b6a1f7562eb8441acae49dd9b2526408a988a1ea8e6b81a7be9cf9d552"
+        },
+        {
+          "file": "14-community/11-community-popover.png",
+          "title": "读完页社区入口",
+          "route": "读完页 → 上滑工具栏 → 气泡图标",
+          "observation": "书评1585、热门划线374和显示书友想法入口；数值为采集时快照。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "18c7fd10f228cc26d4edfcc7d66f8020e088a3bbe03e63ba06a6dc2d947afd4b"
+        },
+        {
+          "file": "14-community/12-popular-highlights.png",
+          "title": "热门划线列表",
+          "route": "社区气泡 → 热门划线",
+          "observation": "按章节展示热门片段及划线人数。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "0cc46a77cc413e31d1461a6f350b61fc92e878d08f2acfd0fb4689d57bf90275"
+        },
+        {
+          "file": "14-community/13-popular-highlight-jump.png",
+          "title": "热门划线跳转",
+          "route": "热门划线列表 → 点击一条片段",
+          "observation": "跳回正文，底部黑条含关闭、上一句、下一句、列表。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "1894b77441417bc775704c2ffc9faba872855354032c29fd6697486d24a08968"
+        },
+        {
+          "file": "14-community/14-community-popover-in-book.png",
+          "title": "正文社区入口",
+          "route": "正文 → 上滑工具栏 → 气泡图标",
+          "observation": "同一组社区概况入口可在正文使用。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "e785f9f6123734207ad4452e06426701e96efa12a9e9e633cb034f386955e059"
+        },
+        {
+          "file": "14-community/15-show-reader-thoughts.png",
+          "title": "显示书友想法",
+          "route": "社区气泡 → 显示书友想法",
+          "observation": "正文出现虚线标记，并提示已显示。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "bfc4af2279b27cb6ebf53f9e69bf9153a9c27786f34af70f352633bf96f19330"
+        },
+        {
+          "file": "14-community/16-reader-thoughts-for-passage.png",
+          "title": "某片段的书友想法",
+          "route": "点击带虚线的片段",
+          "observation": "上方引用卡，下面多位书友的想法、赞和评论入口。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "e7e688b2b5bace92fcc618e99236779a06b1ffed8bbf3c5cffa8479413b466fa"
+        },
+        {
+          "file": "14-community/17-community-thought-editor.png",
+          "title": "从书友想法进入编辑",
+          "route": "片段想法列表 → 写想法",
+          "observation": "引用已带入，编辑器与键盘展开；随后取消，没有发表。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "6dbcd26ca9647db6c19e79bf27eba0cc79d0af8a8a191e5b16ced79ecc260336"
+        },
+        {
+          "file": "14-community/19-return-to-popular-highlights.png",
+          "title": "返回热门划线列表",
+          "route": "热门片段黑色导航条 → 右侧列表图标",
+          "observation": "回到热门划线列表。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "ca1edd3f7400ef9a5b33ecda18c1a3f99dd03b23758d466547cca0a6635ab81b"
+        },
+        {
+          "file": "14-community/20-hide-reader-thoughts-action.png",
+          "title": "隐藏书友想法入口",
+          "route": "正文 → 社区气泡",
+          "observation": "操作按钮变为“隐藏书友想法”；之后已点击恢复隐藏并核对正文虚线消失。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "e3c47c7c831160dead4045075d48ccf0718dc2595a0ece4634ffb56559ba693f"
+        }
+      ]
+    },
+    {
+      "folder": "15-supplement",
+      "title": "补拍：入口、手势、进度与书末",
+      "entry": "2026-10-23 16:48–17:14补拍；原图编号续排并允许跳号。长按封面的同帧无障碍XML另见06-book-cover-long-press.xml。",
+      "screenshots": [
+        {
+          "file": "15-supplement/01-baseline-reading-no-hint.png",
+          "title": "补拍前原阅读位置",
+          "route": "唤醒设备，未重新打开书",
+          "observation": "《蘋果之道》第7章“選單”，87/648；此时没有上滑提示。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "aed81b2cd2c8e664a120b456685e26760f525a59328c8f129930f33666dbb6a5"
+        },
+        {
+          "file": "15-supplement/02-import-instructions.png",
+          "title": "导入说明页",
+          "route": "书架 → 导入",
+          "observation": "只有“从手机中导入”和“从电脑中导入”两段说明：手机版微信读书书架→导入；电脑r.qq.com→传书到手机。底部X关闭；未实际导入。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "cdba68f1a9eb53c2c5332614f3671fab016da77bc2dc96642991e901e5d81f95"
+        },
+        {
+          "file": "15-supplement/03-selection-mode-empty.png",
+          "title": "选择模式未选中",
+          "route": "书架 → 选择",
+          "observation": "顶栏全选、选择书籍、取消；封面空圆圈；底部动作在零选中时禁用。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "7a4a7ecd3a30fa22e888209134e605aeb734a48f2e6a73a7555dc43c7a285dac"
+        },
+        {
+          "file": "15-supplement/04-two-books-selected.png",
+          "title": "选中两本书",
+          "route": "选择模式 → 点两本封面",
+          "observation": "粗黑边框、勾选圆圈，标题已选择2本书籍；下载灰色，移出书架与私密动作可见；未执行动作。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "7ef2e3d39da8f239afbf543198c8d17e8c8be5bd3b54e80cb170188b074db697"
+        },
+        {
+          "file": "15-supplement/05-all-books-selected.png",
+          "title": "全选385本",
+          "route": "选择模式 → 全选",
+          "observation": "已选择385本书籍；全选变“取消全选”，作用于整架；底部下载、移出书架、私密动作，均未执行。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "36e22662963ba20c6a904c861bd0aa02670fabf84f562129b3c7f0c9397f9770"
+        },
+        {
+          "file": "15-supplement/06-book-cover-long-press.png",
+          "title": "长按封面进入选择",
+          "route": "普通书架 → 长按《蘋果之道》封面",
+          "observation": "直接进入选择模式并选中1本，没有独立封面菜单。同帧XML将左下面具角标标为“私密阅读”，底栏为“关闭私密阅读”；本书单选时该动作禁用，未切换。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "95138b942b3536976e3acbbdf7d5eb1811f153ff0fc358fdf757af2e4c5012c5"
+        },
+        {
+          "file": "15-supplement/07-home-search-entry.png",
+          "title": "首页搜索输入页",
+          "route": "书架 → 顶部搜索框",
+          "observation": "独立搜索页，上部推荐词，下部搜索历史；原有历史从PARC开始。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "b4d71d37dc92d9280c87a4d254c01dd0ffa0dfd5a818392f78ad6ff6342d06a3"
+        },
+        {
+          "file": "15-supplement/08-home-search-query.png",
+          "title": "输入审判",
+          "route": "搜索页 → 输入书架已有书名“审判”",
+          "observation": "原生键盘展开，输入尚未提交；未购买或添加书籍。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "c2801185fb7c0eb77c89db8228af03943a2343cc67c34b8f4155c1786f0db3a2"
+        },
+        {
+          "file": "15-supplement/09-home-search-results.png",
+          "title": "书架与书城搜索结果",
+          "route": "提交“审判”",
+          "observation": "按“在书架中搜索：审判”和“在书城中搜索：审判”分段；书架匹配在前，书城下有电子书、版本、推荐值及在读人数。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "8f2c47513a8fa4938776a75dfb65889078b5aed5e69f10583ceb7b01797a11a4"
+        },
+        {
+          "file": "15-supplement/10-open-book-toolbar-hint.png",
+          "title": "打开书后上滑提示",
+          "route": "搜索结果 → 点击书架内《审判》 → 约3秒",
+          "observation": "26/296，底部出现“↑ 上滑显示工具栏”；是已有阅读进度，并非首次读这本书。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "14b940c9599911b06bca641ddb102ff719dd7133685dddb544002dd2a4b9d805"
+        },
+        {
+          "file": "15-supplement/11-hint-after-next-page.png",
+          "title": "提示消失后翻页",
+          "route": "打开书后静置65秒 → 点击右侧",
+          "observation": "27/296，没有再次出现提示；不是每次翻页都展示。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "1a8f18f1612e6cbafc763ba8c62d26e3134f7f1bf6cf4e346521e6f1d5089097"
+        },
+        {
+          "file": "15-supplement/12-hint-disappeared-after-65-seconds.png",
+          "title": "静置65秒后提示消失",
+          "route": "从10静置65秒，期间未操作",
+          "observation": "仍是26/296原段落，提示已消失。仅确定65秒内消失，未测精确超时阈值。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "a8c96440d712d5c602123f3874ea0cb3c99b07e2a97bc4bc670f784f75f6acd3"
+        },
+        {
+          "file": "15-supplement/13-progress-before-jump.png",
+          "title": "跳转前进度",
+          "route": "《审判》原26页 → 上滑 → 进度",
+          "observation": "8%、14条笔记；记录跳转起点。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "5c2c7980d49f33604c0901f0d31df571b9cdd5b35f8810c30409efd3920f0766"
+        },
+        {
+          "file": "15-supplement/14-progress-after-drag-jump.png",
+          "title": "拖动跳转后的返回入口",
+          "route": "进度滑块从原位置拖至中间 → 松手",
+          "observation": "跳到51%附近，正文上浮出“‹ 返回原进度”胶囊，轨道保留灰点。没有把普通轨道点击当作灰点返回证据。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "65bed118e31f0a2594f2c91b60f62b07466d4050a49237b2961d45e1f31eae2e"
+        },
+        {
+          "file": "15-supplement/17-return-original-progress-result.png",
+          "title": "返回原进度结果",
+          "route": "中途数次轨道跳转后 → 返回原进度",
+          "observation": "返回与13相同的26页正文，并自动收起面板/工具栏；总页数重算为289。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "7ea9b8a11da2be498b4cb3b16e7c066406dd0046ff0742d86bdf88c39c4eae55"
+        },
+        {
+          "file": "15-supplement/18-drag-unfinished-book-to-end.png",
+          "title": "未读完书拖至100%",
+          "route": "恢复《审判》26页 → 进度 → 拖至最右端",
+          "observation": "面板100%，拖动期间正文仍是原页；尚未显示读完页。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "c2a591a9737c4480d012e230107da4b955c292fb7a263e723dbe8a84fdfd8100"
+        },
+        {
+          "file": "15-supplement/19-unfinished-book-end-result.png",
+          "title": "100%跳转完成",
+          "route": "18松手 → 等待加载",
+          "observation": "到译后记尾页；进度面板保留，“返回原进度”可见。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "52cf97bb3cb80cc193506d238bb7501f293a424696a3fb7125fb6e6364955f94"
+        },
+        {
+          "file": "15-supplement/20-last-page-before-finish.png",
+          "title": "真正的最后正文页",
+          "route": "关闭进度面板",
+          "observation": "296/296，译后记末尾，尚未显示全书完；返回原进度胶囊仍在。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "85cf31183bae38dac5d2fa3c45b666ec38827b49e7f4c8ea1df0c0bd2f9b7f87"
+        },
+        {
+          "file": "15-supplement/21-finish-page-mark-button.png",
+          "title": "未读完书的全书完页面",
+          "route": "最后正文页 → 再点右侧翻页",
+          "observation": "“全书完”、完字徽章、下划线“标记读完”、本书统计与推荐值、退出阅读；未点击标记读完。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "f24305d52361d9584ea2004f4cb1cb99cc7df8317c747a4796bd03db87d6783f"
+        },
+        {
+          "file": "15-supplement/22-unfinished-book-position-restored.png",
+          "title": "书末测试返回原位置",
+          "route": "全书完页 → 返回原进度",
+          "observation": "回到《审判》原26页正文；未标记读完。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "aeb9ffa1e34500df1a04c6ec101ed4b776f6d0560f4673c42043ec8731de3eb4"
+        },
+        {
+          "file": "15-supplement/23-left-side-next-enabled.png",
+          "title": "左侧下一页开关开启",
+          "route": "我 → 设置 → 点击左侧翻到下一页",
+          "observation": "开关黑底、圆点在右；其他阅读开关保持原值。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "effd635a4c5bdff70122c4ccd702c248fa199283a348e9d5885ba61a70e18bad"
+        },
+        {
+          "file": "15-supplement/24-shelf-before-gesture-tests.png",
+          "title": "未读完状态保留",
+          "route": "退出设置 → 书架",
+          "observation": "《审判》没有读完角标，《正念的奇迹》仍有；未执行标记读完。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "931f59dc6a5d4376f1445107ab64f0e54ff392e3af1c0f8acd4a061b1e718628"
+        },
+        {
+          "file": "15-supplement/25-left-next-test-baseline.png",
+          "title": "翻页测试起点",
+          "route": "开关开启后 → 打开《蘋果之道》",
+          "observation": "原正文87/648；重新进入阅读时再次出现上滑提示。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "09d40a9517a9573d593bebd1d28b0a60308fcdef25a9f916b95caa840d092a15"
+        },
+        {
+          "file": "15-supplement/26-enabled-left-tap-next.png",
+          "title": "开启后点击左侧",
+          "route": "25 → 点击左侧x70,y800",
+          "observation": "从87到88，左侧也是下一页。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "c78a43d2cb6e06621bcfe52d742a286b7981263dfd66018bf8f173732da86fe7"
+        },
+        {
+          "file": "15-supplement/27-enabled-right-tap-next.png",
+          "title": "开启后点击右侧",
+          "route": "26 → 点击右侧x1190,y800",
+          "observation": "从88到89，右侧仍是下一页；不是左右交换。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "2ea01dc337bced20f87e2fb738abcbfe05e2e6b2e53229f98a8538fa47ff05e6"
+        },
+        {
+          "file": "15-supplement/28-left-side-next-restored-off.png",
+          "title": "翻页开关恢复关闭",
+          "route": "退出阅读 → 我 → 设置 → 关闭该开关",
+          "observation": "白底描边、圆点在左；首行缩进仍关、阅读时间仍开。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "dd3bb844e56785b54fa2381bcbe4845c3be30c53d7ed6406df48f38ce3800439"
+        },
+        {
+          "file": "15-supplement/29-default-left-taps-position-restored.png",
+          "title": "默认左侧翻回原位置",
+          "route": "开关关闭 → 重新打开书 → 左侧点两次",
+          "observation": "89→88→87，恢复原正文；左侧重新是上一页。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "1150c708c686d0719d5dfaff0d2a52ee2730f51ddc08f1905ca112c96c1b4348"
+        },
+        {
+          "file": "15-supplement/30-direct-hold-drag-released.png",
+          "title": "连续长按拖动松手",
+          "route": "在原本无划线的PARC处按住1秒，不松手向右拖动 → 松手",
+          "observation": "范围扩为“PARC 的 Smalltalk 程式”，自动出现实线；第一项已经是“删除划线”，未点菜单“划线”。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "66c75bb7dbcb479c3a984063ac90ae148251258cb86b1f335806dba5bcc5de14"
+        },
+        {
+          "file": "15-supplement/31-direct-drag-note-count.png",
+          "title": "连续拖动后笔记43条",
+          "route": "关闭选中菜单 → 打开进度",
+          "observation": "42→43，证明这次扩选已持久保存，非临时选区。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "9b34d46a820c899cc00cc65c93dc5684239934979e5aa10f9e3b5d68289879cd"
+        },
+        {
+          "file": "15-supplement/32-direct-drag-test-highlight-deleted.png",
+          "title": "第一条测试划线删除",
+          "route": "点刚生成的划线 → 删除划线",
+          "observation": "该范围下划线消失，再进行第二种手势。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "70434250b7a5a33cb046ce57b1e5362b5e973dffb4a13075c86161d9afbf7dd5"
+        },
+        {
+          "file": "15-supplement/33-long-press-release-word-handles.png",
+          "title": "长按松手后的词和手柄",
+          "route": "长按PARC约900ms → 松手",
+          "observation": "仅单词选中，显示两端黑手柄；菜单仍为“划线”，尚未自动保存。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "36a68f781592373d41ac1114fa8865b67076f79e969b2dccb2d909a132f7d31d"
+        },
+        {
+          "file": "15-supplement/34-handle-drag-released.png",
+          "title": "松手后拖手柄扩选",
+          "route": "33 → 拖右手柄至后续行 → 松手",
+          "observation": "跨行范围自动出现实线；菜单变“删除划线”，没有点击“划线”。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "e141038a577a413ee34ceef48202153ed351c2fcc318eb58d150d5dac3a4b053"
+        },
+        {
+          "file": "15-supplement/35-handle-drag-note-count.png",
+          "title": "手柄扩选后笔记43条",
+          "route": "关闭菜单 → 打开进度",
+          "observation": "再次42→43；这条跨行扩选也已保存。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "7757839f5828b267dbfebcdd70919861baf10646ffe6275e6996d297ab9fdfab"
+        },
+        {
+          "file": "15-supplement/36-handle-drag-highlight-delete-menu.png",
+          "title": "第二条测试划线删除入口",
+          "route": "关闭进度 → 点本次跨行划线",
+          "observation": "确认菜单为删除划线，只针对刚生成的测试范围。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "f36bfb41e111230c4943f443b1cf669c719eb6411b00d9973f1bc32e3ac7f591"
+        },
+        {
+          "file": "15-supplement/37-handle-drag-test-highlight-deleted.png",
+          "title": "第二条测试划线删除",
+          "route": "36 → 删除划线",
+          "observation": "本次跨行范围下划线消失；原有其他笔记未动。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "fee7ae89096376aa0699020b88f0a7046f1c06941bd12d856c74c733241b035f"
+        },
+        {
+          "file": "15-supplement/38-notes-restored-42.png",
+          "title": "笔记数恢复42条",
+          "route": "删除第二条测试划线 → 打开进度",
+          "observation": "与补拍前42条一致，自动翻页仍关闭。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "f3bd8f4222042c189796ad71f33b8de1bddef10b26205cf9e20b65d74d864ce0"
+        },
+        {
+          "file": "15-supplement/39-footnote-search-toc.png",
+          "title": "查找脚注的目录",
+          "route": "《蘋果之道》 → 目录",
+          "observation": "目录中可前往“注释”；目录本身不能证明存在脚注弹层。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "39160705b80496f5a134d383c63b5d002b15ef559aaf69044ddf54bfd98c9c0f"
+        },
+        {
+          "file": "15-supplement/40-apple-endnotes-chapter.png",
+          "title": "注释是普通正文页",
+          "route": "目录尾部 → 注释 → 等待加载",
+          "observation": "“注释”以章节正文展示，含下载链接、缩写、来源资料；未找到正文脚注标记，不是脚注弹层。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "574a0686e9c2693fb978584e0799a4948ec88f114c55417838af65f0e8e9da41"
+        },
+        {
+          "file": "15-supplement/41-apple-original-body-restored.png",
+          "title": "查注释后原正文恢复",
+          "route": "全文搜索Smalltalk → 命中原段落 → 关闭搜索导航",
+          "observation": "恢复第7章“選單”的原文字和插图；重排后77/581，与01原内容相同。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "124c3e185338381b943b0056d979bd1a135ee64cccc469a8dd9bb71f14af8077"
+        },
+        {
+          "file": "15-supplement/42-trial-final-position-restored.png",
+          "title": "审判最终位置恢复",
+          "route": "抽查《审判》26–29页找脚注 → 左翻三页",
+          "observation": "恢复26/296原段落；抽查页未见可点击脚注标记。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "f3a53813d02e0fdb1f3c30bce7d26244240d89aaf6b4dbdccd4477c26a7196f1"
+        },
+        {
+          "file": "15-supplement/43-search-history-cleanup-limit.png",
+          "title": "搜索历史清理限制",
+          "route": "返回首页搜索 → 清空输入 → 收起键盘",
+          "observation": "新增“审判”历史仍在，界面仅有“清空”；长按/横滑未找到单条删除。为保留原有历史未执行清空，不声称测试痕迹全部回滚。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "19183a77c9b7cec02a548c773f6e9de00887750173f153050cbc756e92c6700e"
+        },
+        {
+          "file": "15-supplement/44-final-reading-restored.png",
+          "title": "补拍完成原阅读位置",
+          "route": "退出搜索 → 重新打开《蘋果之道》",
+          "observation": "恢复“選單”原文字与插图，77/581；没有测试划线、搜索导航或后台播放器。重新进入后临时上滑提示再次出现。",
+          "width": 1264,
+          "height": 1680,
+          "sha256": "15b67131f74577e08ad26a7b68fbcdc6c64dadab8ef503c931e319dd5001e940"
+        }
+      ]
+    }
+  ],
+  "supplement": {
+    "folder": "15-supplement",
+    "date": "2026-10-23",
+    "capture_window": "16:48–17:14 Asia/Singapore",
+    "screenshot_count": 42,
+    "requirement_labels_changed": {
+      "可做": [
+        "A08",
+        "A09",
+        "B05",
+        "E05",
+        "K08",
+        "Q02",
+        "R02"
+      ],
+      "微信读书独有": [
+        "A06",
+        "A11"
+      ]
+    },
+    "still_unverified": [
+      "N04：已查样本未找到可点击脚注；灰点独立点击语义及提示精确超时仍未验证"
+    ],
+    "evidence_files": [
+      {
+        "file": "15-supplement/06-book-cover-long-press.xml",
+        "title": "长按封面同帧UI层级：私密阅读角标与关闭私密阅读动作",
+        "sha256": "2201de6103aa141fc578dd5b796ce60e80ac702c8982dd74ea34409a9e1b0dd1"
+      }
+    ],
+    "restoration": {
+      "apple_book": "原“選單”正文与插图，87/648重算为77/581",
+      "trial_book": "26/296原正文，未标记读完",
+      "notes": 42,
+      "left_side_next": false,
+      "input_mode": "EN",
+      "test_highlights_deleted": 2
+    },
+    "remaining_traces": [
+      "首页新增“审判”搜索历史：未找到单条删除，未清空原历史",
+      "阅读时长、最近打开排序及服务端阅读记录随操作更新，未回滚"
+    ]
+  }
+}
