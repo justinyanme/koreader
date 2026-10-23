@@ -71,9 +71,10 @@ describe("ReaderToolbar module", function()
         return dy > 0 and "south" or "north"
     end
 
-    -- A finger that went down at (x0, y0) and is now at (x, y), as GestureDetector reports it while it moves;
-    -- with `end_swipe`, it lifts there and the swipe is reported from where it started.
-    local function moveEvent(x0, y0, x, y, at, end_swipe)
+    -- A finger that went down at (x0, y0) and is now at (x, y), as GestureDetector reports it while it moves
+    -- ("pan", or `ges` such as "hold_pan"); with `end_swipe`, it lifts there and the swipe is reported from where
+    -- it started.
+    local function moveEvent(x0, y0, x, y, at, end_swipe, ges)
         local dx, dy = x - x0, y - y0
         local start = Geom:new{ x = x0, y = y0, w = 0, h = 0 }
         local here = Geom:new{ x = x, y = y, w = 0, h = 0 }
@@ -85,7 +86,7 @@ describe("ReaderToolbar module", function()
             }))
         else
             UIManager:sendEvent(Event:new("Gesture", {
-                ges = "pan", direction = direction(dx, dy), distance = distance, relative = { x = dx, y = dy },
+                ges = ges or "pan", direction = direction(dx, dy), distance = distance, relative = { x = dx, y = dy },
                 start_pos = start, pos = here, time = at,
             }))
         end
@@ -166,6 +167,13 @@ describe("ReaderToolbar module", function()
 
     local function bookmarkButton(bars)
         return find(bars.top, function(w) return (w.icon == "eink/bookmark-add" or w.icon == "eink/bookmark-on") and w.callback end)
+    end
+
+    -- The progress panel's ‹ 返回原进度 pill, while it shows.
+    local function returnPill(panel)
+        return find(panel, function(w)
+            return w.callback and w.dimen and find(w, function(c) return c.text == _("Back to original position") end) ~= nil
+        end)
     end
 
     for __, file in ipairs{ sample_epub, sample_pdf } do
@@ -587,27 +595,29 @@ describe("ReaderToolbar module", function()
             assert.are.equal(next_chapter, ui:getCurrentPage())
             assert.are.equal(panel, ui.menu.panel)
             assert.are.equal(bars, topWidget())
-
             UIManager:forceRePaint()
-            local back = find(panel, function(w)
-                return w.callback and w.dimen and find(w, function(c)
-                    return type(c.text) == "string" and c.text:find("Return to last position", 1, true)
-                end) ~= nil
-            end)
-            assert.is_truthy(back)
-            tapWidget(back)
-            assert.are.equal(start_page, ui:getCurrentPage())
+            assert.is_truthy(returnPill(panel))
 
-            -- its own entry closes the panel; the bars stay
-            UIManager:forceRePaint()
+            -- its own entry closes the panel; the bars stay, the pill goes with the panel
             rect = panel:getRefreshRegion()
+            local pill_rect = returnPill(panel).dimen:copy()
             refreshes = refreshesOf(function() tapWidget(cell("eink/progress")) end)
             assert.is_nil(ui.menu.panel)
             assert.are.equal(bars, topWidget())
-            assert.are.same({ { mode = "ui", region = rect:combine(bars.bottom_rect) } }, refreshes)
+            assert.are.same({
+                { mode = "ui", region = pill_rect },
+                { mode = "ui", region = rect:combine(bars.bottom_rect) },
+            }, refreshes)
             assert.is_truthy(find(bars.bottom, function(w) return w.icon == "eink/progress" end))
-            ui.menu:hideToolbar()
+
+            -- while the bars show, the panel comes back with the way back to where the reader was
+            tapWidget(cell("eink/progress"))
             UIManager:forceRePaint()
+            tapWidget(returnPill(ui.menu.panel))
+            UIManager:forceRePaint()
+            assert.are.equal(start_page, ui:getCurrentPage())
+            assert.is_nil(ui.menu.bars)
+            assert.are.equal(ui, topWidget())
         end)
 
         it("should show measured book statistics and omit estimates without timed pages", function()
@@ -888,13 +898,12 @@ describe("ReaderToolbar module", function()
             assert.are_not.equal(start_page, ui:getCurrentPage())
             assert.are.equal("eink/bookmark-add", bookmarkButton(bars).icon)
 
-            tapWidget(find(panel, function(w)
-                return w.callback and w.dimen and find(w, function(c)
-                    return type(c.text) == "string" and c.text:find("Return to last position", 1, true)
-                end) ~= nil
-            end))
+            tapWidget(returnPill(panel))
             UIManager:forceRePaint()
             assert.are.equal(start_page, ui:getCurrentPage())
+            tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
+            UIManager:forceRePaint()
+            bars = ui.menu.bars
             assert.are.equal("eink/bookmark-on", bookmarkButton(bars).icon)
             tapWidget(bookmarkButton(bars)) -- remove the test bookmark
             UIManager:forceRePaint()
@@ -1100,6 +1109,664 @@ describe("ReaderToolbar module", function()
             assert.are.equal(was_night, G_reader_settings:isTrue("night_mode"))
             ui.menu:hideToolbar()
             UIManager:forceRePaint()
+        end)
+    end)
+
+    describe("progress drag and 原进度", function()
+        local Palette
+        local clock
+        setup(function()
+            Palette = require("ui/palette")
+            clock = time.now()
+        end)
+
+        local function point(x, y)
+            return Geom:new{ x = math.floor(x), y = math.floor(y), w = 0, h = 0 }
+        end
+
+        -- The finger went down at `from` and is now at `to`: "pan", or "hold_pan" after a hold. Each comes a second
+        -- after the last, past the track's rate limit.
+        local function pan(from, to, ges)
+            clock = clock + time.s(1)
+            moveEvent(from.x, from.y, to.x, to.y, clock, false, ges)
+        end
+
+        -- The finger stays down at `pos` long enough for a hold.
+        local function hold(pos)
+            clock = clock + time.s(1)
+            UIManager:sendEvent(Event:new("Gesture", { ges = "hold", pos = pos, time = clock }))
+        end
+
+        -- The finger lifts at `pos` after moving slowly ("pan_release"), or after a hold ("hold_release").
+        local function lift(pos, ges)
+            clock = clock + time.s(1)
+            UIManager:sendEvent(Event:new("Gesture", { ges = ges or "pan_release", pos = pos, time = clock }))
+        end
+
+        local function openProgress(ui)
+            tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
+            UIManager:forceRePaint()
+            tapWidget(findIcon(ui.menu.bars.bottom, "eink/progress"))
+            UIManager:forceRePaint()
+            return ui.menu.panel
+        end
+
+        local function progressTrack(panel)
+            return find(panel, function(w) return w.on_jump ~= nil end)
+        end
+
+        -- The track's middle line, where the knob of `page` sits.
+        local function onTrack(track, page)
+            return point(track.dimen.x + track:xOf(page), track.dimen.y + track.dimen.h / 2)
+        end
+
+        -- The track's middle line at `fraction` of its width.
+        local function along(track, fraction)
+            return point(track.dimen.x + track.width * fraction, track.dimen.y + track.dimen.h / 2)
+        end
+
+        -- The gray level painted at `pos`: 0 is ink, 0xFF paper.
+        local function shade(pos)
+            return Screen.bb:getPixel(pos.x, pos.y):getColor8().a
+        end
+
+        local function countMode(refreshes, mode)
+            local n = 0
+            for _, r in ipairs(refreshes) do
+                if r.mode == mode then n = n + 1 end
+            end
+            return n
+        end
+
+        -- The index of the first refresh of `mode` on exactly `rect`, if any.
+        local function refreshIndex(refreshes, mode, rect)
+            for i, r in ipairs(refreshes) do
+                local g = r.region
+                if r.mode == mode and g and g.x == rect.x and g.y == rect.y and g.w == rect.w and g.h == rect.h then
+                    return i
+                end
+            end
+        end
+
+        local function firstIndex(refreshes, mode)
+            for i, r in ipairs(refreshes) do
+                if r.mode == mode then return i end
+            end
+        end
+
+        local function percentFigure(ui, page)
+            return { tostring(math.floor(page / ui.document:getPageCount() * 100)), "%" }
+        end
+
+        -- The page between the bars, which 加载中… covers.
+        local function pageArea(ui)
+            local bars = ui.menu.bars
+            local top = bars.show_top and bars.top_rect.h or 0
+            return Geom:new{ x = 0, y = top, w = Screen:getWidth(), h = ui.menu.panel:getRefreshRegion().y - top }
+        end
+
+        local function loadingShown()
+            local loading = _("Loading…")
+            for _, window in ipairs(UIManager._window_stack) do
+                if find(window.widget, function(w) return w.text == loading end) then return true end
+            end
+            return false
+        end
+
+        it("should only preview while the knob is dragged, and jump once when it is let go", function()
+            local ui = openReader(sample_epub)
+            local ok, err = pcall(function()
+                local start = ui:getCurrentPage()
+                local panel = openProgress(ui)
+                local track = progressTrack(panel)
+                local band = panel:getRefreshRegion()
+                local from = onTrack(track, start)
+                local to = along(track, 3/4)
+                local target = track:pageAt(to.x)
+                local stack = #ui.link.location_stack
+                local refreshes = refreshesOf(function()
+                    for _, x in ipairs{ from.x + 40, along(track, 1/2).x, to.x } do
+                        pan(from, point(x, from.y))
+                    end
+                end)
+                -- the page stays; the knob and the position figure follow the finger, with ui refreshes of their own
+                assert.are.equal(start, ui:getCurrentPage())
+                assert.are.equal(stack, #ui.link.location_stack)
+                assert.are.same(percentFigure(ui, target), statisticValues(panel, 1))
+                assert.is_true(#refreshes > 0)
+                for _, r in ipairs(refreshes) do
+                    assert.are.equal("ui", r.mode)
+                    assert.is_true(band:contains(r.region))
+                end
+                -- the held knob is ink; a gray dot marks where the reader is
+                assert.are.equal(0, shade(onTrack(track, target)))
+                assert.are.equal(Palette.mark.a, shade(from))
+
+                -- the finger may leave the track: letting go still ends the drag, with one jump
+                refreshes = refreshesOf(function() lift(point(to.x, track.dimen.y - 30)) end)
+                assert.are.equal(target, ui:getCurrentPage())
+                assert.are.equal(stack + 1, #ui.link.location_stack)
+                assert.is_truthy(firstIndex(refreshes, "partial"))
+                assert.are.same(percentFigure(ui, target), statisticValues(panel, 1))
+                track = progressTrack(panel)
+                assert.are.equal(0xFF, shade(onTrack(track, target))) -- the knob rests: paper again
+                assert.are.equal(start, track.origin_page)
+                assert.are.equal(Palette.mark.a, shade(onTrack(track, start)))
+                -- ‹ 返回原进度 sits centered just above the panel
+                local pill = returnPill(panel)
+                assert.is_truthy(pill)
+                local rect = panel:getRefreshRegion()
+                assert.is_true(pill.dimen.y + pill.dimen.h <= rect.y)
+                assert.is_true(rect.y - (pill.dimen.y + pill.dimen.h) < Screen:scaleBySize(26))
+                assert.are.equal(math.floor((Screen:getWidth() - pill.dimen.w) / 2), pill.dimen.x)
+
+                -- a drag let go where it started does not jump
+                stack = #ui.link.location_stack
+                local here = onTrack(track, target)
+                pan(here, point(here.x + 60, here.y))
+                assert.are_not.same(percentFigure(ui, target), statisticValues(panel, 1))
+                refreshes = refreshesOf(function() lift(here) end)
+                assert.are.equal(target, ui:getCurrentPage())
+                assert.are.equal(stack, #ui.link.location_stack)
+                assert.is_nil(firstIndex(refreshes, "partial"))
+                assert.are.same(percentFigure(ui, target), statisticValues(panel, 1))
+                assert.are.equal(0xFF, shade(onTrack(track, target)))
+
+                -- drags that start off the track, or go up or down along it, move nothing
+                for _, path in ipairs{
+                    { point(here.x, track.dimen.y - 40), point(here.x + 200, track.dimen.y - 40) },
+                    { here, point(here.x + 10, here.y - 120) },
+                } do
+                    pan(path[1], path[2])
+                    lift(path[2])
+                    assert.are.equal(target, ui:getCurrentPage())
+                    assert.are.equal(stack, #ui.link.location_stack)
+                    assert.are.same(percentFigure(ui, target), statisticValues(panel, 1))
+                end
+
+                -- a quick drag ends as a swipe, reported from where it started
+                local quick = along(track, 1/4)
+                local quick_target = track:pageAt(quick.x)
+                moveEvent(here.x, here.y, quick.x, quick.y, time.now(), true)
+                UIManager:forceRePaint()
+                assert.are.equal(quick_target, ui:getCurrentPage())
+                assert.are.equal(stack + 1, #ui.link.location_stack)
+                assert.are.equal(start, progressTrack(panel).origin_page)
+                ui.menu:hideToolbar()
+            end)
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
+        it("should keep the first 原进度 through later jumps, mark it with a dot that takes no tap, and go back to it", function()
+            local ui = openReader(sample_epub)
+            local ok, err = pcall(function()
+                ui:handleEvent(Event:new("GotoPage", 5))
+                UIManager:forceRePaint()
+                local start = ui:getCurrentPage()
+                local anchor = ui.rolling:getBookLocation()
+                local panel = openProgress(ui)
+                local bars = ui.menu.bars
+                local track = progressTrack(panel)
+                assert.is_nil(track.origin_page)
+                assert.is_nil(returnPill(panel))
+
+                -- a tap on the track, a chapter arrow, then a drag: three jumps, one 原进度
+                local mid = along(track, 1/2)
+                tap(mid.x, mid.y)
+                UIManager:forceRePaint()
+                track = progressTrack(panel)
+                assert.are.equal(start, track.origin_page)
+                tap(track.dimen.x + track.width - track.end_width / 2, mid.y)
+                UIManager:forceRePaint()
+                track = progressTrack(panel)
+                assert.are.equal(start, track.origin_page)
+                local from = onTrack(track, ui:getCurrentPage())
+                pan(from, along(track, 3/4), "hold_pan")
+                lift(along(track, 3/4), "hold_release")
+                UIManager:forceRePaint()
+                assert.are.equal(track:pageAt(along(track, 3/4).x), ui:getCurrentPage())
+                track = progressTrack(panel)
+                assert.are.equal(start, track.origin_page)
+
+                -- the dot takes no tap of its own: a tap there is a tap on the track, and the 原进度 stays
+                local dot = onTrack(track, start)
+                tap(dot.x, dot.y)
+                UIManager:forceRePaint()
+                assert.are.equal(track:pageAt(dot.x), ui:getCurrentPage())
+                assert.are.equal(panel, ui.menu.panel)
+                assert.are.equal(bars, ui.menu.bars)
+                assert.is_truthy(returnPill(panel))
+                track = progressTrack(panel)
+                local away = along(track, 3/4)
+                tap(away.x, away.y)
+                UIManager:forceRePaint()
+                assert.are_not.equal(start, ui:getCurrentPage())
+
+                -- the pill goes back to the text the first jump left, and closes the panel and the bars
+                local pill = returnPill(panel)
+                local pill_rect = pill.dimen:copy()
+                local refreshes = refreshesOf(function() tapWidget(pill) end)
+                assert.is_nil(ui.menu.panel)
+                assert.is_nil(ui.menu.bars)
+                assert.are.equal(ui, topWidget())
+                assert.are.equal(start, ui:getCurrentPage())
+                assert.is_true(ui.document:isXPointerInCurrentPage(anchor))
+                assert.is_truthy(refreshIndex(refreshes, "ui", pill_rect))
+                assert.is_truthy(refreshIndex(refreshes, "ui", bars.top_rect))
+                assert.is_truthy(firstIndex(refreshes, "partial"))
+                assert.is_nil(firstIndex(refreshes, "full"))
+
+                -- back there, the 原进度 is used up
+                panel = openProgress(ui)
+                assert.is_nil(returnPill(panel))
+                assert.is_nil(progressTrack(panel).origin_page)
+                ui.menu:hideToolbar()
+            end)
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
+        it("should keep the 原进度 while the bars switch panels, and forget it once they close", function()
+            local ui = openReader(sample_epub)
+            local ok, err = pcall(function()
+                local start = ui:getCurrentPage()
+                local panel = openProgress(ui)
+                local bars = ui.menu.bars
+                local mid = along(progressTrack(panel), 1/2)
+                tap(mid.x, mid.y)
+                UIManager:forceRePaint()
+                local jumped = ui:getCurrentPage()
+                assert.are_not.equal(start, jumped)
+
+                -- 更多 takes the panel's place: the page shows again where the pill was
+                local pill_rect = returnPill(panel).dimen:copy()
+                local refreshes = refreshesOf(function() tapWidget(moreButton(bars)) end)
+                assert.are.equal("more", ui.menu.panel_name)
+                assert.is_truthy(refreshIndex(refreshes, "ui", pill_rect))
+                -- the bars stayed: back in the progress panel, the 原进度 is still there
+                tapWidget(findIcon(bars.bottom, "eink/progress"))
+                UIManager:forceRePaint()
+                panel = ui.menu.panel
+                assert.is_truthy(returnPill(panel))
+                assert.are.equal(start, progressTrack(panel).origin_page)
+
+                -- a tap on the page closes the bars without turning it, and ends the browsing
+                pill_rect = returnPill(panel).dimen:copy()
+                refreshes = refreshesOf(function() tap(Screen:getWidth() - 10, bars.top_rect.h + 10) end)
+                assert.is_nil(ui.menu.bars)
+                assert.are.equal(jumped, ui:getCurrentPage())
+                assert.is_truthy(refreshIndex(refreshes, "ui", pill_rect))
+                panel = openProgress(ui)
+                assert.is_nil(returnPill(panel))
+                assert.is_nil(progressTrack(panel).origin_page)
+                ui.menu:hideToolbar()
+            end)
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
+        it("should cover the page with 加载中… only while a jump waits for the layout, and keep the 原进度's text through a reflow", function()
+            -- the typeset panel opens from 字体 between the page and the bottom bar; it sets its design defaults
+            -- in the global settings, which the other tests don't expect
+            local Replacements_config = Replacements.reader_config
+            Replacements.reader_config = require("apps/reader/modules/readertypesetpanel")
+            local global_keys = { "copt_font_size", "copt_line_spacing", "copt_h_page_margins", "copt_t_page_margin",
+                                  "typeset_serif_missing_shown" }
+            local saved = {}
+            for _, key in ipairs(global_keys) do saved[key] = G_reader_settings:readSetting(key) end
+            local ui = openReader(sample_epub)
+            local function runTasks()
+                for _ = 1, 3 do UIManager:_checkTasks() end
+            end
+            -- the type size track of the typeset panel, and a tap on one of its buttons (+1 or -1)
+            local function stepSize(direction)
+                local size_track = find(ui.config.panel, function(w) return w.on_step and w.stopX end)
+                local x = direction > 0 and size_track.dimen.w - Screen:scaleBySize(10) or Screen:scaleBySize(10)
+                tap(size_track.dimen.x + x, size_track.dimen.y + math.floor(size_track.dimen.h / 2))
+                runTasks() -- the re-render follows BatchedUpdateDone
+                UIManager:forceRePaint()
+            end
+            local size = ui.document.configurable.font_size
+            local grown = false
+            local ok, err = pcall(function()
+                runTasks() -- the reader enables partial rendering on its next tick
+                ui:handleEvent(Event:new("GotoPage", 20))
+                UIManager:forceRePaint()
+                local start = ui:getCurrentPage()
+                local anchor = ui.rolling:getBookLocation()
+                local panel = openProgress(ui)
+                local bars = ui.menu.bars
+
+                -- the book is laid out: a jump shows its page at once
+                local area = pageArea(ui)
+                local mid = along(progressTrack(panel), 1/2)
+                local refreshes = refreshesOf(function() tap(mid.x, mid.y) end)
+                assert.are_not.equal(start, ui:getCurrentPage())
+                assert.is_nil(refreshIndex(refreshes, "ui", area))
+                assert.is_false(loadingShown())
+
+                -- 字体 switches to the typeset panel, whose + grows the type: the book is laid out again only
+                -- around the page shown, for now
+                tapWidget(findIcon(bars.bottom, "eink/font"))
+                UIManager:forceRePaint()
+                assert.are.equal("font", ui.menu.panel_name)
+                stepSize(1)
+                grown = true
+                assert.is_true(ui.document.configurable.font_size > size)
+                assert.is_truthy(ui.rolling.rendering_state)
+                -- back in the progress panel, the bars never closed: the 原进度 is still there, its dot where
+                -- its text is now
+                tapWidget(findIcon(bars.bottom, "eink/progress"))
+                UIManager:forceRePaint()
+                panel = ui.menu.panel
+                assert.are.equal(bars, ui.menu.bars)
+                assert.is_truthy(returnPill(panel))
+                assert.are.equal(ui.document:getPageFromXPointer(anchor), progressTrack(panel).origin_page)
+
+                -- a jump now waits for the target's layout: 加载中… covers the page first, with the knob let go
+                -- resting where it was let go, and goes with the jump
+                area = pageArea(ui)
+                local track = progressTrack(panel)
+                local quarter = along(track, 1/4)
+                pan(onTrack(track, ui:getCurrentPage()), quarter)
+                local knob_under_cover
+                local forceRePaint = UIManager.forceRePaint
+                UIManager.forceRePaint = function(self)
+                    forceRePaint(self)
+                    if knob_under_cover == nil and loadingShown() then
+                        knob_under_cover = shade(onTrack(track, track:pageAt(quarter.x)))
+                    end
+                end
+                local jumped, jump_err = pcall(function()
+                    refreshes = refreshesOf(function() lift(quarter) end)
+                end)
+                UIManager.forceRePaint = forceRePaint
+                assert(jumped, jump_err)
+                assert.are.equal(0xFF, knob_under_cover)
+                local loading = refreshIndex(refreshes, "ui", area)
+                assert.is_truthy(loading)
+                assert.is_true(loading < firstIndex(refreshes, "partial"))
+                assert.is_false(loadingShown())
+                assert.are.equal(bars, topWidget())
+
+                -- back to the 原进度: the same text, on its new page
+                tapWidget(returnPill(panel))
+                UIManager:forceRePaint()
+                assert.is_nil(ui.menu.bars)
+                assert.is_true(ui.document:isXPointerInCurrentPage(anchor))
+
+                -- the type back to its size, through the typeset panel too: still the same text
+                tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
+                UIManager:forceRePaint()
+                tapWidget(findIcon(ui.menu.bars.bottom, "eink/font"))
+                UIManager:forceRePaint()
+                stepSize(-1)
+                grown = false
+                assert.are.equal(size, ui.document.configurable.font_size)
+                assert.is_true(ui.document:isXPointerInCurrentPage(anchor))
+                ui.menu:hideToolbar()
+            end)
+            if grown then
+                ui.config:apply("font_size", size, "SetFontSize")
+            end
+            closeReader(ui)
+            Replacements.reader_config = Replacements_config
+            for _, key in ipairs(global_keys) do
+                if saved[key] == nil then
+                    G_reader_settings:delSetting(key)
+                else
+                    G_reader_settings:saveSetting(key, saved[key])
+                end
+            end
+            assert(ok, err)
+        end)
+
+        it("should reopen the book on the text a jump went to, without the 原进度", function()
+            local ui = openReader(sample_epub)
+            local ok, err = pcall(function()
+                local start = ui:getCurrentPage()
+                local panel = openProgress(ui)
+                local track = progressTrack(panel)
+                local from = onTrack(track, start)
+                pan(from, along(track, 2/3))
+                lift(along(track, 2/3))
+                UIManager:forceRePaint()
+                assert.are_not.equal(start, ui:getCurrentPage())
+                local landed = ui.rolling:getBookLocation()
+                ui.menu:hideToolbar()
+                closeReader(ui)
+                ui = openReader(sample_epub, true)
+                assert.is_true(ui.document:isXPointerInCurrentPage(landed))
+                panel = openProgress(ui)
+                assert.is_nil(returnPill(panel))
+                assert.is_nil(progressTrack(panel).origin_page)
+                ui.menu:hideToolbar()
+            end)
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
+        it("should cover the page only while the book is being laid out, not once its full layout is ready", function()
+            local ui = openReader(sample_epub)
+            local rolling = ui.rolling
+            local states = rolling.RENDERING_STATE
+            local ok, err = pcall(function()
+                local panel = openProgress(ui)
+                -- the states KOReader's partial rendering goes through after a typesetting change
+                for _, case in ipairs{
+                    { "partially laid out", states.PARTIALLY_RERENDERED, true },
+                    { "laid out in the background", states.FULL_RENDERING_IN_BACKGROUND, true },
+                    { "layout ready, reload waiting for the reader to be idle", states.FULL_RENDERING_READY, false },
+                    { "reloading", states.RELOADING_DOCUMENT, true },
+                    { "laid out", nil, false },
+                } do
+                    rolling.rendering_state = case[2]
+                    local area = pageArea(ui)
+                    local track = progressTrack(panel)
+                    local page = ui:getCurrentPage()
+                    local target = along(track, page < track.page_count / 2 and 3/4 or 1/4)
+                    local refreshes = refreshesOf(function() tap(target.x, target.y) end)
+                    assert.are_not.equal(page, ui:getCurrentPage())
+                    assert.are.equal(case[3], refreshIndex(refreshes, "ui", area) ~= nil, case[1])
+                    assert.is_false(loadingShown())
+                end
+                ui.menu:hideToolbar()
+            end)
+            rolling.rendering_state = nil
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
+        it("should take 加载中… away when the jump fails, pass the error on, and keep no trace of the jump", function()
+            local ui = openReader(sample_epub)
+            local rolling = ui.rolling
+            local failing
+            local ok, err = pcall(function()
+                local start = ui:getCurrentPage()
+                local panel = openProgress(ui)
+                local bars = ui.menu.bars
+                local stack = #ui.link.location_stack
+                rolling.rendering_state = rolling.RENDERING_STATE.PARTIALLY_RERENDERED -- as after a typesetting change
+                -- the book goes away under the jump, as when it is reloaded
+                failing = stub(rolling, "onGotoPage", function() error("document closed", 0) end)
+                local area = pageArea(ui)
+                local mid = along(progressTrack(panel), 1/2)
+                local jumped, jump_err
+                local refreshes = refreshesOf(function()
+                    jumped, jump_err = pcall(tap, mid.x, mid.y)
+                end)
+                failing:revert()
+                failing = nil
+                assert.is_false(jumped)
+                assert.are.equal("document closed", jump_err)
+                -- the cover came and went: the page as it was shows again where it was
+                assert.is_false(loadingShown())
+                assert.are.equal(bars, topWidget())
+                local shown = refreshIndex(refreshes, "ui", area)
+                assert.is_truthy(shown)
+                local gone
+                for i = shown + 1, #refreshes do
+                    local g = refreshes[i].region
+                    if refreshes[i].mode == "ui" and g and g.x == area.x and g.y == area.y and g.w == area.w and g.h == area.h then
+                        gone = i
+                    end
+                end
+                assert.is_truthy(gone)
+                assert.are.equal(start, ui:getCurrentPage())
+                -- no jump happened: no way back to offer, nothing on the location stack
+                assert.are.equal(stack, #ui.link.location_stack)
+                rolling.rendering_state = nil
+                tapWidget(findIcon(bars.bottom, "eink/progress"))
+                tapWidget(findIcon(bars.bottom, "eink/progress"))
+                UIManager:forceRePaint()
+                assert.is_nil(returnPill(ui.menu.panel))
+                ui.menu:hideToolbar()
+            end)
+            if failing then failing:revert() end
+            rolling.rendering_state = nil
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
+        it("should take a hold let go on the track as a tap only when it started there", function()
+            local ui = openReader(sample_epub)
+            local ok, err = pcall(function()
+                local start = ui:getCurrentPage()
+                local panel = openProgress(ui)
+                local track = progressTrack(panel)
+                local stack = #ui.link.location_stack
+                local mid = along(track, 1/2)
+                local position = panel.content[1][1].dimen -- the position figure
+                -- held on the position figure, or on the page, then slid onto the track and let go there
+                for _, from in ipairs{
+                    point(position.x + position.w / 2, position.y + position.h / 2),
+                    point(Screen:getWidth() / 2, ui.menu.bars.top_rect.h + 100),
+                } do
+                    hold(from)
+                    pan(from, mid, "hold_pan")
+                    lift(mid, "hold_release")
+                    UIManager:forceRePaint()
+                    assert.are.equal(start, ui:getCurrentPage())
+                    assert.are.equal(stack, #ui.link.location_stack)
+                    assert.are.same(percentFigure(ui, start), statisticValues(panel, 1))
+                end
+                -- held on the track, without moving: a tap there
+                hold(mid)
+                lift(mid, "hold_release")
+                UIManager:forceRePaint()
+                assert.are.equal(track:pageAt(mid.x), ui:getCurrentPage())
+                assert.are.equal(stack + 1, #ui.link.location_stack)
+                ui.menu:hideToolbar()
+            end)
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
+        it("should forget a drag whose release never reached the track", function()
+            local Key = require("device/key")
+            local ui = openReader(sample_epub)
+            local ok, err = pcall(function()
+                local start = ui:getCurrentPage()
+                local panel = openProgress(ui)
+                local bars = ui.menu.bars
+                local track = progressTrack(panel)
+                local stack = #ui.link.location_stack
+                local from, to = onTrack(track, start), along(track, 3/4)
+                local away = point(Screen:getWidth() / 2, bars.top_rect.h + 100)
+                -- the finger lifts over a window on top of the bars: the track never hears of it
+                pan(from, to)
+                assert.are_not.same(percentFigure(ui, start), statisticValues(panel, 1))
+                -- the next gesture starts on the page: the knob rests on the page again, and stays there
+                local refreshes = refreshesOf(function() pan(away, point(away.x + 200, away.y)) end)
+                assert.are.same(percentFigure(ui, start), statisticValues(panel, 1))
+                assert.is_truthy(refreshIndex(refreshes, "ui", track.dimen))
+                assert.are.equal(0xFF, shade(onTrack(track, start)))
+                pan(away, point(away.x + 300, away.y))
+                lift(point(away.x + 300, away.y))
+                UIManager:forceRePaint()
+                assert.are.equal(start, ui:getCurrentPage())
+                assert.are.equal(stack, #ui.link.location_stack)
+                assert.are.same(percentFigure(ui, start), statisticValues(panel, 1))
+
+                -- a drag cut short by the panel closing (Back) leaves nothing behind either
+                pan(from, to)
+                UIManager:sendEvent(Event:new("KeyPress", Key:new("Back", {})))
+                UIManager:forceRePaint()
+                assert.is_nil(ui.menu.panel)
+                assert.is_false(track.held)
+                assert.is_nil(track.preview_page)
+                tapWidget(findIcon(bars.bottom, "eink/progress"))
+                UIManager:forceRePaint()
+                panel = ui.menu.panel
+                pan(away, point(away.x + 300, away.y))
+                lift(point(away.x + 300, away.y))
+                UIManager:forceRePaint()
+                assert.are.equal(start, ui:getCurrentPage())
+                assert.are.equal(stack, #ui.link.location_stack)
+                assert.are.same(percentFigure(ui, start), statisticValues(panel, 1))
+                ui.menu:hideToolbar()
+            end)
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
+        it("should repaint where the pill was only if it was painted", function()
+            local ui = openReader(sample_epub)
+            local ok, err = pcall(function()
+                local panel = openProgress(ui)
+                local bars = ui.menu.bars
+                local mid = along(progressTrack(panel), 1/2)
+                tap(mid.x, mid.y)
+                UIManager:forceRePaint()
+                local pill_rect = returnPill(panel).dimen:copy()
+                tapWidget(moreButton(bars))
+                UIManager:forceRePaint()
+                -- back to the progress panel, and away before it was ever painted: no pill to take away
+                tapWidget(findIcon(bars.bottom, "eink/progress"))
+                assert.is_truthy(returnPill(ui.menu.panel))
+                local refreshes = refreshesOf(function() tap(Screen:getWidth() - 10, bars.top_rect.h + 10) end)
+                assert.is_nil(ui.menu.bars)
+                assert.is_nil(refreshIndex(refreshes, "ui", pill_rect))
+            end)
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
+        it("should drag after a hold, take a hold that does not move as a tap, and go back in a PDF", function()
+            local ui = openReader(sample_pdf)
+            local ok, err = pcall(function()
+                local start = ui:getCurrentPage()
+                local pages = ui.document:getPageCount()
+                local panel = openProgress(ui)
+                local track = progressTrack(panel)
+                -- a hold that does not move jumps where it is, as a tap
+                local mid = along(track, 1/2)
+                hold(mid)
+                lift(mid, "hold_release")
+                UIManager:forceRePaint()
+                local middle = track:pageAt(mid.x)
+                assert.are.equal(middle, ui:getCurrentPage())
+                -- a drag after a hold previews, and jumps once let go
+                track = progressTrack(panel)
+                local from = onTrack(track, middle)
+                local last = point(track.dimen.x + track.width - track.inset, from.y)
+                hold(from)
+                pan(from, last, "hold_pan")
+                assert.are.equal(middle, ui:getCurrentPage())
+                assert.are.same({ "100", "%" }, statisticValues(panel, 1))
+                lift(last, "hold_release")
+                UIManager:forceRePaint()
+                assert.are.equal(pages, ui:getCurrentPage())
+                assert.are.equal(start, progressTrack(panel).origin_page)
+
+                tapWidget(returnPill(panel))
+                UIManager:forceRePaint()
+                assert.are.equal(start, ui:getCurrentPage())
+                assert.is_nil(ui.menu.bars)
+            end)
+            closeReader(ui)
+            assert(ok, err)
         end)
     end)
 

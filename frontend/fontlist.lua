@@ -106,18 +106,29 @@ function FontList:isSystemFont(file)
         or file:match("^/system_ext/fonts/")) ~= nil
 end
 
+local chinese_coverage, unreadable_fonts = {}, {}
+
+-- true/false for a readable face, nil when coverage cannot be checked. Cache all outcomes for this session.
 function FontList:hasChinese(file, index)
-    if not file then return false end
+    if not file then
+        logger.warn("Unable to check Chinese font coverage: no font file")
+        return
+    end
     local info = self.fontinfo[file] and self.fontinfo[file][index + 1]
     if info and info.has_chinese ~= nil then return info.has_chinese end
+    local key = file .. ":" .. index
+    if chinese_coverage[key] ~= nil then return chinese_coverage[key] end
+    if unreadable_fonts[key] then return end
     local ok, ftsize = pcall(FT.newFaceSize, file, 16, index)
     if not ok then
+        unreadable_fonts[key] = true
         logger.warn("Unable to check Chinese font coverage:", file, index, ftsize)
-        return false
+        return
     end
     local has_chinese = ftsize:hasGlyph(0x4E2D) -- 中
     ftsize:done()
     if info then info.has_chinese = has_chinese end
+    chinese_coverage[key] = has_chinese
     return has_chinese
 end
 
