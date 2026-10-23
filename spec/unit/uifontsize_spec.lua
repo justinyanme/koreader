@@ -182,12 +182,12 @@ describe("Interface font size", function()
         return tappable(fm.layout_group[2], function(w) return w.icon == "eink/" .. icon or w.icon == "eink/" .. icon .. ".bold" end)
     end
 
-    -- The way a reader gets there: 我 → 设置 on the shelf, 更多 → 全部设置 in the reader.
+    -- The way a reader gets there: 我 → 设置 on the shelf; over a book, "ShowEinkSettings" (the toolbar's 更多
+    -- leads to the original menu instead).
     local function openSettings(ui)
         if ui.document then
-            tap(Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }) -- the toolbars
-            tap(findWidget(ui.menu.bars.top, function(w) return w.icon == "eink/more" and w.callback ~= nil end).dimen)
-            tap(findWidget(ui.menu.panel, function(w) return w.label == _("All settings") and w.callback ~= nil end).dimen)
+            ui:handleEvent(Event:new("ShowEinkSettings"))
+            UIManager:forceRePaint()
         else
             tap(tab(ui, "user").dimen)
             tap(tappable(ui.me_view, function(w) return w.text == _("Settings") end).dimen)
@@ -624,7 +624,7 @@ describe("Interface font size", function()
             assert.is_near(roleSize("ui_body", 1.35), findText(settings, _("Interface font size")).face.orig_size, 1e-9)
             assertFits(settings)
             settings:closeMenu(true)
-            -- the toolbar's panels (its bars hold icons only): more, brightness from more's first tile,
+            -- the toolbar's panels (its bars hold icons only): more, brightness from more's first row,
             -- progress and the typeset panel
             tap(Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() })
             local function entry(icon)
@@ -632,8 +632,13 @@ describe("Interface font size", function()
             end
             tap(entry("eink/more").dimen)
             assert.are.equal("more", ui.menu.panel_name)
-            assertFits(ui.menu.panel)
-            tap(findWidget(ui.menu.panel, function(w) return w.label == _("Brightness") and w.callback ~= nil end).dimen)
+            local more = ui.menu.panel
+            assertFits(more)
+            for __, r in ipairs{ _("Brightness and warmth"), _("All settings (original)"), _("Cancel") } do
+                local label = findText(more, r)
+                assert.is_near(roleSize("ui_body", 1.35), label.face.orig_size, 1e-9)
+            end
+            tap(findWidget(more, function(w) return w.text == _("Brightness and warmth") and w.callback ~= nil end).dimen)
             assert.are.equal("brightness", ui.menu.panel_name)
             assertFits(ui.menu.panel)
             for __, icon in ipairs{ "eink/progress", "eink/font" } do

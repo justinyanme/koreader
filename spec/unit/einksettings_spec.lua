@@ -109,8 +109,7 @@ describe("Reorganized settings", function()
         return page.bar.capsule
     end
 
-    -- the tile labelled `label` in a toolbar panel
-    -- Opens the reader toolbar's more panel as a reader does: a tap in the middle, then 更多 in the top bar.
+    -- Opens the reader toolbar's 更多 panel as a reader does: a tap in the middle, then 更多 in the top bar.
     local function openMorePanel(ui)
         tap(Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() })
         local function moreButton(w)
@@ -125,15 +124,12 @@ describe("Reorganized settings", function()
         return ui.menu.panel
     end
 
-    local function findTile(w, label)
+    -- the row labelled `label` in the 更多 panel's list, faded or not
+    local function findListRow(w, label)
         if type(w) ~= "table" then return end
-        if w.label == label and w.callback then return w end
+        if w.text == label and w.ges_events then return w end
         for __, c in ipairs(w) do
-            local f = findTile(c, label)
-            if f then return f end
-        end
-        for __, k in ipairs{ "content", "frame" } do
-            local f = rawget(w, k) and findTile(w[k], label)
+            local f = findListRow(c, label)
             if f then return f end
         end
     end
@@ -565,17 +561,19 @@ describe("Reorganized settings", function()
             while isSettings(topWidget()) do topWidget():closeMenu(true) end
         end)
 
-        it("opens from the toolbar's more panel: refresh and ghosting, and all settings", function()
-            tap(findTile(openMorePanel(ui), _("Refresh and ghosting")).dimen)
-            local page = topWidget()
-            assert.is_true(isSettings(page))
-            assert.are.equal(_("Refresh and ghosting"), page.title)
+        it("keeps refresh and ghosting out of the toolbar's 更多 list, whose last entry is the original menu", function()
+            local list = openMorePanel(ui)
+            assert.is_nil(findListRow(list, _("Refresh and ghosting")))
+            assert.is_nil(findListRow(list, _("All settings")))
+            tap(findListRow(list, _("All settings (original)")).dimen)
+            assert.is_nil(ui.menu.panel)
             assert.is_nil(ui.menu.bars)
-            page:closeMenu(true)
-            tap(findTile(openMorePanel(ui), _("All settings")).dimen)
-            page = topWidget()
-            assert.is_true(isSettings(page))
-            assert.are.equal(_("Settings"), page.title)
+            assert.is_truthy(ui.menu.menu_container)
+            assert.are.equal(ui.menu.menu_container, topWidget())
+            ui.menu:onCloseReaderMenu()
+            -- 刷新与残影 is a row of 设置 → 屏幕
+            local page = openSettings(ui, "screen")
+            assert.is_truthy(row(page, _("Refresh and ghosting")))
         end)
 
         it("backs its rows with the reader's items and previews the tap zones", function()
@@ -631,12 +629,11 @@ describe("Reorganized settings", function()
             ui:onClose()
         end)
 
-        it("opens the same page from the toolbar, pages it, and goes back to the book", function()
+        it("opens the same page over the book, pages it, and goes back to the book", function()
             local page_no = ui:getCurrentPage()
-            local panel = openMorePanel(ui)
             local page
             local refreshes = refreshesOf(function()
-                tap(findTile(panel, _("All settings")).dimen)
+                ui:handleEvent(Event:new("ShowEinkSettings"))
                 page = topWidget()
             end)
             assert.is_true(isSettings(page))
