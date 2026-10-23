@@ -15,6 +15,8 @@ Replaces ReaderHighlight (apps/replacements reader_highlight slot):
 - a tap on a highlight, or a long-press on a word of it, replaces "Highlight"
   with "Delete highlight" and adds "Delete note" when it has a thought;
   after a long-press, the look-up is for the word pressed;
+- a tap on an image of the text, but not of a highlight or thought mark, shows
+  it in the image preview (ui/widget/imagepreview);
 - copying closes the popover and confirms with a toast;
 - a thought is written in a compact band above the keyboard, over a washed,
   inert page; Back discards the draft, Save persists it and shows a toast;
@@ -1006,7 +1008,30 @@ function ReaderHighlightBubble:onTap(arg, ges)
             return true
         end
     end
-    return ReaderHighlight.onTap(self, arg, ges)
+    -- not the tap ending a long-press, nor those of select mode
+    local previews = not (self.hold_pos or self.select_mode)
+    return ReaderHighlight.onTap(self, arg, ges) or (previews and self:previewImage(ges))
+end
+
+-- Images with a side shorter than this, in their own pixels, are glyphs, bullets or rules set in the text
+-- (the reference book's list bullets are 50px): a tap on them stays a tap on the page.
+local PREVIEW_MIN_SIDE = 64
+
+--- Shows an image tapped in the text in the image preview: after links, thought marks and highlights,
+-- before the toolbar and page turns. Fixed-layout pages have no images to tell from the page.
+function ReaderHighlightBubble:previewImage(ges)
+    local pos = self.view:screenToPageTransform(ges.pos)
+    -- the frames of an animated image, or for an SVG image a function rendering it at any scale
+    local image = pos and self.ui.document:getImageFromPosition(pos, true, true)
+    if not image then return end
+    local bb = type(image) == "function" and image(1) or image -- its own size; frames come as a table
+    if type(bb) == "cdata" and math.min(bb:getWidth(), bb:getHeight()) < PREVIEW_MIN_SIDE then
+        if type(image) == "function" then image(false) else image:free() end
+        return
+    end
+    -- loaded on first use, as ReaderHighlight does ImageViewer
+    UIManager:show(require("ui/widget/imagepreview"):new{ image = image })
+    return true
 end
 
 --- Highlight popover: the selection popover's actions, with "Delete highlight" in the first place.
