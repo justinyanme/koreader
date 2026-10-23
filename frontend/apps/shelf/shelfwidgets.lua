@@ -5,7 +5,6 @@ They take plain data so they can move to ui/widget once the other redesign
 screens need them:
 
     Chip{ text, count, selected, callback }
-    Pager{ page, pages, on_change } -- page is 1-based
     TabBar{ tabs = { { id, icon } }, current, height, on_change } -- the tab icons of the bottom band
     BottomSheet{ title, header, rows = { { text, callback, checked } } } -- shown with BottomSheet:show()
 
@@ -41,7 +40,6 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local util = require("util")
 local Screen = Device.screen
-local T = require("ffi/util").template
 local _ = require("gettext")
 local C_ = _.pgettext
 
@@ -295,31 +293,6 @@ function Chip:init()
         self.selected and Palette.ink or Palette.paper)
 end
 
-local Pager = HorizontalGroup:extend{
-    page = 1,
-    pages = 1,
-    on_change = nil,
-}
-
-function Pager:init()
-    local function button(icon, enabled, to_page)
-        return Tappable:new{
-            callback = enabled and function() self.on_change(to_page) end or nil,
-            pill(IconWidget:new{ icon = icon, width = dp(18), height = dp(18), dim = not enabled or nil },
-                dp(44), dp(32), Size.border.default, enabled and Palette.ink or Palette.rule),
-        }
-    end
-    local count = TextWidget:new{
-        text = T("%1 / %2", self.page, self.pages),
-        face = Font:getFace("ui_label"),
-    }
-    table.insert(self, button("chevron.left", self.page > 1, self.page - 1))
-    table.insert(self, HorizontalSpan:new{ width = dp(14) })
-    table.insert(self, CenterContainer:new{ dimen = Geom:new{ w = math.max(dp(54), count:getSize().w), h = dp(32) }, count })
-    table.insert(self, HorizontalSpan:new{ width = dp(14) })
-    table.insert(self, button("chevron.right", self.page < self.pages, self.page + 1))
-end
-
 --- The tab icons at the left of the bottom band (DESIGN.md, Tab bar): 28dp icons with no labels, 91dp apart
 -- from a 32dp inset, each tappable over its 91dp cell and the band's height. The current tab's icon is the
 -- filled "eink/<icon>.bold", the others "eink/<icon>".
@@ -446,7 +419,6 @@ end
 return {
     Tappable = Tappable,
     Chip = Chip,
-    Pager = Pager,
     TabBar = TabBar,
     BottomSheet = BottomSheet,
     pill = pill,

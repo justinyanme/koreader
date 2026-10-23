@@ -232,14 +232,15 @@ describe("Shelf home (FileManager replacement)", function()
             assert.are.equal(dp(58), band.h)
             assert.are.equal(Palette.rule:getColor8().a, gray(math.floor(screen.w / 2), band.y))
             local tabs = {}
-            for __, icon in ipairs{ "eink/shelf.bold", "eink/user", "eink/folder" } do
+            for __, icon in ipairs{ "eink/shelf.bold", "eink/user" } do
                 local tab = find(fm, icon)
                 assert.is_truthy(tab, icon)
                 assert.is_true(tab.dimen.y >= band.y and tab.dimen.h >= dp(44))
                 table.insert(tabs, tab)
             end
-            -- 书源 comes first only with its plugin (disabled here); 文件 stays last until 导入 and 我 lead to it
+            -- 书源 comes first only with its plugin (disabled here); 文件 has no tab, 导入 and 我 lead to it
             assert.is_nil(find(fm, "eink/compass"))
+            assert.is_nil(find(fm, "eink/folder"))
             assert.are.equal(0, tabs[1].dimen.x)
             assert.are.equal(tabs[1].dimen.x + tabs[1].dimen.w, tabs[2].dimen.x)
             assert.are.equal(dp(91), tabs[1].dimen.w)
@@ -436,9 +437,9 @@ describe("Shelf home (FileManager replacement)", function()
             fastforward_ui_events()
             local refreshes, restore = spyRefreshes()
             view:setFilter("new")
-            fm:switchTab("files")
+            fm:openFiles()
             assert.are.equal(fm.files_ui, fm.content[1])
-            fm:switchTab("shelf")
+            fm:closeFiles()
             assert.are.equal(fm.shelf_view, fm.content[1])
             restore()
             assert.is_true(#refreshes >= 5)
@@ -452,10 +453,13 @@ describe("Shelf home (FileManager replacement)", function()
             end
             fm:switchTab("me")
             assert.are.equal(fm.me_view, fm.content[1])
-            -- rotation rebuilds the layout and keeps the tab
-            fm:switchTab("files")
+            -- rotation rebuilds the layout and keeps 文件, and where it was opened from
+            fm:openFiles()
             fm:reinit()
             assert.are.equal(fm.files_ui, fm.content[1])
+            tap(fm.layout_group[2][1].back.dimen)
+            assert.are.equal("me", fm.current_tab)
+            assert.are.equal(fm.me_view, fm.content[1])
             fm:onClose()
         end)
 
@@ -466,6 +470,11 @@ describe("Shelf home (FileManager replacement)", function()
             assert.are.equal("files", fm.current_tab)
             assert.are.equal(fm.files_ui, fm.content[1])
             assert.are.equal(home .. "/sub", fm.file_chooser.path)
+            -- a folder change inside 文件 keeps it, and the back arrow returns to 书架
+            fm.file_chooser:changeToPath(home)
+            assert.are.equal("files", fm.current_tab)
+            tap(fm.layout_group[2][1].back.dimen)
+            assert.are.equal("shelf", fm.current_tab)
             fm:onClose()
         end)
 
@@ -525,6 +534,10 @@ describe("Shelf home (FileManager replacement)", function()
                 local fc = fm.file_chooser
                 assert.is_true(fc:getFocusItem().focused)
                 assert.are.equal(book, fc.item_table[(fc.page - 1) * fc.perpage + fc.selected.y].path)
+                -- the home opened on 文件: its back arrow leads to 书架
+                tap(fm.layout_group[2][1].back.dimen)
+                assert.are.equal("shelf", fm.current_tab)
+                assert.are.equal(fm.shelf_view, fm.content[1])
                 fm:onClose()
             end)
 
@@ -745,14 +758,19 @@ describe("Shelf home (FileManager replacement)", function()
             assert.is_false(pager.prev_enabled or pager.next_enabled)
             press("LPgBack")
             assert.are.equal(view.pages, view.page)
-            -- on 文件 the file browser takes the page keys, as before
-            tap(find(fm, "eink/folder").dimen)
+            -- on 文件 (from 我) the file browser takes the page keys, as before, and the capsule turns its pages
+            tap(find(fm.me_view, _("Files")).dimen)
             assert.are.equal("files", fm.current_tab)
             local fc_page = fm.file_chooser.page
             press("RPgFwd")
             assert.are.equal(fc_page + 1, fm.file_chooser.page)
+            assert.are.equal(fm.file_chooser.page, capsule(fm).page)
+            tap(capsule(fm).prev_rect)
+            assert.are.equal(fc_page, fm.file_chooser.page)
             assert.are.equal(view.pages, view.page)
-            -- back on 书架, on the page it was left
+            -- back to 我, then on 书架, on the page it was left
+            tap(fm.layout_group[2][1].back.dimen)
+            assert.are.equal("me", fm.current_tab)
             tap(find(fm, "eink/shelf").dimen)
             assert.are.equal("shelf", fm.current_tab)
             assert.are.equal(view.pages, view.page)

@@ -1,6 +1,6 @@
 --[[--
 The 我的 tab: this week's reading, a streak line, and entries for all notes,
-the vocabulary, sync and transfer, and settings.
+the vocabulary, 文件, sync and transfer, and settings.
 
 Subpages open over the content area, above the tab bar, with a nav bar and a
 paged list. Entering, leaving and paging repaint the content area (or the list
@@ -263,6 +263,8 @@ function MeView:buildHome()
             function() self:open("notes") end),
         self:entryRow(C_("Me page", "Vocabulary"), T(_("%1 words"), home.word_count),
             function() self:open("vocab") end),
+        -- 文件 shows in the file manager's content area, on the folder named here; its back arrow returns here
+        self:entryRow(_("Files"), BD.dirpath(self.ui.file_chooser.path), function() self.ui:openFiles() end),
         self:entryRow(_("Sync and transfer"), "KOSync · Calibre · OPDS", function() self:open("sync") end),
         self:entryRow(_("Settings"), _("Reading · Screen · Network · Device"), function()
             self.ui:handleEvent(Event:new("ShowEinkSettings"))
