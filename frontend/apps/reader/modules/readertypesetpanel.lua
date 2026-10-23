@@ -764,9 +764,14 @@ function ReaderTypesetPanel.genGlobalIndentMenuItem(ui)
             local on = not isOn()
             -- a copy: the defaults of new installations stay as they are
             local tweaks = require("util").tableDeepCopy(globalTweaks())
-            -- on, the indent card's tweaks; off (from indent), none of them
+            -- On, the indent card's tweaks; off (from indent), none of them. The global table only holds the tweaks
+            -- that are on (see ReaderStyleTweak:updateCssText()): the card's off ones are removed, never saved false.
             for __, tweak in ipairs(MODE_TWEAKS.indent) do
-                tweaks[tweak[1]] = on and tweak[2] or nil
+                if on and tweak[2] then
+                    tweaks[tweak[1]] = true
+                else
+                    tweaks[tweak[1]] = nil
+                end
             end
             G_reader_settings:saveSetting("style_tweaks", tweaks)
             if not styletweak then return end

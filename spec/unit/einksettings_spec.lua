@@ -708,9 +708,44 @@ describe("Reorganized settings", function()
                 assert.are.same(before, G_reader_settings:readSetting("footer"))
                 tap(row(page, name).rect)
                 assert.is_true(G_reader_settings:readSetting("footer").time)
+                page:closeMenu(true)
+
+                -- no footer setting yet: only the time is saved, and the default footer still comes at the next start
+                G_reader_settings:delSetting("footer")
+                require("apps/reader/modules/readertoolbar").applyFooterDefaults()
+                local default_footer = require("util").tableDeepCopy(G_reader_settings:readSetting("footer"))
+                G_reader_settings:delSetting("footer")
+                page = openSettings(fm)
+                assert.is_true(toggleShowsOn(row(page, name)))
+                tap(row(page, name).rect)
+                assert.is_false(toggleShowsOn(row(page, name)))
+                assert.are.same({ time = false }, G_reader_settings:readSetting("footer"))
+                require("apps/reader/modules/readertoolbar").applyFooterDefaults()
+                default_footer.time = false
+                assert.are.same(default_footer, G_reader_settings:readSetting("footer"))
             end)
             G_reader_settings:saveSetting("footer", saved)
             assert(ok, err)
+        end)
+
+        it("has the reading preferences' names and subtitles in Chinese", function()
+            local preferences = require("ui/elements/eink_settings_order")[1]
+            assert.are.equal("preferences", preferences.id)
+            local msgids, untranslated = {}, {}
+            for __, r in ipairs(preferences.rows) do
+                table.insert(msgids, r.text)
+                if r.subtitle then table.insert(msgids, r.subtitle) end
+            end
+            assert.are.equal(7, #msgids) -- four names, three subtitles
+            local ok, err = pcall(function()
+                _.changeLang("zh_CN")
+                for __, msgid in ipairs(msgids) do
+                    if _(msgid) == msgid then table.insert(untranslated, msgid) end
+                end
+            end)
+            _.changeLang("C")
+            assert(ok, err)
+            assert.are.same({}, untranslated)
         end)
 
         it("dims rows that need a book, and says which ones this device lacks instead", function()
@@ -1011,6 +1046,67 @@ describe("Reorganized settings", function()
             assert.is_true(showsTime())
             tap(page.bar.back.dimen)
             assert.is_true(G_reader_settings:readSetting("footer").time)
+        end)
+    end)
+
+    describe("in the reader, with a footer showing one item at a time", function()
+        local ui, saved
+
+        setup(function()
+            saved = { footer = G_reader_settings:readSetting("footer"), mode = G_reader_settings:readSetting("reader_footer_mode") }
+            G_reader_settings:delSetting("footer")
+            ReaderToolbar.applyFooterDefaults()
+            -- the user's own footer: one item at a time (time, then the page), now on the time
+            local footer = G_reader_settings:readSetting("footer")
+            footer.all_at_once, footer.dynamic_filler = false, false
+            G_reader_settings:saveSetting("reader_footer_mode", 1) -- the order's first item, the time
+            DocSettings:open(sample_epub):purge()
+            ui = ReaderUI:new{ dimen = Screen:getSize(), document = DocumentRegistry:openDocument(sample_epub) }
+            UIManager:show(ui)
+            UIManager:forceRePaint()
+        end)
+        teardown(function()
+            while isSettings(topWidget()) do topWidget():closeMenu(true) end
+            ui:closeDocument()
+            UIManager:close(ui)
+            ui:onClose()
+            G_reader_settings:saveSetting("footer", saved.footer)
+            G_reader_settings:saveSetting("reader_footer_mode", saved.mode)
+            DocSettings:open(sample_epub):purge()
+        end)
+
+        it("moves the footer on to its next item when the time it shows is turned off, and keeps that item after", function()
+            local footer = ui.view.footer
+            local time_text = footer.textGeneratorMap.time(footer)
+            assert.are.equal(footer.mode_list.time, footer.mode)
+            assert.are.equal(time_text, footer.footer_text.text)
+            local page = openSettings(ui)
+            local name = _("Show time while reading")
+            local band = 0
+            for x = page.bar.dimen.x, page.bar.dimen.x + page.bar.dimen.w - 1, 3 do
+                band = band + gray(x, page.bar.dimen.y + math.floor(page.bar.dimen.h / 2))
+            end
+            local refreshes = refreshesOf(function() tap(row(page, name).rect) end)
+            assert.are.same({ { mode = "fast", region = row(page, name).toggle_rect } }, refreshes)
+            -- the next item shows, saved as the footer's mode, without painting over the page
+            assert.are.equal(footer.mode_list.page_progress, footer.mode)
+            assert.are.equal(footer.mode, G_reader_settings:readSetting("reader_footer_mode"))
+            assert.are.equal(footer.textGeneratorMap.page_progress(footer), footer.footer_text.text)
+            local after = 0
+            for x = page.bar.dimen.x, page.bar.dimen.x + page.bar.dimen.w - 1, 3 do
+                after = after + gray(x, page.bar.dimen.y + math.floor(page.bar.dimen.h / 2))
+            end
+            assert.are.equal(band, after)
+            tap(page.bar.back.dimen)
+            assert.are.equal(ui, topWidget())
+            assert.is_true(ui.view.footer_visible)
+            -- on again: the time is an item again, the footer stays on the page
+            page = openSettings(ui)
+            tap(row(page, name).rect)
+            assert.is_true(footer.settings.time)
+            assert.are.equal(footer.mode_list.page_progress, footer.mode)
+            assert.are.equal(footer.textGeneratorMap.page_progress(footer), footer.footer_text.text)
+            tap(page.bar.back.dimen)
         end)
     end)
 

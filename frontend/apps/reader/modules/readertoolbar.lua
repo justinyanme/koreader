@@ -219,25 +219,32 @@ end
 
 --- Reading page footer, as in WeChat Read: the time at the left, the current page / pages at the right.
 -- Only replaces a footer the user never customized, i.e. absent or still equal to upstream's defaults
--- (the one-time migration saves the default footer on first start) or to the first round's.
+-- (the one-time migration saves the default footer on first start) or to the first round's. A footer holding only
+-- the time, which the settings' 阅读时显示时间 saves when there is no footer yet, gets this one with that time.
 function ReaderToolbar.applyFooterDefaults()
     local util = require("util")
     local footer = G_reader_settings:readSetting("footer")
-    if footer == nil or util.tableEquals(footer, require("apps/reader/modules/readerfooter").default_settings)
+    local only_time = footer ~= nil and next(footer) == "time" and next(footer, "time") == nil
+    if footer == nil or only_time
+            or util.tableEquals(footer, require("apps/reader/modules/readerfooter").default_settings)
             or util.tableEquals(footer, footerSettings(FOOTER_V1)) then
-        G_reader_settings:saveSetting("footer", footerSettings(FOOTER))
+        local settings = footerSettings(FOOTER)
+        if only_time then
+            settings.time = footer.time
+        end
+        G_reader_settings:saveSetting("footer", settings)
     end
 end
 
 --- The settings' 阅读时显示时间 toggle (WeChat Read's 13-reading-preferences/02-settings.png): the footer's time
 -- item, the same setting as its checkbox in the status bar menu. With `ui` a reader, its footer follows at once;
--- elsewhere, the next book's footer does.
+-- elsewhere, the next book's footer does. Without a footer setting yet, it saves the time alone, for
+-- applyFooterDefaults() to complete with the default footer, which a full footer would count as the user's own.
 function ReaderToolbar.genTimeMenuItem(ui)
-    local ReaderFooter = require("apps/reader/modules/readerfooter")
     local footer = ui and ui.view and ui.view.footer
     local function settings()
         if footer then return footer.settings end
-        return G_reader_settings:readSetting("footer") or ReaderFooter.default_settings
+        return G_reader_settings:readSetting("footer") or footerSettings(FOOTER)
     end
     return {
         text = _("Show time while reading"),
@@ -248,8 +255,8 @@ function ReaderToolbar.genTimeMenuItem(ui)
             if footer then
                 footer:toggleItem("time")
             else
-                local saved = G_reader_settings:readSetting("footer") or require("util").tableDeepCopy(ReaderFooter.default_settings)
-                saved.time = not saved.time
+                local saved = G_reader_settings:readSetting("footer") or {}
+                saved.time = not settings().time
                 G_reader_settings:saveSetting("footer", saved)
             end
         end,
