@@ -141,6 +141,28 @@ describe("ReaderTypesetPanel module", function()
         UIManager:forceRePaint()
     end
 
+    -- the painted gray level at (x, y): 0 is ink, 255 is paper
+    local function gray(x, y)
+        return Screen.bb:getPixel(x, y):getColor8().a
+    end
+
+    -- What a track shows: the text painted in its knob, and the color its − (-1) or + (+1) button is outlined in.
+    local function knobText(track)
+        local size = track.knob_text:getSize()
+        local cx = track.dimen.x + track:stopX(math.max(1, math.min(track.count, track.position)))
+        local mid = track.minus_rect.y + math.floor(track.minus_rect.h / 2)
+        for x = cx - math.floor(size.w / 2), cx + math.floor(size.w / 2) do
+            for y = mid - math.floor(size.h / 4), mid + math.floor(size.h / 4) do
+                if gray(x, y) < 0x80 then return track.knob_text.text end -- inked
+            end
+        end
+    end
+    local function buttonOutline(track, direction)
+        local x = direction < 0 and track.dimen.x or track.dimen.x + track.dimen.w - Screen:scaleBySize(33)
+        return gray(x, track.minus_rect.y + math.floor(track.minus_rect.h / 2)) -- its outer edge
+    end
+    local INK, RULE = require("ui/palette").ink:getColor8().a, require("ui/palette").rule:getColor8().a
+
     -- The − and + buttons at the ends of a track, and its stops.
     local function tapMinus(track) tapTrack(track, Screen:scaleBySize(10)) end
     local function tapPlus(track) tapTrack(track, track.dimen.w - Screen:scaleBySize(10)) end
@@ -317,8 +339,8 @@ describe("ReaderTypesetPanel module", function()
             assert.are.same({ 18, 18 }, ui.document.configurable.h_page_margins)
             assert.are.equal(Screen:scaleBySize(18), ui.document:getPageMargins().left)
             openPanel(ui)
-            assert.are.equal(string.format("%g", size), trackOf(ui, 1).label)
-            assert.are.equal("4", trackOf(ui, 2).label)
+            assert.are.equal(string.format("%g", size), knobText(trackOf(ui, 1)))
+            assert.are.equal("4", knobText(trackOf(ui, 2)))
             assert.are.equal(7, trackOf(ui, 3).position)
             assert.are.equal(3, trackOf(ui, 4).position)
             ui.menu:hideToolbar()
@@ -582,7 +604,8 @@ describe("ReaderTypesetPanel module", function()
                 { C_("Typeset track", "Tight"), C_("Typeset track", "Loose"), C_("Typeset panel", "Line spacing"), 5 },
                 { C_("Typeset track", "Small"), C_("Typeset track", "Large"), _("Margins"), 5 },
             } do
-                assert.are.same(case, { t[i].low, t[i].high, t[i].label, t[i].position })
+                assert.are.same(case, { t[i].low_text.text, t[i].high_text.text, knobText(t[i]), t[i].position })
+                assert.are.same({ INK, INK }, { buttonOutline(t[i], -1), buttonOutline(t[i], 1) })
                 assert.are.equal(Panel.getContentWidth(), t[i].dimen.w)
                 -- rows 44dp apart under the title row
                 local above = i == 1 and title.dimen or t[i - 1].dimen
@@ -608,7 +631,7 @@ describe("ReaderTypesetPanel module", function()
                 tapPlus(trackOf(ui, i))
                 runTasks()
                 assert.are.same(up, ui.document.configurable[name])
-                if case[5] then assert.are.equal(case[5], trackOf(ui, i).label) end
+                if case[5] then assert.are.equal(case[5], knobText(trackOf(ui, i))) end
                 assert.are.equal(ui.document:getCurrentPage(), ui.document:getPageFromXPointer(xpointer), name)
                 tapMinus(trackOf(ui, i))
                 tapMinus(trackOf(ui, i))
@@ -624,24 +647,29 @@ describe("ReaderTypesetPanel module", function()
 
         it("should stop at the ends of a track, with the button there disabled", function()
             openPanel(ui)
+            -- at the last stop, + is outlined in rule gray with a dimmed glyph, and does nothing
             tapStop(trackOf(ui, 4), 9)
             assert.are.same({ 70, 70 }, ui.document.configurable.h_page_margins)
-            assert.is_false(trackOf(ui, 4).can_step[1])
+            assert.are.same({ INK, RULE }, { buttonOutline(trackOf(ui, 4), -1), buttonOutline(trackOf(ui, 4), 1) })
+            assert.is_true(trackOf(ui, 4).icons[1].dim)
             tapPlus(trackOf(ui, 4))
             assert.are.same({ 70, 70 }, ui.document.configurable.h_page_margins)
             tapStop(trackOf(ui, 3), 1)
             assert.are.equal(85, ui.document.configurable.line_spacing)
-            assert.is_false(trackOf(ui, 3).can_step[-1])
+            assert.are.same({ RULE, INK }, { buttonOutline(trackOf(ui, 3), -1), buttonOutline(trackOf(ui, 3), 1) })
+            assert.is_true(trackOf(ui, 3).icons[-1].dim)
             tapStop(trackOf(ui, 1), 10)
             assert.are.equal(28, ui.document.configurable.font_size)
-            assert.are.equal(10, trackOf(ui, 1).position)
+            assert.are.equal("28", knobText(trackOf(ui, 1)))
+            assert.are.equal(RULE, buttonOutline(trackOf(ui, 1), 1))
             tapPlus(trackOf(ui, 1))
             assert.are.equal(28, ui.document.configurable.font_size)
             tapStop(trackOf(ui, 1), 1)
             assert.are.equal(15, ui.document.configurable.font_size)
             tapMinus(trackOf(ui, 1))
             assert.are.equal(15, ui.document.configurable.font_size)
-            assert.is_true(trackOf(ui, 1).can_step[1])
+            assert.are.same({ RULE, INK }, { buttonOutline(trackOf(ui, 1), -1), buttonOutline(trackOf(ui, 1), 1) })
+            assert.is_nil(trackOf(ui, 1).icons[1].dim)
         end)
 
         it("should read back values past a track's ends there, with their own number, and go back onto it", function()
@@ -651,15 +679,26 @@ describe("ReaderTypesetPanel module", function()
             ui:handleEvent(Event:new("SetLineSpace", 70))
             runTasks()
             openPanel(ui)
-            assert.are.equal("32", trackOf(ui, 1).label)
+            assert.are.equal("32", knobText(trackOf(ui, 1)))
             assert.is_true(trackOf(ui, 1).position > 10)
-            assert.is_false(trackOf(ui, 1).can_step[1])
             assert.is_true(trackOf(ui, 3).position < 1)
+            -- the button leading further away is gray and does nothing
+            assert.are.same({ INK, RULE }, { buttonOutline(trackOf(ui, 1), -1), buttonOutline(trackOf(ui, 1), 1) })
+            assert.are.same({ RULE, INK }, { buttonOutline(trackOf(ui, 3), -1), buttonOutline(trackOf(ui, 3), 1) })
             tapPlus(trackOf(ui, 1))
             tapMinus(trackOf(ui, 3))
             assert.are.equal(32, ui.document.configurable.font_size)
             assert.are.equal(70, ui.document.configurable.line_spacing)
-            -- the end stops, where the knobs show, take a tap
+            -- the other goes back onto the track, to its end stop
+            tapMinus(trackOf(ui, 1))
+            assert.are.equal(28, ui.document.configurable.font_size)
+            tapPlus(trackOf(ui, 3))
+            assert.are.equal(85, ui.document.configurable.line_spacing)
+            -- and so does a tap on the end stop, where the knob shows
+            ui.config:apply("font_size", 32, "SetFontSize")
+            ui.config:apply("line_spacing", 70, "SetLineSpace")
+            ui.config:refreshPanel()
+            UIManager:forceRePaint()
             tapStop(trackOf(ui, 1), 10)
             assert.are.equal(28, ui.document.configurable.font_size)
             tapStop(trackOf(ui, 3), 1)
@@ -678,8 +717,8 @@ describe("ReaderTypesetPanel module", function()
             runTasks()
             openPanel(ui)
             local t = tracks(ui.config.panel)
-            assert.are.same({ "19.5", 5.5 }, { t[1].label, t[1].position })
-            assert.are.same({ _("Font Weight"), 3.5 }, { t[2].label, t[2].position })
+            assert.are.same({ "19.5", 5.5 }, { knobText(t[1]), t[1].position })
+            assert.are.same({ _("Font Weight"), 3.5 }, { knobText(t[2]), t[2].position })
             assert.are.equal(2.5, t[3].position)
             assert.is_near(3.4, t[4].position, 1e-9)
             assert.are.equal(19.5, ui.document.configurable.font_size)
@@ -695,6 +734,27 @@ describe("ReaderTypesetPanel module", function()
             assert.are.equal(95, ui.document.configurable.line_spacing)
             tapMinus(trackOf(ui, 4))
             assert.are.same({ 18, 18 }, ui.document.configurable.h_page_margins)
+        end)
+
+        it("should leave margins set elsewhere alone when the font size changes, in landscape too", function()
+            -- as the original bottom bar sets them; {10, 10} is also upstream's default
+            ui:handleEvent(Event:new("ConfigChange", "h_page_margins", { 10, 10 }))
+            ui:handleEvent(Event:new("SetPageHorizMargins", { 10, 10 }))
+            ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_CLOCKWISE))
+            finally(function()
+                ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_UPRIGHT))
+                runTasks()
+            end)
+            runTasks()
+            assert.is_true(ui.config:marginsFor(10) > 10) -- the panel's own 10dp would widen here
+            openPanel(ui)
+            assert.are.equal(1, trackOf(ui, 4).position) -- the knob still shows where they are
+            tapPlus(trackOf(ui, 1))
+            runTasks()
+            assert.are.equal(20, ui.document.configurable.font_size)
+            assert.are.same({ 10, 10 }, ui.document.configurable.h_page_margins)
+            assert.are.equal(Screen:scaleBySize(10), ui.document:getPageMargins().left)
+            assert.is_nil(ui.doc_settings:readSetting("typeset_margin"))
         end)
 
         it("should read a margin step saved by the first round as its margin", function()

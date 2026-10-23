@@ -336,8 +336,8 @@ function ReaderTypesetPanel:marginsFor(margin)
     return margin + math.max(0, math.ceil((width - 2 * margin - MAX_LINE_CHARS * self.configurable.font_size) / 2))
 end
 
---- The margin of this book on the track: the one chosen in the panel, else the track's margin the margins
--- match, if any.
+--- Where the margin knob sits: on the margin chosen in the panel, else on the track's margin the margins match,
+-- if any. Only for the knob: margins set elsewhere stay the user's own.
 function ReaderTypesetPanel:trackMargin()
     local margin = self.ui.doc_settings:readSetting(MARGIN_KEY)
     if margin then return margin end
@@ -374,12 +374,9 @@ function ReaderTypesetPanel:onSetPageHorizMargins()
 end
 
 function ReaderTypesetPanel:setFontSize(size)
-    local margin = self:trackMargin() -- before the size changes
     self.ui:handleEvent(Event:new("BatchedUpdate")) -- a single re-render for size and margins
     self:apply("font_size", size, "SetFontSize")
-    if margin then
-        self:setMargin(margin)
-    end
+    self:applyMargin() -- the line length cap of a margin chosen in the panel depends on the size
     self.ui:handleEvent(Event:new("BatchedUpdateDone"))
 end
 
