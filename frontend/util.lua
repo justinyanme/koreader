@@ -554,6 +554,18 @@ function util.isCJKChar(c)
            (code >= 0x30000 and  code <= 0x3134F))   -- CJK Unified Ideographs Extension G
 end
 
+--- Tests whether c is a CJK character that can be part of a word: not CJK punctuation (CJK Symbols and
+--- Punctuation, CJK Compatibility Forms) nor a halfwidth or fullwidth form (fullwidth punctuation and Latin).
+--- Added by the e-ink redesign (selection popover, dictionary sheet).
+---- @string c
+---- @treturn boolean true if a CJK word character
+function util.isCJKWordChar(c)
+    if not util.isCJKChar(c) then return false end
+    local code = ffiUtil.utf8charcode(c)
+    return not ((code >= 0x3000 and code <= 0x303F) or (code >= 0xFE30 and code <= 0xFE4F)
+        or (code >= 0xFF00 and code <= 0xFFEF))
+end
+
 --- Tests whether str contains CJK characters
 ---- @string str
 ---- @treturn boolean true if CJK
