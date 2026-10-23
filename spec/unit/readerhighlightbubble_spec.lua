@@ -107,6 +107,76 @@ describe("ReaderHighlightBubble module", function()
         end)
     end
 
+    local function iconOf(widget)
+        return find(widget, function(w) return w.icon ~= nil end)
+    end
+
+    -- gray level of a screen pixel, 0 (ink) to 255 (paper)
+    local function gray(x, y)
+        return Screen.bb:getPixel(x, y):getColor8().a
+    end
+
+    local function inked(x0, y0, x1, y1)
+        for y = y0, y1 do
+            for x = x0, x1 do
+                if gray(x, y) < 0x80 then return true end
+            end
+        end
+        return false
+    end
+
+    -- Once painted: a paper card with an ink outline, and an outlined arrow from its edge to the first of the
+    -- selection's rects when above it, the last when below.
+    local function assertPopover(bubble, rects)
+        local anchor = bubble.above and rects[1] or rects[#rects]
+        local r, h = bubble.bubble_rect, bubble.arrow_h
+        local mid_y = r.y + math.floor(r.h / 2)
+        assert.is_true(gray(r.x, mid_y) < 0x80)
+        assert.is_true(gray(r.x + r.w - 1, mid_y) < 0x80)
+        assert.are.equal(0xFF, gray(r.x + Screen:scaleBySize(3), mid_y))
+        assert.is_true(h > 0)
+        assert.is_true(bubble.arrow_x >= anchor.x and bubble.arrow_x < anchor.x + anchor.w)
+        local x = bubble.arrow_x
+        if bubble.above then
+            local base = r.y + r.h
+            assert.are.equal(0xFF, gray(x, base - 1)) -- the outline opens into the arrow
+            assert.are.equal(0xFF, gray(x, base + 1)) -- which is hollow
+            assert.is_true(gray(x, base + h - 1) < 0x80) -- up to its tip
+            assert.is_true(base + h <= anchor.y)
+        else
+            assert.are.equal(0xFF, gray(x, r.y))
+            assert.are.equal(0xFF, gray(x, r.y - 2))
+            assert.is_true(gray(x, r.y - h) < 0x80)
+            assert.is_true(r.y - h >= anchor.y + anchor.h)
+        end
+    end
+
+    -- Each label's cell, left to right, holds the named icon above the label, in at least 44 × 44dp.
+    local function assertIconCells(bubble, cells)
+        local prev_x = -1
+        for _, expected in ipairs(cells) do
+            local label, icon_name = expected[1], expected[2]
+            local c = cell(bubble, label)
+            assert.is_truthy(c, label)
+            assert.is_true(c.dimen.x > prev_x, label)
+            prev_x = c.dimen.x
+            assert.is_true(c.dimen.w >= Screen:scaleBySize(44) and c.dimen.h >= Screen:scaleBySize(44), label)
+            local icon = iconOf(c)
+            assert.are.equal(icon_name, icon.icon)
+            local icon_bottom = icon.dimen.y + icon.dimen.h
+            assert.is_true(icon.dimen.y < c.dimen.y + c.dimen.h / 3, label)
+            assert.is_true(inked(c.dimen.x, icon_bottom + 1, c.dimen.x + c.dimen.w - 1, c.dimen.y + c.dimen.h - 1), label)
+        end
+    end
+
+    local SELECTION_ACTIONS = {
+        { "Copy", "eink/copy" },
+        { "Highlight", "eink/highlight" },
+        { "Write note", "eink/thought" },
+        { "Look up", "eink/search" },
+        { "Search", "eink/search-text" },
+    }
+
     -- Long-press at pos0, drag to pos1 (if any), release.
     local function select(ui, pos0, pos1)
         ui.highlight:onHold(nil, { pos = pos0 })
@@ -150,6 +220,46 @@ describe("ReaderHighlightBubble module", function()
             for _, r in ipairs(refreshes) do
                 assert.are.equal("fast", r.mode)
             end
+        end)
+
+        it("should show a white popover pointing at the selection, each action an icon over its label", function()
+            select(ui, Geom:new{ x = 200, y = 300 }, Geom:new{ x = 200, y = 360 })
+            local bubble = ui.highlight.highlight_dialog
+            UIManager:forceRePaint()
+            assert.is_true(bubble.above)
+            assertPopover(bubble, ui.highlight:selectionRects())
+            assertIconCells(bubble, SELECTION_ACTIONS)
+            ui.highlight:onClose()
+        end)
+
+        it("should keep the popover 16dp from the screen edges, its arrow still on the word", function()
+            local edge = Screen:scaleBySize(16)
+            -- a word at the start of a line: above it, against the left edge
+            select(ui, Geom:new{ x = 100, y = 160 })
+            local bubble = ui.highlight.highlight_dialog
+            UIManager:forceRePaint()
+            assert.is_true(bubble.above)
+            assert.are.equal(edge, bubble.bubble_rect.x)
+            assertPopover(bubble, ui.highlight:selectionRects())
+            ui.highlight:onClose()
+            UIManager:forceRePaint()
+
+            -- a word on the first line, at its end: below it, against the right edge
+            select(ui, Geom:new{ x = 480, y = 60 })
+            bubble = ui.highlight.highlight_dialog
+            UIManager:forceRePaint()
+            assert.is_false(bubble.above)
+            assert.are.equal(Screen:getWidth() - edge, bubble.bubble_rect.x + bubble.bubble_rect.w)
+            assertPopover(bubble, ui.highlight:selectionRects())
+            ui.highlight:onClose()
+        end)
+
+        it("should run an action from a tap on its icon", function()
+            select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
+            UIManager:forceRePaint()
+            tapWidget(iconOf(cell(ui.highlight.highlight_dialog, "Highlight")))
+            assert.are.equal(1, #ui.annotation.annotations)
+            ui.highlight:onClose()
         end)
 
         it("should show the bubble, not the dictionary, for a single word", function()
@@ -205,6 +315,15 @@ describe("ReaderHighlightBubble module", function()
             local bubble = ui.highlight.highlight_dialog
             assert.are.equal(bubble, topWidget())
             assert.are.same({ { mode = "ui", region = bubble:getRefreshRegion() } }, refreshes)
+            -- the same white popover: styles, then the actions as icons over labels
+            assertPopover(bubble, ui.highlight:highlightRects(1))
+            assert.is_truthy(cell(bubble, "wave"))
+            assertIconCells(bubble, {
+                { "Write note", "eink/thought" },
+                { "Copy", "eink/copy" },
+                { "Look up", "eink/search" },
+                { "Delete", "eink/highlight-off" },
+            })
 
             tapWidget(cell(bubble, "Write note"))
             UIManager:forceRePaint()
@@ -220,6 +339,20 @@ describe("ReaderHighlightBubble module", function()
             assert.are.equal("A thought", DocSettings:open(sample_epub):readSetting("annotations")[1].note)
             ui = openReader(sample_epub)
             assert.are.equal("A thought", ui.annotation.annotations[1].note)
+        end)
+
+        it("should delete a highlight from its popover, repainting only its lines", function()
+            select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
+            tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
+            UIManager:forceRePaint()
+            local refreshes = refreshesOf(function() tapWidget(cell(ui.highlight.highlight_dialog, "Delete")) end)
+            assert.are.equal(0, #ui.annotation.annotations)
+            assert.is_nil(ui.highlight.highlight_dialog)
+            assert.are.equal(ui, topWidget())
+            assertNoFullScreen(refreshes)
+            for _, r in ipairs(refreshes) do
+                assert.are.equal("ui", r.mode)
+            end
         end)
 
         it("should drop a highlight made for a note that is cancelled", function()
@@ -372,6 +505,9 @@ describe("ReaderHighlightBubble module", function()
             select(ui, Geom:new{ x = 430, y = 210 }, Geom:new{ x = 60, y = 236 })
             local bubble = ui.highlight.highlight_dialog
             assert.are.equal(bubble, topWidget())
+            UIManager:forceRePaint()
+            assertPopover(bubble, ui.highlight:selectionRects())
+            assertIconCells(bubble, SELECTION_ACTIONS)
             tapWidget(cell(bubble, "Highlight"))
             assert.are.equal(1, #ui.annotation.annotations)
             local item = ui.annotation.annotations[1]

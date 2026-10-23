@@ -21,8 +21,6 @@ return {
     ink_3 = Blitbuffer.COLOR_GRAY_9, -- disabled, chevrons, fine print
     rule = Blitbuffer.COLOR_GRAY_D, -- row dividers, disabled outlines
     mark = Blitbuffer.COLOR_LIGHT_GRAY, -- marker highlight fill
-    bubble_rule = Blitbuffer.COLOR_GRAY_4, -- dividers inside the black selection bubble
-    marker_on_ink = Blitbuffer.COLOR_DARK_GRAY, -- marker swatch on the black bubble
     -- typographic covers only
     cover_stock = Blitbuffer.COLOR_GRAY_D,
     cover_tint = Blitbuffer.COLOR_GRAY_B,
