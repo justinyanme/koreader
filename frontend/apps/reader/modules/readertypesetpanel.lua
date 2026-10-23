@@ -157,6 +157,7 @@ local FontCard = InputContainer:extend{
     width = nil,
     name = nil,
     face = nil,
+    face_index = nil,
     selected = false,
     callback = nil,
 }
@@ -165,17 +166,24 @@ function FontCard:init()
     local h = Screen:scaleBySize(44)
     local bw = Size.border.default
     self.dimen = Geom:new{ w = self.width, h = h }
+    local label = TextWidget:new{
+        text = self.name, face = self.face or Font:getFace("ui_label"),
+        fgcolor = self.selected and Palette.paper or Palette.ink,
+        max_width = self.width - 2 * (bw + Screen:scaleBySize(6)),
+    }
+    local size = label.face.orig_size / Font.ui_scale
+    while label:isTruncated() and size > 12 do
+        size = math.max(12, size - 1)
+        label:free()
+        label.face = Font:getFace(label.face.realname, size * Font.ui_scale, self.face_index)
+    end
     self[1] = FrameContainer:new{
         bordersize = bw, padding = 0, radius = Screen:scaleBySize(9),
         color = self.selected and Palette.ink or Palette.mark,
         background = self.selected and Palette.ink or Palette.mark,
         CenterContainer:new{
             dimen = Geom:new{ w = self.width - 2 * bw, h = h - 2 * bw },
-            TextWidget:new{
-                text = self.name, face = self.face or Font:getFace("ui_label"),
-                fgcolor = self.selected and Palette.paper or Palette.ink,
-                max_width = self.width - 2 * (bw + Screen:scaleBySize(6)),
-            },
+            label,
         },
     }
     self.ges_events = { TapSelect = { GestureRange:new{ ges = "tap", range = self.dimen } } }
@@ -518,6 +526,31 @@ end
 ------------------------------------------------------------------------
 -- Fonts
 
+local font_styles = {
+    regular = true, medium = true, bold = true, italic = true, oblique = true,
+    light = true, thin = true, black = true, heavy = true, semibold = true,
+    demibold = true, extralight = true, ultralight = true, extrabold = true,
+}
+local font_regions = { SC = "SC", TC = "TC", JP = "JP", J = "JP", KR = "KR", K = "KR", HK = "HK", HC = "HK" }
+
+local function fontFamily(face)
+    local name = face
+    while true do
+        local family, style = name:match("^(.-)[%s%-]+(%a+)$")
+        if not style or not font_styles[style:lower()] then break end
+        name = family
+    end
+    local family, suffix = name:match("^(.-) (%u+)$")
+    local region = font_regions[suffix]
+    if region then name = family end
+    if name == "Noto Sans CJK" or name == "Source Han Sans" then
+        name = "Source Han Sans"
+    elseif name == "Noto Serif CJK" or name == "Source Han Serif" then
+        name = "Source Han Serif"
+    end
+    return name, region
+end
+
 --- Whether the book is CJK: by its typography language, or by the UI language when that language is only
 -- a fallback (no language chosen by the user, none usable in the book: txt, "und", missing).
 function ReaderTypesetPanel:isCJK()
@@ -544,18 +577,52 @@ function ReaderTypesetPanel:fontCards(width)
     local card_w = math.floor((width - (columns - 1) * gap) / columns)
     local cre = require("document/credocument"):engineInit()
     local available = cre.getFontFaces()
+    local language = (_.current_lang or "en"):lower():gsub("-", "_")
+    local region = language:match("^ja") and "JP" or language:match("^ko") and "KR"
+        or (language == "zh_tw" or language:find("hant", 1, true)) and "TC"
+        or (language == "zh_hk" or language == "zh_mo") and "HK" or "SC"
+    local representatives, ranks = {}, {}
+    local families = {}
+    for _, face in ipairs(available) do
+        local family, variant = fontFamily(face)
+        families[face] = family
+        if not face:lower():find("mono", 1, true) then
+            local rank = variant == region and 1 or not variant and 2 or variant == "SC" and 3 or 4
+            if not ranks[family] or rank < ranks[family] then
+                representatives[family], ranks[family] = face, rank
+            end
+        end
+    end
+    local display_names = {
+        ["Source Han Sans"] = _("Source Han Sans"),
+        ["Source Han Serif"] = _("Source Han Serif"),
+        FZLanTingHei = _("Fangzheng Lanting Hei"),
+        FZZhunYuan = _("Fangzheng Zhun Yuan"),
+        FZKai = _("Fangzheng Kai"),
+        FZHei = _("Fangzheng Hei"),
+        FZShuSong = _("Fangzheng Shu Song"),
+        FZSong = _("Fangzheng Song"),
+        FZFangSong = _("Fangzheng Fang Song"),
+        FZLiShu = _("Fangzheng Li Shu"),
+        FZWeiBei = _("Fangzheng Wei Bei"),
+    }
     local system_face = FontList:getSystemFontFace()
     local current = self.ui.font.font_face
     local function fontDetails(face)
         local file, index = cre.getFontFaceFilenameAndFaceIndex(face)
         if not file then file, index = cre.getFontFaceFilenameAndFaceIndex(face, nil, true) end
-        local name = face == system_face and _("System font")
-            or (file and FontList:getLocalizedFontName(file, index)) or face
+        local family = families[face] or fontFamily(face)
+        local name = display_names[family] or display_names[family:match("^(FZ%a+)")]
+            or (file and FontList:getLocalizedFontName(file, index, true)) or family
+        name = fontFamily(name)
+        if face == system_face then name = _("System font") end
         return name, file, index
     end
     local faces, seen = {}, {}
     local function add(face)
         if not face or seen[face] or not util.arrayContains(available, face) then return end
+        -- The system-font shortcut retains its device source; named family cards follow the UI language.
+        if face ~= system_face and representatives[families[face]] ~= face then return end
         local name = face:lower()
         for _, pattern in ipairs{ "clock", "emoji", "symbol", "dancing", "coming soon", "cutive", "script", "dingbat" } do
             if name:find(pattern, 1, true) then return end
@@ -605,6 +672,7 @@ function ReaderTypesetPanel:fontCards(width)
             table.insert(row, FontCard:new{
                 width = card_w, name = name,
                 face = file and Font:getFace(file, 14 * Font.ui_scale, index),
+                face_index = index,
                 selected = current == face,
                 callback = function()
                     self.ui.font:onSetFont(face)

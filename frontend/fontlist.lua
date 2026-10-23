@@ -295,14 +295,17 @@ function FontList:dumpFontList()
 end
 
 -- Try to determine the localized font name
-function FontList:getLocalizedFontName(file, index)
+function FontList:getLocalizedFontName(file, index, family_only)
     local lang = G_reader_settings:readSetting("language")
     if not lang then return end
     lang = lang:lower():gsub("_","-")
     local altname = self.fontinfo[file]
     altname = altname and altname[index+1]
     altname = altname and altname.names and (altname.names[lang] or altname.names[lang:match("%w+")])
-    altname = altname and (altname[tonumber(HB.HB_OT_NAME_ID_FULL_NAME)] or altname[tonumber(HB.HB_OT_NAME_ID_FONT_FAMILY)])
+    -- Older HarfBuzz bindings omit the typographic family constant (OpenType name ID 16).
+    altname = altname and (family_only
+        and (altname[16] or altname[tonumber(HB.HB_OT_NAME_ID_FONT_FAMILY)])
+        or altname[tonumber(HB.HB_OT_NAME_ID_FULL_NAME)] or altname[tonumber(HB.HB_OT_NAME_ID_FONT_FAMILY)])
     if not altname then return end -- ensure nil
     return altname
 end

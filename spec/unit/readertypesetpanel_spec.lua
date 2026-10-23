@@ -1322,6 +1322,151 @@ describe("ReaderTypesetPanel module", function()
         end)
     end)
 
+    describe("with regional font families", function()
+        local ui, cre, available, paths, catalog, filenames, lang, recent, selected, setting_lang, metadata_path, metadata_info
+        local function add(face, real_face)
+            paths[face] = { cre.getFontFaceFilenameAndFaceIndex(real_face or "Noto Sans CJK SC") }
+            table.insert(available, face)
+        end
+        local function cards()
+            local result, seen = {}, {}
+            find(ui.config.panel, function(w)
+                if w.name and w.callback and not seen[w] then
+                    table.insert(result, w)
+                    seen[w] = true
+                end
+                return false
+            end)
+            return result
+        end
+        before_each(function()
+            cre = require("document/credocument"):engineInit()
+            available, paths = cre.getFontFaces(), {}
+            lang = _.current_lang
+            setting_lang = G_reader_settings:readSetting("language")
+            recent = G_reader_settings:readSetting("cre_fonts_recently_selected")
+            selected = G_reader_settings:readSetting("cre_fonts_explicitly_selected")
+        end)
+        after_each(function()
+            if ui then closeReader(ui); ui = nil end
+            if catalog then catalog:revert(); catalog = nil end
+            if filenames then filenames:revert(); filenames = nil end
+            _.changeLang(lang)
+            G_reader_settings:saveSetting("language", setting_lang)
+            if metadata_path then
+                require("fontlist").fontinfo[metadata_path] = metadata_info
+                metadata_path, metadata_info = nil, nil
+            end
+            G_reader_settings:saveSetting("cre_fonts_recently_selected", recent)
+            G_reader_settings:saveSetting("cre_fonts_explicitly_selected", selected)
+        end)
+        local function openCatalog()
+            local get_filename = cre.getFontFaceFilenameAndFaceIndex
+            catalog = stub(cre, "getFontFaces", function() return require("util").tableDeepCopy(available) end)
+            filenames = stub(cre, "getFontFaceFilenameAndFaceIndex", function(face, ...)
+                if paths[face] then return unpack(paths[face]) end
+                return get_filename(face, ...)
+            end)
+            local choices = {}
+            for face in pairs(paths) do choices[face] = true end
+            G_reader_settings:saveSetting("cre_fonts_recently_selected", available)
+            G_reader_settings:saveSetting("cre_fonts_explicitly_selected", choices)
+            ui = openReader(sample_epub)
+            openPanel(ui)
+        end
+
+        it("should choose one regional face per UI language and leave Mono and other regions in More", function()
+            local variants = {
+                { "zh_CN", "SC", "Noto Sans" }, { "zh_TW", "TC", "Noto Serif" },
+                { "ja", "JP", "FreeSans" }, { "ko", "KR", "FreeSerif" }, { "zh_HK", "HK", "Droid Sans Mono" },
+            }
+            for __, v in ipairs(variants) do
+                add("Noto Serif CJK " .. v[2], v[3])
+                add("Noto Sans CJK " .. v[2], v[3])
+            end
+            add("Source Han Serif SC")
+            add("Noto Serif Mono CJK SC")
+            openCatalog()
+            for __, v in ipairs(variants) do
+                _.current_lang = v[1]
+                ui.config:refreshPanel()
+                UIManager:forceRePaint()
+                local count, sans_count = 0, 0
+                for ___, card in ipairs(cards()) do
+                    assert.is_nil(card.name:find("Mono", 1, true))
+                    if card.name == _("System font") then
+                        assert.are.equal(paths["Noto Sans CJK SC"][1], card.face.realname)
+                    end
+                    if card.name == _("Source Han Sans") then
+                        sans_count = sans_count + 1
+                        assert.are.equal(paths["Noto Sans CJK " .. v[2]][1], card.face.realname)
+                    end
+                    if card.name == _("Source Han Serif") then
+                        count = count + 1
+                        assert.are.equal(paths["Noto Serif CJK " .. v[2]][1], card.face.realname)
+                    end
+                end
+                assert.are.equal(1, count)
+                assert.are.equal(v[2] == "SC" and 0 or 1, sans_count)
+            end
+            tapWidget(fontCard(ui.config.panel, _("View more") .. " ›"))
+            for __, face in ipairs{ "Noto Serif CJK SC", "Noto Serif CJK TC", "Noto Serif Mono CJK SC", "Source Han Serif SC" } do
+                local present = false
+                for ___, item in ipairs(ui.font.face_table) do
+                    if item.menu_item_id == face then present = true end
+                end
+                assert.is_true(present)
+            end
+        end)
+
+        it("should retain a user font's localized typographic family without its style suffix", function()
+            _.changeLang("zh_CN")
+            G_reader_settings:saveSetting("language", "zh_CN")
+            add("Reader Family Regular", "FreeSerif")
+            metadata_path = paths["Reader Family Regular"][1]
+            local FontList = require("fontlist")
+            metadata_info = FontList.fontinfo[metadata_path]
+            FontList.fontinfo[metadata_path] = require("util").tableDeepCopy(metadata_info)
+            local info = FontList.fontinfo[metadata_path][paths["Reader Family Regular"][2] + 1]
+            info.names["zh-cn"] = { [1] = "旧字族名", [4] = "完整字体名", [16] = "示例字族 Medium" }
+            openCatalog()
+            local card = fontCard(ui.config.panel, "示例字族")
+            assert.is_truthy(card)
+            assert.are.equal(metadata_path, card.face.realname)
+        end)
+
+        it("should localize Chinese family names, remove styles and shrink before ellipsis", function()
+            _.changeLang("zh_CN")
+            local names = {
+                { "FZLanTingHei-M-GB18030", "方正兰亭黑" }, { "FZZhunYuan_GB18030", "方正准圆" },
+                { "FZKai-Z03", "方正楷体" }, { "FZShuSong-Z01", "方正书宋" },
+                { "Noto Serif CJK SC", "思源宋体" }, { "Source Han Sans SC", "思源黑体" },
+                { "Readable Family Medium Italic", "Readable Family" },
+                { "An Extremely Long Reading Family Regular", "An Extremely Long Reading Family" },
+            }
+            for __, pair in ipairs(names) do add(pair[1]) end
+            table.insert(available, 1, "Source Han Sans SC")
+            openCatalog()
+            for __, pair in ipairs(names) do
+                local card = fontCard(ui.config.panel, pair[2])
+                assert.is_truthy(card)
+                local text = find(card, function(w) return w.text == pair[2] end)
+                assert.are.equal(paths[pair[1]][1], text.face.realname)
+                if pair[2] == "Readable Family" then
+                    assert.is_true(text.face.orig_size < 14)
+                    assert.is_false(text:isTruncated())
+                elseif pair[2] == "An Extremely Long Reading Family" then
+                    assert.are.equal(12, text.face.orig_size)
+                    assert.is_true(text:isTruncated())
+                else
+                    assert.is_false(text:isTruncated())
+                end
+            end
+            -- The actual bundled CJK face is still rendered as the system-font card on non-Android.
+            assert.is_truthy(fontCard(ui.config.panel, _("System font")))
+        end)
+    end)
+
     describe("with a book without a language", function()
         local ui, lang
         setup(function()
