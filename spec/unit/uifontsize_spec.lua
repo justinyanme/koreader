@@ -237,7 +237,7 @@ describe("Interface font size", function()
     -- Taps the track of `page` on step `i`.
     local function tapSize(page, i)
         local control = page.control
-        tapAt(control.dimen.x + control:stepX(i), control.track_rect.y + math.floor(control.track_rect.h / 2))
+        tapAt(control.dimen.x + control:stopX(i), control.track_rect.y + math.floor(control.track_rect.h / 2))
     end
 
     -- the size of a face of `role` (at its own size, or at `size`), as the interface font size makes it at `scale`
@@ -320,15 +320,15 @@ describe("Interface font size", function()
             assert.is_truthy(findText(page, _("Tap the slider to set the interface font size")))
             assert.is_truthy(findText(page, _("The size of a book's text is set in the reader, and this setting does not change it.")))
             -- the default size, second of five, both buttons in ink; one page: the capsule is gray
-            assert.are.equal(2, page.control.step)
-            assert.are.equal(_("Default"), page.control.name_label.text)
-            assert.is_true(page.control.minus_enabled and page.control.plus_enabled)
+            assert.are.equal(2, page.control.position)
+            assert.are.equal(_("Default"), page.control.caption)
+            assert.is_true(page.control.can_step[-1] and page.control.can_step[1])
             assert.is_false(page.bar.capsule.prev_enabled or page.bar.capsule.next_enabled)
             -- the track is ink up to the knob and gray after it, near the bottom bar
             local control = page.control
             local cy = control.track_rect.y + math.floor(control.track_rect.h / 2)
             assert.is_true(cy < page.bar.dimen.y and cy > page.bar.dimen.y - Screen:scaleBySize(60))
-            local knob_x = control.dimen.x + control:stepX(2)
+            local knob_x = control.dimen.x + control:stopX(2)
             assert.are.equal(Palette.ink:getColor8().a, gray(knob_x - Screen:scaleBySize(20), cy - Screen:scaleBySize(12)))
             assert.are.equal(Palette.mark:getColor8().a, gray(knob_x + Screen:scaleBySize(20), cy - Screen:scaleBySize(12)))
             assert.are.equal(Palette.paper:getColor8().a, gray(knob_x, cy))
@@ -339,7 +339,7 @@ describe("Interface font size", function()
             local refreshes = refreshesOf(function() tap(page.control.plus_rect) end)
             assert.are.equal(1.1, Font:getUIScale())
             assert.are.equal(1.1, G_reader_settings:readSetting("ui_font_scale"))
-            assert.are.equal(names[3], page.control.name_label.text)
+            assert.are.equal(names[3], page.control.caption)
             -- the page itself is rebuilt in the new size, and repainted above its bottom bar with "ui"
             local heading = findText(page, _("Tap the slider to set the interface font size"))
             assert.is_near(roleSize("ui_title", 1.1), heading.face.orig_size, 1e-9)
@@ -349,14 +349,14 @@ describe("Interface font size", function()
             -- the last size from the track; + is then gray and does nothing
             tapSize(page, 5)
             assert.are.equal(1.35, Font:getUIScale())
-            assert.are.equal(names[5], page.control.name_label.text)
-            assert.is_false(page.control.plus_enabled)
+            assert.are.equal(names[5], page.control.caption)
+            assert.is_false(page.control.can_step[1])
             refreshes = refreshesOf(function() tap(page.control.plus_rect) end)
             assert.are.same({}, refreshes)
             assert.are.equal(1.35, Font:getUIScale())
             -- a tap near a step picks it; a tap on the current one changes nothing
             local control = page.control
-            tapAt(control.dimen.x + control:stepX(4) + Screen:scaleBySize(10), control.track_rect.y + 2)
+            tapAt(control.dimen.x + control:stopX(4) + Screen:scaleBySize(10), control.track_rect.y + 2)
             assert.are.equal(1.2, Font:getUIScale())
             refreshes = refreshesOf(function() tapSize(page, 4) end)
             assert.are.same({}, refreshes)
@@ -365,8 +365,8 @@ describe("Interface font size", function()
             tap(page.control.minus_rect)
             tap(page.control.minus_rect)
             assert.are.equal(0.9, Font:getUIScale())
-            assert.are.equal(names[1], page.control.name_label.text)
-            assert.is_false(page.control.minus_enabled)
+            assert.are.equal(names[1], page.control.caption)
+            assert.is_false(page.control.can_step[-1])
             refreshes = refreshesOf(function() tap(page.control.minus_rect) end)
             assert.are.same({}, refreshes)
             assert.are.equal(0.9, G_reader_settings:readSetting("ui_font_scale"))
@@ -607,12 +607,20 @@ describe("Interface font size", function()
             assert.is_near(roleSize("ui_body", 1.35), findText(settings, _("Interface font size")).face.orig_size, 1e-9)
             assertFits(settings)
             settings:closeMenu(true)
-            -- the toolbar's labels, and its panels: more, progress, brightness and the typeset panel
+            -- the toolbar's panels (its bars hold icons only): more, brightness from more's first tile,
+            -- progress and the typeset panel
             tap(Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() })
-            assert.are.equal(Screen:scaleBySize(roleSize("ui_caption", 1.35)), findText(ui.menu.bars, _("Progress")).face.size)
-            for __, icon in ipairs{ "eink/more", "eink/progress", "eink/light", "eink/font" } do
-                local entry = findWidget(ui.menu.bars, function(w) return w.icon == icon and w.callback ~= nil end)
-                tap(entry.dimen)
+            local function entry(icon)
+                return findWidget(ui.menu.bars, function(w) return w.icon == icon and w.callback ~= nil end)
+            end
+            tap(entry("eink/more").dimen)
+            assert.are.equal("more", ui.menu.panel_name)
+            assertFits(ui.menu.panel)
+            tap(findWidget(ui.menu.panel, function(w) return w.label == _("Brightness") and w.callback ~= nil end).dimen)
+            assert.are.equal("brightness", ui.menu.panel_name)
+            assertFits(ui.menu.panel)
+            for __, icon in ipairs{ "eink/progress", "eink/font" } do
+                tap(entry(icon).dimen)
                 assert.is_truthy(ui.menu.panel)
                 assertFits(ui.menu.panel)
             end

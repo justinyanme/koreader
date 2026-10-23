@@ -1,12 +1,12 @@
 --[[--
-排版面板 of the e-ink redesign (see DESIGN.md, Panels): font size, font, line
-spacing and margins of reflowable books in one panel between the page and the
-reader toolbar's bottom bar, opened from the toolbar's "Font" ("ShowConfigMenu").
-The bottom bar keeps showing; the top bar hides, as in WeChat Read. The pill at
-the right of its title row opens the layout options page (weight, render mode,
-embedded fonts and styles, and links into the existing hyphenation and style
-tweak menus), nested in the toolbar: the bottom bar then holds only a back
-arrow, back to the panel.
+排版面板 of the e-ink redesign (see DESIGN.md, Panels): tracks for the font
+size, weight, line spacing and margins of reflowable books, then the font, in
+one panel between the page and the reader toolbar's bottom bar, opened from the
+toolbar's "Font" ("ShowConfigMenu"). The bottom bar keeps showing; the top bar
+hides, as in WeChat Read. The pill at the right of its title row opens the
+layout options page (render mode, embedded fonts and styles, and links into the
+existing hyphenation and style tweak menus), nested in the toolbar: the bottom
+bar then holds only a back arrow, back to the panel.
 
 Replaces ReaderConfig (apps/replacements reader_config slot) for reflowable
 books on touch devices. Fixed-layout books and devices without touch keep the
@@ -51,10 +51,11 @@ local T = require("ffi/util").template
 local _ = require("gettext")
 local C_ = _.pgettext
 
--- Values of the panel's steps; DESIGN.md (Typography, Layout) records them.
+-- Stops of the panel's tracks; DESIGN.md (Tracks) records them. Font weight uses the engine's own steps (creoptions).
 local FONT_SIZES = { 15, 16, 17, 18, 19, 20, 22, 24, 26, 28 }
-local LINE_SPACINGS = { 105, 125, 145 } -- % of the font's line height: about 1.55 / 1.8 / 2.1 em with CJK faces
-local MARGINS = { 18, 28, 44 } -- dp, left and right
+-- % of the font's line height; the first round's 105 / 125 / 145 measure about 1.55 / 1.8 / 2.1 em with CJK faces.
+local LINE_SPACINGS = { 85, 95, 105, 115, 125, 135, 145, 155, 165 }
+local MARGINS = { 10, 14, 18, 23, 28, 36, 44, 56, 70 } -- dp, left and right; with the first round's 18 / 28 / 44
 local MAX_LINE_CHARS = 38 -- CJK characters per line
 -- 思源宋体, not bundled. Only the first face of a .ttc collection is listed by crengine (as in ReaderFont).
 local SERIF_FACES = { "Source Han Serif SC", "Noto Serif CJK SC", "Noto Serif SC", "Source Han Serif CN", "Source Han Serif" }
@@ -200,8 +201,8 @@ end
 -- The 44dp top margin leaves room for the chapter header.
 local DESIGN_DEFAULTS = {
     { "copt_font_size", 19, "DCREREADER_CONFIG_DEFAULT_FONT_SIZE" },
-    { "copt_line_spacing", LINE_SPACINGS[2], "DCREREADER_CONFIG_LINE_SPACE_PERCENT_MEDIUM" },
-    { "copt_h_page_margins", { MARGINS[2], MARGINS[2] }, "DCREREADER_CONFIG_H_MARGIN_SIZES_MEDIUM" },
+    { "copt_line_spacing", 125, "DCREREADER_CONFIG_LINE_SPACE_PERCENT_MEDIUM" },
+    { "copt_h_page_margins", { 28, 28 }, "DCREREADER_CONFIG_H_MARGIN_SIZES_MEDIUM" },
     { "copt_t_page_margin", 44, "DCREREADER_CONFIG_T_MARGIN_SIZES_LARGE" },
 }
 
@@ -257,7 +258,7 @@ function ReaderTypesetPanel:onSetDimensions(dimen)
     if self.ui.rolling and self.ui.postReaderReadyCallback == nil then
         -- On rotation or resize, ReaderRolling re-renders after us: batch so that its re-render is the only one.
         self.ui:handleEvent(Event:new("BatchedUpdate"))
-        self:applyMarginStep()
+        self:applyMargin()
         self.ui:handleEvent(Event:new("BatchedUpdateDone"))
     end
 end
@@ -319,13 +320,15 @@ end
 ------------------------------------------------------------------------
 -- Font size and margins
 
-local MARGIN_STEP_KEY = "typeset_margin_step" -- doc setting: the margin step chosen in the panel
+local MARGIN_KEY = "typeset_margin" -- doc setting: the margin (dp) chosen in the panel
+-- The first round saved the step of its three margins instead.
+local FIRST_ROUND_MARGIN_STEP_KEY = "typeset_margin_step"
+local FIRST_ROUND_MARGINS = { 18, 28, 44 }
 
---- Left and right margin (dp) of a margin step: the step's value, widened so that a line holds at most
--- MAX_LINE_CHARS characters at the current font size. KOReader's dp grows with the screen, so this only
+--- Left and right margin (dp) for a margin chosen in the panel: the margin, widened so that a line holds at
+-- most MAX_LINE_CHARS characters at the current font size. KOReader's dp grows with the screen, so this only
 -- widens margins in landscape or with a DPI override.
-function ReaderTypesetPanel:marginsFor(step)
-    local margin = MARGINS[step]
+function ReaderTypesetPanel:marginsFor(margin)
     if self.configurable.visible_pages == 2 then
         return margin -- ponytail: no cap in two-column mode, use the column width if it matters
     end
@@ -333,22 +336,23 @@ function ReaderTypesetPanel:marginsFor(step)
     return margin + math.max(0, math.ceil((width - 2 * margin - MAX_LINE_CHARS * self.configurable.font_size) / 2))
 end
 
---- The margin step of this book: the one chosen in the panel, else the step the margins match, if any.
-function ReaderTypesetPanel:marginStep()
-    local step = self.ui.doc_settings:readSetting(MARGIN_STEP_KEY)
-    if step then return step end
+--- Where the margin knob sits: on the margin chosen in the panel, else on the track's margin the margins match,
+-- if any. Only for the knob: margins set elsewhere stay the user's own.
+function ReaderTypesetPanel:trackMargin()
+    local margin = self.ui.doc_settings:readSetting(MARGIN_KEY)
+    if margin then return margin end
     local current = self.configurable.h_page_margins or {}
     if current[1] ~= current[2] then return end
-    for i, margin in ipairs(MARGINS) do
-        if current[1] == margin or current[1] == self:marginsFor(i) then return i end
+    for __, m in ipairs(MARGINS) do
+        if current[1] == m or current[1] == self:marginsFor(m) then return m end
     end
 end
 
---- Sets the margins of the chosen step for the current screen and font size.
-function ReaderTypesetPanel:applyMarginStep()
-    local step = self.ui.doc_settings:readSetting(MARGIN_STEP_KEY)
-    if not step then return end
-    local margin = self:marginsFor(step)
+--- Sets the margins of the chosen margin for the current screen and font size.
+function ReaderTypesetPanel:applyMargin()
+    local chosen = self.ui.doc_settings:readSetting(MARGIN_KEY)
+    if not chosen then return end
+    local margin = self:marginsFor(chosen)
     local current = self.configurable.h_page_margins or {}
     if current[1] ~= margin or current[2] ~= margin then
         self.setting_margins = true
@@ -357,55 +361,45 @@ function ReaderTypesetPanel:applyMarginStep()
     end
 end
 
-function ReaderTypesetPanel:setMarginStep(step)
-    self.ui.doc_settings:saveSetting(MARGIN_STEP_KEY, step)
-    self:applyMarginStep()
+function ReaderTypesetPanel:setMargin(margin)
+    self.ui.doc_settings:saveSetting(MARGIN_KEY, margin)
+    self:applyMargin()
 end
 
--- Margins set elsewhere (the original bottom bar, gestures) are the user's own: forget the step.
+-- Margins set elsewhere (the original bottom bar, gestures) are the user's own: forget the chosen one.
 function ReaderTypesetPanel:onSetPageHorizMargins()
     if not self.setting_margins then
-        self.ui.doc_settings:delSetting(MARGIN_STEP_KEY)
+        self.ui.doc_settings:delSetting(MARGIN_KEY)
     end
 end
 
 function ReaderTypesetPanel:setFontSize(size)
-    local step = self:marginStep() -- before the size changes
     self.ui:handleEvent(Event:new("BatchedUpdate")) -- a single re-render for size and margins
     self:apply("font_size", size, "SetFontSize")
-    if step then
-        self:setMarginStep(step)
-    end
+    self:applyMargin() -- the line length cap of a margin chosen in the panel depends on the size
     self.ui:handleEvent(Event:new("BatchedUpdateDone"))
-end
-
---- Font size one step down (-1) or up (+1) the scale: the nearest size strictly below or above the current one.
-function ReaderTypesetPanel:stepFontSize(direction)
-    local size = self.configurable.font_size
-    local target
-    for i = direction > 0 and 1 or #FONT_SIZES, direction > 0 and #FONT_SIZES or 1, direction do
-        if (FONT_SIZES[i] - size) * direction > 0 then
-            target = FONT_SIZES[i]
-            break
-        end
-    end
-    if target then
-        self:setFontSize(target)
-    end
-end
-
-local function nearestIndex(values, value)
-    local best, best_d = 1, math.huge
-    for i, v in ipairs(values) do
-        local d = math.abs(v - (value or 0))
-        if d < best_d then best, best_d = i, d end
-    end
-    return best
 end
 
 local function indexOf(values, value)
     for i, v in ipairs(values) do
         if v == value then return i end
+    end
+end
+
+--- The position of `value` on a track of `values`: its stop, or between the two around it. Past an end it goes on
+-- at the pace of the last interval, so that it is never taken for the end stop.
+local function trackPosition(values, value)
+    local i = 2
+    while i < #values and value > values[i] do
+        i = i + 1
+    end
+    return i - 1 + (value - values[i - 1]) / (values[i] - values[i - 1])
+end
+
+--- The first of `values` strictly below (direction -1) or above (+1) `value`, if any.
+local function nextValue(values, value, direction)
+    for i = direction > 0 and 1 or #values, direction > 0 and #values or 1, direction do
+        if (values[i] - value) * direction > 0 then return values[i] end
     end
 end
 
@@ -544,10 +538,38 @@ end
 ------------------------------------------------------------------------
 -- Pages
 
+--- A track (DESIGN.md, Tracks) over `t.values` at `t.value`, showing `t.label` in its knob and `t.low` and `t.high` at
+-- its ends; `t.set` applies one of the values. − and + go to the next value below or above, from a value between two
+-- of them too.
+function ReaderTypesetPanel:track(t)
+    local function set(v)
+        t.set(v)
+        self:refreshPanel()
+    end
+    return EinkControls.Track:new{
+        width = Panel.getContentWidth(),
+        count = #t.values,
+        position = trackPosition(t.values, t.value),
+        label = t.label,
+        low = t.low,
+        high = t.high,
+        on_change = function(i) set(t.values[i]) end,
+        on_step = function(direction)
+            local target = nextValue(t.values, t.value, direction)
+            if target then set(target) end
+        end,
+    }
+end
+
 function ReaderTypesetPanel:mainContent()
     local w = Panel.getContentWidth()
-    local control_w = w - LABEL_W
     local size = self.configurable.font_size
+    local weights = self:option("font_base_weight").values
+    local weight = self.configurable.font_base_weight
+    -- The weight's knob shows its step on the engine's scale (3 is regular), or the row's name between two steps.
+    local weight_step = indexOf(weights, weight)
+    local margins = self.configurable.h_page_margins
+    local small, large = C_("Typeset track", "Small"), C_("Typeset track", "Large")
     local entry = EntryPill:new{ text = _("More layout options"), callback = function() self:showPage("more") end }
     return VerticalGroup:new{
         align = "left",
@@ -558,39 +580,29 @@ function ReaderTypesetPanel:mainContent()
             },
             entry,
         },
-        VerticalSpan:new{ width = Screen:scaleBySize(4) },
-        controlRow(T(C_("Typeset panel", "Font size %1"), string.format("%g", size)),
-            EinkControls.TickStepper:new{
-                count = #FONT_SIZES, width = control_w,
-                value = nearestIndex(FONT_SIZES, size),
-                on_change = function(i)
-                    self:setFontSize(FONT_SIZES[i])
-                    self:refreshPanel()
-                end,
-                on_step = function(direction)
-                    self:stepFontSize(direction)
-                    self:refreshPanel()
-                end,
-            }),
-        controlRow(_("Font"), self:fontCards(control_w)),
-        controlRow(C_("Typeset panel", "Line spacing"),
-            EinkControls.Segmented:new{
-                labels = { C_("Line spacing", "Compact"), C_("Line spacing", "Standard"), C_("Line spacing", "Loose") }, width = control_w,
-                value = indexOf(LINE_SPACINGS, self.configurable.line_spacing),
-                on_change = function(i)
-                    self:apply("line_spacing", LINE_SPACINGS[i], "SetLineSpace")
-                    self:refreshPanel()
-                end,
-            }),
-        controlRow(_("Margins"),
-            EinkControls.Segmented:new{
-                labels = { C_("Margins", "Narrow"), C_("Margins", "Standard"), C_("Margins", "Wide") }, width = control_w,
-                value = self:marginStep(),
-                on_change = function(i)
-                    self:setMarginStep(i)
-                    self:refreshPanel()
-                end,
-            }),
+        self:track{
+            values = FONT_SIZES, value = size, label = string.format("%g", size),
+            low = small, high = large,
+            set = function(v) self:setFontSize(v) end,
+        },
+        self:track{
+            values = weights, value = weight, label = weight_step and tostring(weight_step) or _("Font Weight"),
+            low = C_("Typeset track", "Light"), high = C_("Typeset track", "Bold"),
+            set = function(v) self:apply("font_base_weight", v, "SetFontBaseWeight") end,
+        },
+        self:track{
+            values = LINE_SPACINGS, value = self.configurable.line_spacing, label = C_("Typeset panel", "Line spacing"),
+            low = C_("Typeset track", "Tight"), high = C_("Typeset track", "Loose"),
+            set = function(v) self:apply("line_spacing", v, "SetLineSpace") end,
+        },
+        -- margins set elsewhere, even uneven ones, read back at their own place
+        self:track{
+            values = MARGINS, value = self:trackMargin() or (margins[1] + margins[2]) / 2, label = _("Margins"),
+            low = small, high = large,
+            set = function(v) self:setMargin(v) end,
+        },
+        VerticalSpan:new{ width = Screen:scaleBySize(8) },
+        controlRow(_("Font"), self:fontCards(w - LABEL_W)),
     }
 end
 
@@ -617,19 +629,9 @@ end
 
 function ReaderTypesetPanel:moreContent()
     local control_w = Panel.getContentWidth() - LABEL_W
-    local weight = self:option("font_base_weight")
     local render = self:option("block_rendering_mode")
     return VerticalGroup:new{
         align = "left",
-        controlRow(_("Font Weight"),
-            EinkControls.TickStepper:new{
-                count = #weight.values, width = control_w,
-                value = nearestIndex(weight.values, self.configurable.font_base_weight),
-                on_change = function(i)
-                    self:apply("font_base_weight", weight.values[i], "SetFontBaseWeight")
-                    self:refreshPanel()
-                end,
-            }),
         controlRow(_("Render Mode"),
             EinkControls.Segmented:new{
                 labels = render.toggle, width = control_w,
@@ -656,10 +658,15 @@ end
 -- language is CJK (Source Han Sans while the serif is missing). Applied before the first render.
 function ReaderTypesetPanel:onReadSettings(config)
     ReaderConfig.onReadSettings(self, config)
-    -- The margins of the chosen step for this screen, before ReaderTypeset applies them and the first render.
-    local step = config:readSetting(MARGIN_STEP_KEY)
-    if step and self.document.koptinterface == nil then
-        local margin = self:marginsFor(step)
+    local first_round_step = config:readSetting(FIRST_ROUND_MARGIN_STEP_KEY)
+    if first_round_step then
+        config:delSetting(FIRST_ROUND_MARGIN_STEP_KEY)
+        config:saveSetting(MARGIN_KEY, FIRST_ROUND_MARGINS[first_round_step])
+    end
+    -- The margins of the chosen margin for this screen, before ReaderTypeset applies them and the first render.
+    local chosen = config:readSetting(MARGIN_KEY)
+    if chosen and self.document.koptinterface == nil then
+        local margin = self:marginsFor(chosen)
         self.configurable.h_page_margins = { margin, margin }
     end
     self.pick_default_font = self.document.koptinterface == nil
