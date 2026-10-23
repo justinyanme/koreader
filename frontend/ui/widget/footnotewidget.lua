@@ -19,6 +19,8 @@ local Screen = Device.screen
 local T = require("ffi/util").template
 local time = require("ui/time")
 
+local CARD_BORDER_SIZE = 1 -- N04 specifies a one-pixel outline, independent of DPI.
+
 -- Note: we can't use < or > in comments in the CSS, or MuPDF complains with:
 --   error: css syntax error: unterminated comment.
 -- So, HTML tags in comments are written uppercase (eg: <li> => LI)
@@ -139,10 +141,9 @@ local FootnoteWidget = InputContainer:extend{
 
 function FootnoteWidget:init()
     -- Set widget size
-    self.width = Screen:getWidth()
+    self.width = Screen:getWidth() - 2 * Screen:scaleBySize(4)
     self.height = math.floor(Screen:getHeight() * 1/3) -- will be decreased when content is smaller
-    local border_size = 1 -- N04 specifies a one-pixel outline, independent of DPI.
-    local content_width = self.width - 2 * border_size
+    local content_width = self.width - 2 * CARD_BORDER_SIZE
 
     if Device:isTouchDevice() then
         local range = Geom:new{
@@ -316,7 +317,7 @@ function FootnoteWidget:init()
     -- breaking algorithms, which will visually add to the bottom padding.
     local padding_top = Size.padding.large
     local padding_bottom = Size.padding.large
-    local htmlwidget_height = self.height - 2 * border_size - padding_top - padding_bottom
+    local htmlwidget_height = self.height - 2 * CARD_BORDER_SIZE - padding_top - padding_bottom
 
     -- We always get balanced XHTML from crengine for HTML snippets, so we
     -- pass is_xhtml=true to avoid side effects from MuPDF's HTML5 parser.
@@ -338,11 +339,12 @@ function FootnoteWidget:init()
     if single_page_height then
         -- MuPDF returns a negative bounding box for empty content.
         single_page_height = math.max(1, single_page_height)
+        -- No public resize API; CenterContainer ignore="height" lets HTML paint over the bottom outline.
         self.htmlwidget.htmlbox_widget.dimen.h = single_page_height
         self.htmlwidget.v_scroll_bar.height = single_page_height
         self.htmlwidget[1]:resetLayout()
         self.htmlwidget.dimen.h = single_page_height
-        self.height = single_page_height + 2 * border_size + padding_top + padding_bottom
+        self.height = single_page_height + 2 * CARD_BORDER_SIZE + padding_top + padding_bottom
     end
 
     local vgroup = VerticalGroup:new{
@@ -356,7 +358,7 @@ function FootnoteWidget:init()
 
     self.container = FrameContainer:new{
         background = Blitbuffer.COLOR_WHITE,
-        bordersize = border_size,
+        bordersize = CARD_BORDER_SIZE,
         radius = Screen:scaleBySize(14),
         margin = 0,
         padding = 0,

@@ -1,6 +1,6 @@
 describe("Footnote card through ReaderUI", function()
     local DocumentRegistry, DocSettings, ReaderUI, UIManager, Event, Geom, Screen, Key
-    local ui, book
+    local ui, book, original_setDirty, night_setting
 
     setup(function()
         require("commonrequire")
@@ -51,6 +51,8 @@ describe("Footnote card through ReaderUI", function()
     end
 
     before_each(function()
+        original_setDirty = UIManager.setDirty
+        night_setting = G_reader_settings:readSetting("night_mode")
         G_reader_settings:saveSetting("footnote_link_in_popup", true)
         DocSettings:open(book):purge()
         ui = ReaderUI:new{ dimen = Screen:getSize(), document = DocumentRegistry:openDocument(book) }
@@ -59,7 +61,10 @@ describe("Footnote card through ReaderUI", function()
     end)
 
     after_each(function()
+        UIManager.setDirty = original_setDirty
         while top() ~= ui do UIManager:close(top()) end
+        if Screen.bb:getInverse() == 1 then ui:handleEvent(Event:new("ToggleNightMode")) end
+        G_reader_settings:saveSetting("night_mode", night_setting)
         ui:closeDocument()
         ui:onClose()
         UIManager:forceRePaint()
@@ -73,9 +78,8 @@ describe("Footnote card through ReaderUI", function()
         local page = ui.document:getCurrentPage()
         local popup = openFootnote(1)
         local frame = popup.container
-        assert.are.equal(1, frame.bordersize)
-        assert.are.equal(Screen:scaleBySize(14), frame.radius)
-        assert.are.equal(Screen:getWidth(), frame.dimen.w)
+        assert.are.equal(Screen:scaleBySize(4), frame.dimen.x)
+        assert.are.equal(Screen:getWidth() - 2 * Screen:scaleBySize(4), frame.dimen.w)
         assert.are.equal(Screen:getHeight(), frame.dimen.y + frame.dimen.h)
         assert.is_true(frame.dimen.h < Screen:getHeight() / 3)
         assert.are.equal(frame.dimen.h, popup.height)
@@ -85,6 +89,65 @@ describe("Footnote card through ReaderUI", function()
         assert.are.equal(ui, top())
         assert.are.equal(page, ui.document:getCurrentPage())
     end)
+
+    for _, colors in ipairs{
+        { name = "day", ink = 0, paper = 255, background = 85 },
+        { name = "night", ink = 255, paper = 0, background = 170 },
+    } do
+        it("paints all borders and clear rounded corners with regional ui refreshes in " .. colors.name .. " mode", function()
+            if colors.name == "night" then
+                ui:handleEvent(Event:new("ToggleNightMode"))
+                UIManager:forceRePaint()
+                assert.are.equal(1, Screen.bb:getInverse())
+            end
+            local refreshes = {}
+            UIManager.setDirty = function(self, widget, mode, region, ...)
+                if mode then table.insert(refreshes, { mode = mode, region = region }) end
+                return original_setDirty(self, widget, mode, region, ...)
+            end
+            local function assertCardRefresh(rect)
+                local count = 0
+                for _, refresh in ipairs(refreshes) do
+                    local mode, region = refresh.mode, refresh.region
+                    if type(mode) == "function" then mode, region = mode() end
+                    assert.are_not.equal("full", mode)
+                    assert.is_nil(mode:match("^flash"))
+                    if region == rect then
+                        assert.are.equal("ui", mode)
+                        count = count + 1
+                    end
+                end
+                assert.are.equal(1, count)
+            end
+            local popup = openFootnote(1)
+            local r = popup.container.dimen
+            assertCardRefresh(r)
+
+            -- Repaint the opened card over a dark page so unpainted corners cannot hide in white.
+            Screen.bb:fill(require("ffi/blitbuffer").Color8(85))
+            popup:paintTo(Screen.bb, 0, 0)
+            local function pixel(x, y) return Screen.bb:getPixelP(x, y)[0]:getColor8().a end
+            local right, bottom = r.x + r.w - 1, r.y + r.h - 1
+            local mid_x, mid_y = r.x + math.floor(r.w / 2), r.y + math.floor(r.h / 2)
+            assert.are.equal(colors.ink, pixel(mid_x, r.y))
+            assert.are.equal(colors.ink, pixel(r.x, mid_y))
+            assert.are.equal(colors.ink, pixel(right, mid_y))
+            assert.are.equal(colors.ink, pixel(mid_x, bottom))
+            assert.are.equal(colors.paper, pixel(mid_x, r.y + 2))
+            for _, corner in ipairs{
+                { r.x, r.y }, { right, r.y }, { r.x + 1, r.y + 1 }, { right - 1, r.y + 1 },
+                { r.x, bottom }, { right, bottom }, { r.x + 1, bottom - 1 }, { right - 1, bottom - 1 },
+            } do
+                assert.are.equal(colors.background, pixel(corner[1], corner[2]))
+            end
+
+            refreshes = {}
+            UIManager:sendEvent(Event:new("KeyPress", Key:new("Back", {})))
+            UIManager:forceRePaint()
+            assert.are.equal(ui, top())
+            assertCardRefresh(r)
+        end)
+    end
 
     it("pages a long note with gestures and keys, then returns without moving the reader", function()
         local page = ui.document:getCurrentPage()
