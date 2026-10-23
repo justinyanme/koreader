@@ -94,18 +94,13 @@ describe("Reading fonts from the user's fonts folder", function()
                     return get_filename(face, ...)
                 end)
                 local ui = open()
-                -- Model genuine recent choices, not the original menu's automatically discovered entries.
-                G_reader_settings:saveSetting("cre_fonts_recently_selected", { "Noto Serif", "Dancing Script" })
-                ui:handleEvent(Event:new("CloseConfigMenu"))
-                ui:handleEvent(Event:new("ShowConfigMenu"))
-                UIManager:forceRePaint()
                 local names = {}
                 find(ui.config.panel, function(w)
                     if w.name and w.callback then table.insert(names, w.name) end
                     return false
                 end)
                 assert.are.equal("System font", names[1])
-                assert.are.equal("Noto Serif", names[2])
+                assert.are.equal("FreeSerif", names[2])
                 assert.is_true(require("util").arrayContains(names, "FreeSerif") < require("util").arrayContains(names, "FreeSans"))
                 for _, face in ipairs(decorative) do
                     assert.is_false(require("util").arrayContains(names, face))
@@ -130,12 +125,47 @@ describe("Reading fonts from the user's fonts folder", function()
                 assert.are.equal("FreeSerif", ui.font.font_face)
                 assert.are.equal("FreeSerif", ui.document:getFontFace())
                 assert.are.equal(not opt_out, G_reader_settings:readSetting("system_fonts"))
+                assert.is_true(G_reader_settings:readSetting("cre_fonts_explicitly_selected").FreeSerif)
                 close(ui)
                 ui = open()
                 assert.are.equal("FreeSerif", ui.font.font_face)
                 assert.are.equal("FreeSerif", ui.document:getFontFace())
                 card = find(ui.config.panel, function(w) return w.name == "FreeSerif" and w.callback end)
                 assert.is_true(card.selected)
+                local reordered = {}
+                find(ui.config.panel, function(w)
+                    if w.name and w.callback then table.insert(reordered, w.name) end
+                    return false
+                end)
+                assert.are.equal("FreeSerif", reordered[2])
+                card = find(ui.config.panel, function(w) return w.name == "Noto Serif" and w.callback end)
+                UIManager:sendEvent(Event:new("Gesture", {
+                    ges = "tap", pos = Geom:new{ x = card.dimen.x + card.dimen.w / 2, y = card.dimen.y + card.dimen.h / 2 },
+                }))
+                UIManager:forceRePaint()
+                reordered = {}
+                find(ui.config.panel, function(w)
+                    if w.name and w.callback then table.insert(reordered, w.name) end
+                    return false
+                end)
+                assert.are.same({ "System font", "Noto Serif", "FreeSerif" }, { reordered[1], reordered[2], reordered[3] })
+                assert.are.equal("Noto Serif", ui.document:getFontFace())
+                for _, item in ipairs(ui.font:getFontSettingsTable()) do
+                    if item.text == "Sort fonts by recently selected" then item.hold_callback() end
+                end
+                local confirm = UIManager._window_stack[#UIManager._window_stack].widget
+                assert.are.equal("Clear", confirm.ok_text)
+                confirm.ok_callback()
+                UIManager:close(confirm)
+                assert.is_nil(G_reader_settings:readSetting("cre_fonts_explicitly_selected"))
+                close(ui)
+                ui = open()
+                reordered = {}
+                find(ui.config.panel, function(w)
+                    if w.name and w.callback then table.insert(reordered, w.name) end
+                    return false
+                end)
+                assert.are.equal("FreeSerif", reordered[2])
                 close(ui)
             end, debug.traceback)
             local result = assert(io.open(result_path, "w"))

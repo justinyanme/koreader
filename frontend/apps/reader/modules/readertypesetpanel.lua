@@ -564,7 +564,10 @@ function ReaderTypesetPanel:fontCards(width)
         table.insert(faces, face)
     end
     add(system_face)
-    for _, face in ipairs(G_reader_settings:readSetting("cre_fonts_recently_selected", {})) do add(face) end
+    local selected = G_reader_settings:readSetting("cre_fonts_explicitly_selected", {})
+    for _, face in ipairs(G_reader_settings:readSetting("cre_fonts_recently_selected", {})) do
+        if selected[face] then add(face) end
+    end
     local groups = { {}, {}, {}, {} } -- Chinese, user, bundled, other system fonts
     for _, face in ipairs(available) do
         if not seen[face] then

@@ -732,6 +732,7 @@ Do you want to clear the history of selected fonts?]]),
                 ok_text = _("Clear"),
                 ok_callback = function()
                     G_reader_settings:delSetting("cre_fonts_recently_selected")
+                    G_reader_settings:delSetting("cre_fonts_explicitly_selected")
                     -- Recreate it now, sorted alphabetically (we may not go visit
                     -- and refresh the font menu until quit, but we want to be able
                     -- to notice newly added fonts at next startup).
@@ -826,6 +827,10 @@ This setting allows scaling all monospace fonts by this percentage so they can f
 end
 
 function ReaderFont:addToRecentlySelectedList(face)
+    -- The recent list also tracks discovered fonts; distinguish actual choices without discarding that catalog.
+    local selected = G_reader_settings:readSetting("cre_fonts_explicitly_selected", {})
+    selected[face] = true
+    G_reader_settings:saveSetting("cre_fonts_explicitly_selected", selected)
     local idx = util.arrayContains(self.fonts_recently_selected, face)
     if idx then
         table.remove(self.fonts_recently_selected, idx)

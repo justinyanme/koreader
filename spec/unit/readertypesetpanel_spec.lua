@@ -433,15 +433,45 @@ describe("ReaderTypesetPanel module", function()
             ui.menu:hideToolbar()
         end)
 
+        it("should select a font by name from More and show it selected when reopening", function()
+            local panel = openPanel(ui)
+            local xpointer = ui.rolling:getBookLocation()
+            tapWidget(fontCard(panel, _("View more") .. " ›"))
+            UIManager:forceRePaint()
+            local menu = topWidget()[1]
+            for __ = 2, menu.page do
+                tapWidget(menu.page_info_left_chev)
+                UIManager:forceRePaint()
+            end
+            local item
+            for __ = 1, menu.page_num do
+                item = find(menu, function(w) return w.item and w.item.menu_item_id == "FreeSerif" and w.dimen end)
+                if item then break end
+                tapWidget(menu.page_info_right_chev)
+                UIManager:forceRePaint()
+            end
+            assert.is_truthy(item)
+            tapWidget(item)
+            runTasks()
+            UIManager:forceRePaint()
+            back()
+            assert.are.equal("FreeSerif", ui.document:getFontFace())
+            assert.are.equal(xpointer, ui.rolling:getBookLocation())
+            assert.are.equal(ui.document:getCurrentPage(), ui.document:getPageFromXPointer(xpointer))
+            openPanel(ui)
+            assert.is_true(fontCard(ui.config.panel, "FreeSerif").selected)
+            ui.menu:hideToolbar()
+        end)
+
         it("should apply profile and gesture SetFont events through the registered engine fonts", function()
             local xpointer = ui.rolling:getBookLocation()
-            ui:handleEvent(Event:new("SetFont", "FreeSerif"))
+            ui:handleEvent(Event:new("SetFont", "Noto Serif"))
             runTasks()
             assert.are.equal(xpointer, ui.rolling:getBookLocation())
-            assert.are.equal("FreeSerif", ui.document:getFontFace())
+            assert.are.equal("Noto Serif", ui.document:getFontFace())
             assert.are.equal(ui.document:getCurrentPage(), ui.document:getPageFromXPointer(xpointer))
             ui:handleEvent(Event:new("SetFont", "Missing profile font"))
-            assert.are.equal("FreeSerif", ui.document:getFontFace())
+            assert.are.equal("Noto Serif", ui.document:getFontFace())
         end)
 
         it("should recover a removed font to the default reading font in a Latin EPUB", function()
