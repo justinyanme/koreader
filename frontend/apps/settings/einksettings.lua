@@ -87,6 +87,20 @@ local function isChecked(item)
     return item.checked and true or false
 end
 
+-- Whether a row stands only for items of the reader's menu, which the file browser's lacks.
+local function needsBook(row)
+    if not row.items then return false end
+    local fm_order = require("ui/elements/filemanager_menu_order")
+    for _, id in ipairs(row.items) do
+        for _, ids in pairs(fm_order) do
+            for _, fm_id in ipairs(ids) do
+                if fm_id == id then return false end
+            end
+        end
+    end
+    return true
+end
+
 -- Entries of `items` that are single-choice: radio ones, and in a `choice` list those up to the first separator.
 local function choiceSet(items, choice)
     local set = {}
@@ -241,8 +255,11 @@ function EinkSettings:homeEntry(row, group_id)
     local items = self:rowItems(row)
     local item = items[1]
     if not item then
+        -- a book brings reader-only items; nothing brings what this device lacks (e-ink refresh control on a
+        -- screen KOReader doesn't take for e-ink, sleep screens on Android) or a plugin that is off
+        local reason = not self.ui.document and needsBook(row) and _("Open a book first") or _("Not available")
         entry.enabled = false
-        entry.value_func = function() return _("Open a book first") end
+        entry.value_func = function() return reason end
     elseif row.toggle then
         entry.checked_func, entry.callback = item.checked_func, item.callback
     else

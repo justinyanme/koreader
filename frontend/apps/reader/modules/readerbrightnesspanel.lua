@@ -42,12 +42,13 @@ local function fromTick(tick, min, max)
     return min + math.floor((tick - 1) / (TICKS - 1) * (max - min) + 0.5)
 end
 
--- Labelled control row ("srow"): gray label column, then the control.
+-- Labelled control row ("srow"): label column, then the control. The label is ink: pencil gray is only for
+-- placeholders and the open-book hint (DESIGN.md, Colors).
 local function controlRow(label, control)
     return HorizontalGroup:new{
         LeftContainer:new{
             dimen = Geom:new{ w = LABEL_W, h = Screen:scaleBySize(52) },
-            text(label, "ui_label", Palette.ink_2, LABEL_W),
+            text(label, "ui_label", Palette.ink, LABEL_W),
         },
         control,
     }

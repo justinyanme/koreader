@@ -785,7 +785,7 @@ If you wish your highlights to be saved in the document, just move it to a writa
         table.insert(menu_items.long_press.sub_item_table, {
             text = v[1],
             checked_func = function()
-                return G_reader_settings:readSetting("default_highlight_action", "ask") == v[2]
+                return (G_reader_settings:readSetting("default_highlight_action") or "ask") == v[2]
             end,
             radio = true,
             callback = function()
@@ -1642,13 +1642,13 @@ function ReaderHighlight:_resetHoldTimer(clear)
             -- If normal-hold is set to use the highlight action, and this action is still "ask",
             -- no need to handle long-hold.
             if G_reader_settings:isTrue("highlight_action_on_single_word") and
-                   G_reader_settings:readSetting("default_highlight_action", "ask") == "ask" then
+                   (G_reader_settings:readSetting("default_highlight_action") or "ask") == "ask" then
                 handle_long_hold = false
             end
         else
             -- Multi words selection uses default_highlight_action, and no need for long-hold
             -- if it is already "ask".
-            if G_reader_settings:readSetting("default_highlight_action", "ask") == "ask" then
+            if (G_reader_settings:readSetting("default_highlight_action") or "ask") == "ask" then
                 handle_long_hold = false
             end
         end
@@ -2123,7 +2123,7 @@ function ReaderHighlight:onHoldRelease()
     local long_final_hold = self.long_hold_reached
     self:_resetHoldTimer(true) -- clear state
 
-    local default_highlight_action = G_reader_settings:readSetting("default_highlight_action", "ask")
+    local default_highlight_action = (G_reader_settings:readSetting("default_highlight_action") or "ask")
 
     if self.select_mode then -- extended highlighting, ending fragment
         if self.selected_text then
@@ -2202,7 +2202,7 @@ function ReaderHighlight:onSetHighlightAction(action_num, no_notification)
 end
 
 function ReaderHighlight:onCycleHighlightAction()
-    local current_action = G_reader_settings:readSetting("default_highlight_action", "ask")
+    local current_action = (G_reader_settings:readSetting("default_highlight_action") or "ask")
     local next_action_num
     for i, v in ipairs(long_press_action) do
         if v[2] == current_action then
