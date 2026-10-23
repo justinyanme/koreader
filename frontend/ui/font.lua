@@ -157,6 +157,37 @@ local Font = {
     faces = {},
 }
 
+-- The interface font size of the e-ink redesign (see DESIGN.md, Typography) multiplies
+-- the sizes of the ui_* roles, kept here at the default size; never the reading text or
+-- the DPI. Faces got with a role's own size follow it, faces got with an explicit size don't.
+Font.ui_sizemap = {}
+for name, size in pairs(Font.sizemap) do
+    if name:find("^ui_") then
+        Font.ui_sizemap[name] = size
+    end
+end
+
+local function scaleUIRoles(scale)
+    Font.ui_scale = scale
+    for name, size in pairs(Font.ui_sizemap) do
+        Font.sizemap[name] = size * scale
+    end
+end
+
+local saved_ui_scale = G_reader_settings and G_reader_settings:readSetting("ui_font_scale")
+scaleUIRoles(type(saved_ui_scale) == "number" and saved_ui_scale > 0 and saved_ui_scale or 1)
+
+--- Sets and saves the interface font size: `scale` multiplies the ui_* roles' sizes (1 is the default).
+-- Widgets built before keep their faces until they are rebuilt.
+function Font:setUIScale(scale)
+    G_reader_settings:saveSetting("ui_font_scale", scale)
+    scaleUIRoles(scale)
+end
+
+function Font:getUIScale()
+    return self.ui_scale
+end
+
 if G_reader_settings and G_reader_settings:has("font_ui_fallbacks") then
     local additional_fallbacks = G_reader_settings:readSetting("font_ui_fallbacks")
     for i=#additional_fallbacks, 1, -1 do
