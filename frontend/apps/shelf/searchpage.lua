@@ -144,7 +144,7 @@ function SearchPage:buildContent(rect)
         align = "left", VerticalSpan:new{ width = dp(12) }, self:buildField(),
         VerticalSpan:new{ width = dp(24) }, heading_row,
     }
-    if self.results then table.insert(list, rule(self.inner_w, Palette.confirm_rule)) end
+    if self.results then table.insert(list, rule(self.inner_w, Palette.rule)) end
     local items = self.results or self.history
     local row_h = self.results and math.max(dp(104), 2 * self.input:getSize().h + dp(20))
         or math.max(dp(57), self.input:getSize().h + dp(16))

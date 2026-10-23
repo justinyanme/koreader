@@ -60,7 +60,7 @@ function Pill:init()
     self.touch_dimen.y = self.dimen.y - math.floor((self.touch_dimen.h - h) / 2)
     local border = Size.border.default
     self[1] = FrameContainer:new{
-        bordersize = border, color = Palette.confirm_rule, background = Palette.paper,
+        bordersize = border, color = Palette.rule, background = Palette.paper,
         radius = math.floor(h / 2), padding = 0,
         CenterContainer:new{ dimen = Geom:new{ w = w - 2 * border, h = h - 2 * border }, label },
     }

@@ -401,7 +401,8 @@ function BookSourceView:buildSearch(page)
         LeftContainer:new{
             dimen = Geom:new{ w = inner_w - clear_w, h = inner_h },
             HorizontalGroup:new{
-                icon("eink/search", dp(18), not searchable),
+                EinkControls.Glyph:new{ icon = "eink/search", width = dp(18), height = dp(18), alpha = true,
+                    enabled = searchable and true or false },
                 HorizontalSpan:new{ width = dp(8) },
                 text(query or _("Search this source"), "ui_label_large",
                     query and Palette.ink or searchable and Palette.ink_2 or Palette.ink_3,
@@ -552,7 +553,7 @@ function BookSourceView:buildCell(page, book, x, y)
                     dimen = Geom:new{ w = w, h = BAND_H - Size.border.default },
                     HorizontalGroup:new{
                         LineWidget:new{ background = Palette.ink, dimen = Geom:new{ w = fill, h = dp(4) } },
-                        LineWidget:new{ background = Palette.rule, dimen = Geom:new{ w = bar_w - fill, h = dp(4) } },
+                        LineWidget:new{ background = Palette.mark, dimen = Geom:new{ w = bar_w - fill, h = dp(4) } },
                     },
                 },
             },

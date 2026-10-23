@@ -111,8 +111,7 @@ end
 
 function Panel:paintTo(bb, x, y)
     self.dimen.x, self.dimen.y = x, y
-    -- rule gray as measured on the Leaf5 (0xBB): Palette.rule is still lighter, see DESIGN.md (Confirm layer)
-    bb:paintRect(x, y, self.dimen.w, self.rule, Palette.confirm_rule)
+    bb:paintRect(x, y, self.dimen.w, self.rule, Palette.rule)
     self[1]:paintTo(bb, x, y + self.rule)
 end
 

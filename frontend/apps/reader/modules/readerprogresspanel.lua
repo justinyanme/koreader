@@ -477,7 +477,7 @@ function ReaderProgressPanel:buildContent()
     local column_w = math.floor((w - 2 * rule) / 3)
     local function divider()
         return LineWidget:new{
-            dimen = Geom:new{ w = rule, h = Screen:scaleBySize(40) }, background = Palette.confirm_rule,
+            dimen = Geom:new{ w = rule, h = Screen:scaleBySize(40) }, background = Palette.rule,
         }
     end
     local origin = self:getOrigin()
