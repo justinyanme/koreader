@@ -1,7 +1,8 @@
 --[[--
 The 书架 tab, after WeChat Read's shelf on the Leaf5 (00-entry/01-bookshelf.png): a full-width
 search field, the title row, and a paged cover grid. The title names the status filter
-(书架, or 在读 ▾) and opens the filter menu; the order is set in 设置 → 书架. The grid fills
+(书架, or 在读 ▾) and opens the filter menu; 导入 at the right of the row opens the import page
+(apps/shelf/importpage); the order is set in 设置 → 书架. The grid fills
 the content area: the next page's first row shows cut off at its foot, under the bottom band
 that ShelfFileManager draws with the tab icons and the page capsule.
 
@@ -20,6 +21,7 @@ local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
+local ImportPage = require("apps/shelf/importpage")
 local InputDialog = require("ui/widget/inputdialog")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local Notification = require("ui/widget/notification")
@@ -129,6 +131,27 @@ function ShelfView:reload(rescan)
         self.extracting = { total = #self:pendingFiles(), done = 0, stalls = 0, start = time.now() }
         self.poll = self.poll or function() self:pollExtraction() end
         UIManager:scheduleIn(1, self.poll)
+    end
+end
+
+-- What the shelf draws of its books, and their order: compared before and after a rescan.
+local function booksKey(books)
+    local keys = {}
+    for i, book in ipairs(books) do
+        keys[i] = table.concat({ book.file, book.title, book.status, tostring(book.has_cover),
+            book.last_read or "", book.mtime or "" }, "\0")
+    end
+    table.sort(keys)
+    return table.concat(keys, "\n")
+end
+
+--- Walks the home folder again (导入 closed: books may have come in), and redraws the grid only if the books
+-- or what it shows of them changed.
+function ShelfView:rescan()
+    local before = booksKey(self.books)
+    self:reload(true)
+    if booksKey(self.books) ~= before then
+        self:update("grid")
     end
 end
 
@@ -313,6 +336,22 @@ function ShelfView:titleText()
     return filter_texts[self.filter] .. " ▾"
 end
 
+--- A text action of the title row (导入): a circled line icon before 16dp bold ink text, 44dp tall to tap.
+function ShelfView:textAction(icon, label, callback)
+    local icon_size = dp(20)
+    local content = HorizontalGroup:new{
+        align = "center",
+        IconWidget:new{ icon = icon, width = icon_size, height = icon_size, alpha = true },
+        HorizontalSpan:new{ width = dp(4) },
+        TextWidget:new{ text = label, face = Font:getFace("ui_title"), fgcolor = Palette.ink },
+    }
+    return ShelfWidgets.Tappable:new{
+        callback = callback,
+        CenterContainer:new{ dimen = Geom:new{ w = content:getSize().w, h = math.max(TITLE_TAP_H, content:getSize().h) },
+            content },
+    }
+end
+
 function ShelfView:buildTitleRow()
     local title = TextWidget:new{
         text = self:titleText(),
@@ -326,17 +365,25 @@ function ShelfView:buildTitleRow()
         callback = function() self:showFilterMenu() end,
         LeftContainer:new{ dimen = Geom:new{ w = title:getSize().w, h = tap_h }, title },
     }
+    self.import_button = self:textAction("eink/plus.circle", C_("Shelf", "Import"),
+        function() ImportPage.show(self.ui) end)
+    -- between the title and the actions at the right: the indexing progress, right-aligned
+    local free_w = self.width - 2 * GUTTER - title:getSize().w - self.import_button:getSize().w
     local row = HorizontalGroup:new{ align = "center", HorizontalSpan:new{ width = GUTTER }, self.title_button }
     if self.extracting then
+        local gap = dp(16)
         local progress = TextWidget:new{
             text = T(_("Indexing books %1 / %2…"), self.extracting.done, self.extracting.total),
             face = Font:getFace("ui_label"),
             fgcolor = Palette.ink,
-            max_width = self.width - 2 * GUTTER - title:getSize().w - dp(12),
+            max_width = free_w - 2 * gap,
         }
-        table.insert(row, HorizontalSpan:new{ width = self.width - 2 * GUTTER - title:getSize().w - progress:getSize().w })
+        table.insert(row, HorizontalSpan:new{ width = free_w - gap - progress:getSize().w })
         table.insert(row, progress)
+        free_w = gap
     end
+    table.insert(row, HorizontalSpan:new{ width = free_w })
+    table.insert(row, self.import_button)
     return VerticalGroup:new{
         align = "left",
         VerticalSpan:new{ width = TITLE_MID - math.floor(tap_h / 2) },
