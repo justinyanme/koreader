@@ -1,7 +1,7 @@
 describe("Shelf home (FileManager replacement)", function()
     local DataStorage, DocSettings, Event, FileManager, Geom, Key, Palette, ReadHistory, ReaderUI, Replacements
     local SelectionBubble, ShelfView, UIManager, Screen
-    local filemanagerutil, lfs, ffiUtil, util, T, _, C_
+    local filemanagerutil, lfs, ffiUtil, util, T, _, C_, N_, NC_
     local saved_settings
     local cleanup_files = {}
 
@@ -9,6 +9,21 @@ describe("Shelf home (FileManager replacement)", function()
 
     local function topWidget()
         return UIManager._window_stack[#UIManager._window_stack].widget
+    end
+
+    -- The text of the toast on screen, if any.
+    local function toastText()
+        for __, window in ipairs(UIManager._window_stack) do
+            if window.widget.toast then return window.widget.text end
+        end
+    end
+
+    local function closeToasts()
+        for i = #UIManager._window_stack, 1, -1 do
+            local widget = UIManager._window_stack[i].widget
+            if widget.toast then UIManager:close(widget) end
+        end
+        UIManager:forceRePaint()
     end
 
     -- The innermost painted tap target around the first text or icon equal to `label` (or nil).
@@ -152,6 +167,8 @@ describe("Shelf home (FileManager replacement)", function()
         T = ffiUtil.template
         _ = require("gettext")
         C_ = _.pgettext
+        N_ = _.ngettext
+        NC_ = _.npgettext
         require("apps/shelf/shelffilemanager") -- registers the replacement
         ShelfView = require("apps/shelf/shelfview")
         saved_settings = {}
@@ -325,7 +342,7 @@ describe("Shelf home (FileManager replacement)", function()
                 local title = book.file:gsub(".*/", ""):gsub("%.%w+$", "")
                 local cell = find(view, title)
                 assert.is_truthy(cell, title)
-                local cover = cell[1][1] -- the cover, or the cover with the tag over it
+                local cover = cell[1][1][1] -- the cover, or the cover with the tag over it, in its selection-mode frame
                 if book.status == "complete" then
                     local tag = cover[2]
                     assert.is_truthy(find(tag, finished) or find(tag, util.splitToChars(finished)[1]))
@@ -392,24 +409,30 @@ describe("Shelf home (FileManager replacement)", function()
             fm:onClose()
         end)
 
-        it("changes status from the long-press actions", function()
+        it("changes status from the book sheet's actions, which 文件 shows on a long press", function()
             local fm, view = openShelf(home)
             local actions = view:getBookActions(bookNamed(view, "a.epub"))
             assert.are.equal(5, #actions)
             actions[4].callback() -- Put on hold
             assert.are.same({ all = 5, reading = 0, new = 2, complete = 1, abandoned = 2 }, view.counts)
             assert.are.equal("abandoned", DocSettings:open(bookPath("a.epub")):readSetting("summary").status)
+            assert.are.equal(T(N_("Marked 1 book as %2", "Marked %1 books as %2", 1), 1,
+                C_("Status of single book", "On hold")), toastText())
             actions = view:getBookActions(bookNamed(view, "a.epub"))
             actions[4].callback() -- Mark as reading
             assert.are.equal(1, view.counts.reading)
+            closeToasts()
             fm:onClose()
         end)
 
         it("removes a book from the shelf but keeps the file, until the book is opened again", function()
             local fm, view = openShelf(home)
-            view:getBookActions(bookNamed(view, "d.txt"))[5].callback() -- Remove from shelf
+            view:getBookActions(bookNamed(view, "d.txt"))[5].callback() -- Remove from shelf, once confirmed
+            UIManager:forceRePaint()
+            tap(find(topWidget(), C_("Shelf", "Remove")).dimen)
             assert.are.same({ "b.epub", "e.pdf", "a.epub", "c.pdf" }, names(view.shown))
             assert.are.equal("file", lfs.attributes(bookPath("d.txt"), "mode"))
+            closeToasts()
             fm:onClose()
             fm, view = openShelf(home)
             assert.is_nil(bookNamed(view, "d.txt"))
@@ -577,6 +600,417 @@ describe("Shelf home (FileManager replacement)", function()
             assert.are.equal(page, reader:getCurrentPage())
             reader:onHome()
             FileManager.instance:onClose()
+        end)
+    end)
+
+    describe("in selection mode", function()
+        local home
+        local count = 14
+        local function bookPath(i) return string.format("%s/s%02d.txt", home, i) end
+        local function title(i) return string.format("s%02d", i) end
+
+        -- The cover of a book on the page shown, from its cell (the tap target around its title).
+        local function coverRect(view, i)
+            local cell = find(view, title(i))
+            if not cell then return end
+            return Geom:new{ x = cell.dimen.x, y = cell.dimen.y, w = view.grid.cover_w, h = view.grid.cover_h }
+        end
+
+        -- A selected cover has an ink frame around it.
+        local function framed(view, i)
+            local cover = coverRect(view, i)
+            return gray(cover.x - dp(2), cover.y + math.floor(cover.h / 2)) == Palette.ink:getColor8().a
+        end
+
+        local function selectedTitle(n)
+            return T(NC_("Shelf", "1 book selected", "%1 books selected", n), n)
+        end
+
+        before_each(function()
+            G_reader_settings:delSetting("shelf_filter")
+            G_reader_settings:delSetting("shelf_sort")
+            G_reader_settings:delSetting("shelf_removed")
+        end)
+
+        setup(function()
+            local books = {}
+            -- unread books, newest first: s01, s02, …
+            for i = 1, count do
+                table.insert(books, { name = string.format("s%02d.txt", i), source = "sample.txt", mtime = 2000 - i })
+            end
+            home = makeHome("shelf_select_home", books)
+        end)
+
+        teardown(function()
+            ffiUtil.purgeDir(home)
+        end)
+
+        it("enters from 选择 with nothing selected, selects covers instead of opening them, and leaves with 取消", function()
+            local fm, view = openShelf(home)
+            local screen_w = Screen:getWidth()
+            -- 选择 ends the title row, after 导入
+            local select = find(view, _("Select"))
+            local import = find(view, C_("Shelf", "Import"))
+            assert.is_truthy(select)
+            assert.is_true(select.dimen.x > import.dimen.x + import.dimen.w)
+            assert.are.equal(screen_w - dp(22), select.dimen.x + select.dimen.w)
+            assert.is_truthy(find(select, "eink/check.circle"))
+            local refreshes, restore = spyRefreshes()
+            tap(select.dimen)
+            restore()
+            -- 全选 at the left, 选择书籍 in the middle, 取消 at the right, all over the title row
+            local all, heading, cancel = find(view, _("Select all")), find(view, _("Select books")), find(view, _("Cancel"))
+            assert.is_truthy(all)
+            assert.is_truthy(heading)
+            assert.is_truthy(cancel)
+            assert.is_nil(find(view, _("Shelf")))
+            assert.is_nil(find(view, C_("Shelf", "Import")))
+            local row = view:titleRect()
+            assert.are.equal(dp(22), all.dimen.x)
+            assert.are.equal(screen_w - dp(22), cancel.dimen.x + cancel.dimen.w)
+            -- the heading's ink is centered on the screen
+            local min_x, max_x
+            for x = all.dimen.x + all.dimen.w + dp(4), cancel.dimen.x - dp(4) do
+                for y = row.y, row.y + row.h - 1 do
+                    if gray(x, y) < 0x80 then
+                        min_x, max_x = min_x or x, x
+                        break
+                    end
+                end
+            end
+            assert.is_truthy(min_x)
+            assert.is_true(math.abs((min_x + max_x) / 2 - screen_w / 2) <= 2)
+            for __, target in ipairs{ all, cancel } do
+                assert.is_true(target.dimen.w >= dp(44) and target.dimen.h >= dp(44))
+                assert.is_true(target.dimen.y >= row.y and target.dimen.y + target.dimen.h <= row.y + row.h)
+            end
+            -- the band swaps the tab icons for 移出书架 and 标记为, gray while nothing is selected
+            assert.is_nil(find(fm, "eink/shelf.bold"))
+            assert.is_nil(find(fm, "eink/user"))
+            local remove, mark = find(fm, "eink/shelf.remove"), find(fm, "eink/mark")
+            assert.is_truthy(remove)
+            assert.is_truthy(mark)
+            assert.is_true(remove.dimen.y >= fm.tabbar_dimen.y and mark.dimen.x >= remove.dimen.x + remove.dimen.w)
+            tap(remove.dimen)
+            tap(mark.dimen)
+            assert.are.equal(fm, topWidget())
+            -- from the title row down and the band, as "ui"
+            assert.is_true(#refreshes > 0)
+            for __, r in ipairs(refreshes) do
+                assert.are.equal("ui", r.type or "ui")
+                if r.requested then assert.is_true(r.region.y >= row.y) end
+            end
+            -- a tap on a cover selects it and never opens the book
+            assert.is_false(framed(view, 2))
+            refreshes, restore = spyRefreshes()
+            tap(coverRect(view, 2))
+            restore()
+            assert.are.equal(fm, topWidget())
+            assert.is_nil(ReaderUI.instance)
+            assert.is_true(framed(view, 2))
+            assert.is_false(framed(view, 1))
+            assert.is_truthy(find(view, selectedTitle(1)))
+            -- only the cover, its frame, the title row and the band were repainted
+            local cover = coverRect(view, 2)
+            local around = Geom:new{ x = cover.x - dp(5), y = cover.y - dp(5), w = cover.w + dp(10), h = cover.h + dp(10) }
+            for __, r in ipairs(refreshes) do
+                assert.are.equal("ui", r.type or "ui")
+                if r.requested then
+                    assert.is_true(around:contains(r.region) or row:contains(r.region) or fm.tabbar_dimen:contains(r.region))
+                end
+            end
+            tap(coverRect(view, 3))
+            assert.is_truthy(find(view, selectedTitle(2)))
+            -- a second tap leaves it out again
+            tap(coverRect(view, 2))
+            assert.is_false(framed(view, 2))
+            assert.is_truthy(find(view, selectedTitle(1)))
+            -- 取消 leaves selection mode: the shelf as it was, and a tap opens books again
+            tap(find(view, _("Cancel")).dimen)
+            assert.are.equal(_("Shelf"), titleText(view))
+            assert.is_truthy(find(fm, "eink/shelf.bold"))
+            assert.is_nil(find(fm, "eink/shelf.remove"))
+            assert.is_false(framed(view, 3))
+            -- entering again starts with nothing selected
+            tap(find(view, _("Select")).dimen)
+            assert.is_truthy(find(view, _("Select books")))
+            assert.is_false(framed(view, 3))
+            fm:onClose()
+        end)
+
+        it("enters on a long press with that book selected, and Back leaves it", function()
+            local fm, view = openShelf(home)
+            local refreshes, restore = spyRefreshes()
+            local cover = coverRect(view, 4)
+            gesture("hold", cover.x + dp(10), cover.y + dp(10))
+            restore()
+            -- no sheet, no book opened: selection mode with s04 selected
+            assert.are.equal(fm, topWidget())
+            assert.is_nil(ReaderUI.instance)
+            assert.is_truthy(find(view, selectedTitle(1)))
+            assert.is_true(framed(view, 4))
+            assert.is_truthy(find(fm, "eink/shelf.remove"))
+            for __, r in ipairs(refreshes) do
+                assert.are.equal("ui", r.type or "ui")
+                if r.requested then assert.is_true(r.region.y >= view:titleRect().y) end
+            end
+            -- another long press selects that one too, and one on a selected cover leaves it out
+            gesture("hold", coverRect(view, 5).x + dp(10), coverRect(view, 5).y + dp(10))
+            assert.is_truthy(find(view, selectedTitle(2)))
+            gesture("hold", cover.x + dp(10), cover.y + dp(10))
+            assert.is_truthy(find(view, selectedTitle(1)))
+            assert.is_false(framed(view, 4))
+            -- Back leaves selection mode, not the shelf
+            press("Back")
+            assert.are.equal(fm, topWidget())
+            assert.are.equal(FileManager.instance, fm)
+            assert.is_nil(view.selected)
+            assert.are.equal(_("Shelf"), titleText(view))
+            assert.is_false(framed(view, 5))
+            fm:onClose()
+        end)
+
+        it("selects across pages, and 全选 takes the whole shelf, not only the page", function()
+            local fm, view = openShelf(home)
+            assert.is_true(view.pages > 1)
+            local per_page = view.grid.cols * view.grid.rows
+            tap(find(view, _("Select")).dimen)
+            tap(coverRect(view, 1))
+            -- the next page: s01 stays selected while another is picked there
+            tap(capsule(fm).next_rect)
+            assert.are.equal(2, view.page)
+            local on_next = per_page + 1
+            assert.is_false(framed(view, on_next))
+            tap(coverRect(view, on_next))
+            assert.is_truthy(find(view, selectedTitle(2)))
+            swipe("south")
+            assert.are.equal(1, view.page)
+            assert.is_true(framed(view, 1))
+            assert.is_false(framed(view, 2))
+            -- 全选: every book on every page, and it turns into 取消全选
+            local refreshes, restore = spyRefreshes()
+            tap(find(view, _("Select all")).dimen)
+            restore()
+            assert.is_truthy(find(view, selectedTitle(count)))
+            assert.is_nil(find(view, _("Select all")))
+            assert.is_truthy(find(view, _("Deselect all")))
+            for i = 1, per_page do assert.is_true(framed(view, i)) end
+            for __, r in ipairs(refreshes) do
+                assert.are.equal("ui", r.type or "ui")
+                if r.requested then assert.is_true(r.region.y >= view:titleRect().y) end
+            end
+            for __ = 2, view.pages do tap(capsule(fm).next_rect) end
+            assert.is_true(framed(view, count))
+            -- leaving one out brings 全选 back
+            tap(coverRect(view, count))
+            assert.is_truthy(find(view, selectedTitle(count - 1)))
+            assert.is_truthy(find(view, _("Select all")))
+            tap(coverRect(view, count))
+            -- 取消全选 clears the selection and stays in selection mode, the actions gray again
+            tap(find(view, _("Deselect all")).dimen)
+            assert.is_truthy(find(view, _("Select books")))
+            assert.is_false(framed(view, count))
+            local remove = find(fm, "eink/shelf.remove")
+            tap(remove.dimen)
+            assert.are.equal(fm, topWidget())
+            fm:onClose()
+        end)
+
+        it("takes only the books of the current filter with 全选", function()
+            for i = 1, 3 do
+                local doc_settings = DocSettings:open(bookPath(i))
+                doc_settings:saveSetting("summary", { status = "reading" })
+                doc_settings:flush()
+                require("ui/widget/booklist").resetBookInfoCache(bookPath(i))
+            end
+            local ok, err = pcall(function()
+                local fm, view = openShelf(home)
+                tap(view.title_button.dimen)
+                tap(find(topWidget(), C_("Status of group of books", "Reading")).dimen)
+                assert.are.equal(3, #view.shown)
+                tap(find(view, _("Select")).dimen)
+                tap(find(view, _("Select all")).dimen)
+                assert.is_truthy(find(view, selectedTitle(3)))
+                assert.is_truthy(find(view, _("Deselect all")))
+                fm:onClose()
+            end)
+            for i = 1, 3 do
+                DocSettings:open(bookPath(i)):purge()
+                require("ui/widget/booklist").resetBookInfoCache(bookPath(i))
+            end
+            assert(ok, err)
+        end)
+
+        it("removes the selected books from the shelf once confirmed, and keeps their files", function()
+            local fm, view = openShelf(home)
+            local before = names(view.shown)
+            tap(find(view, _("Select")).dimen)
+            tap(coverRect(view, 2))
+            tap(coverRect(view, 3))
+            -- 移出书架 asks first, over the washed shelf
+            local refreshes, restore = spyRefreshes()
+            tap(find(fm, "eink/shelf.remove").dimen)
+            restore()
+            local layer = topWidget()
+            assert.are.equal(require("ui/widget/confirmlayer"), getmetatable(layer).__index)
+            assert.are.equal(T(N_("Remove 1 book from the shelf? The file stays on the device.",
+                "Remove %1 books from the shelf? The files stay on the device.", 2), 2), layer.text)
+            assert.are.same({ type = "ui", region = layer:getRefreshRegion(), requested = true }, refreshes[1])
+            -- 取消 changes nothing: still selecting the same two books
+            tap(find(layer, _("Cancel")).dimen)
+            assert.are.equal(fm, topWidget())
+            assert.are.same(before, names(view.shown))
+            assert.is_nil(G_reader_settings:readSetting("shelf_removed"))
+            assert.is_truthy(find(view, selectedTitle(2)))
+            assert.is_true(framed(view, 2) and framed(view, 3))
+            -- confirmed: hidden from the shelf, the files stay, and selection mode ends
+            tap(find(fm, "eink/shelf.remove").dimen)
+            tap(find(topWidget(), C_("Shelf", "Remove")).dimen)
+            assert.is_nil(view.selected)
+            assert.are.equal(_("Shelf"), titleText(view))
+            assert.is_truthy(find(fm, "eink/shelf.bold"))
+            assert.are.equal(count - 2, #view.shown)
+            assert.is_nil(find(view, title(2)))
+            assert.is_nil(find(view, title(3)))
+            for i = 2, 3 do
+                assert.are.equal("file", lfs.attributes(bookPath(i), "mode"))
+            end
+            -- written to the settings file at once, as the next start reads it (not only when KOReader quits)
+            local on_disk = require("luasettings"):open(G_reader_settings.file):readSetting("shelf_removed")
+            assert.is_truthy(on_disk[bookPath(2)])
+            assert.is_truthy(on_disk[bookPath(3)])
+            assert.are.equal(T(N_("Removed 1 book from the shelf. The file stays on the device.",
+                "Removed %1 books from the shelf. The files stay on the device.", 2), 2), toastText())
+            closeToasts()
+            -- still hidden the next time
+            fm:onClose()
+            fm, view = openShelf(home)
+            assert.are.equal(count - 2, #view.shown)
+            assert.is_nil(find(view, title(2)))
+            -- one book: asked by its title; a tap on the washed page cancels too
+            tap(find(view, _("Select")).dimen)
+            tap(coverRect(view, 5))
+            tap(find(fm, "eink/shelf.remove").dimen)
+            assert.are.equal(T(_("Remove “%1” from the shelf? The file stays on the device."), title(5)), topWidget().text)
+            gesture("tap", math.floor(Screen:getWidth() / 2), dp(40))
+            assert.are.equal(fm, topWidget())
+            assert.is_truthy(find(view, title(5)))
+            assert.is_truthy(find(view, selectedTitle(1)))
+            tap(find(fm, "eink/shelf.remove").dimen)
+            tap(find(topWidget(), C_("Shelf", "Remove")).dimen)
+            assert.is_nil(find(view, title(5)))
+            assert.are.equal(T(_("Removed from shelf. The file is still in %1"),
+                filemanagerutil.abbreviate(home)), toastText())
+            closeToasts()
+            fm:onClose()
+        end)
+
+        it("marks the selected books 读完, 在读 or 搁置, saved with each book", function()
+            local ok, err = pcall(function()
+                local fm, view = openShelf(home)
+                assert.are.equal(count, view.counts.new)
+                tap(find(view, _("Select")).dimen)
+                tap(coverRect(view, 1))
+                tap(coverRect(view, 2))
+                tap(find(fm, "eink/mark").dimen)
+                local layer = topWidget()
+                assert.are.equal(require("ui/widget/confirmlayer"), getmetatable(layer).__index)
+                assert.are.equal(T(N_("Mark 1 book as", "Mark %1 books as", 2), 2), layer.text)
+                local labels = { C_("Status of single book", "Finished"), C_("Status of single book", "Reading"),
+                    C_("Status of single book", "On hold"), _("Cancel") }
+                local y = 0
+                for __, label in ipairs(labels) do
+                    local row = find(layer, label)
+                    assert.is_truthy(row, label)
+                    assert.is_true(row.dimen.y > y) -- in this order
+                    y = row.dimen.y
+                end
+                -- 取消 changes nothing
+                tap(find(layer, _("Cancel")).dimen)
+                assert.are.equal(fm, topWidget())
+                assert.is_false(DocSettings:hasSidecarFile(bookPath(1)))
+                assert.is_truthy(find(view, selectedTitle(2)))
+                -- 读完: both get the tag, and selection mode ends
+                tap(find(fm, "eink/mark").dimen)
+                tap(find(topWidget(), C_("Status of single book", "Finished")).dimen)
+                assert.is_nil(view.selected)
+                assert.is_truthy(find(fm, "eink/shelf.bold"))
+                assert.are.same({ all = count, reading = 0, new = count - 2, complete = 2, abandoned = 0 }, view.counts)
+                local finished = C_("Status of single book", "Finished")
+                for i = 1, 2 do
+                    local cell = find(view, title(i))
+                    assert.is_truthy(find(cell, finished) or find(cell, util.splitToChars(finished)[1]))
+                    assert.are.equal("complete", DocSettings:open(bookPath(i)):readSetting("summary").status)
+                end
+                assert.are.equal(T(N_("Marked 1 book as %2", "Marked %1 books as %2", 2), 2, finished), toastText())
+                closeToasts()
+                -- kept with the books: the next time, and under the 读完 filter
+                fm:onClose()
+                require("ui/widget/booklist").book_info_cache = {}
+                fm, view = openShelf(home)
+                assert.are.equal(2, view.counts.complete)
+                -- one book, asked by its title: 搁置, then 在读
+                local cover = coverRect(view, 1)
+                gesture("hold", cover.x + dp(10), cover.y + dp(10))
+                tap(find(fm, "eink/mark").dimen)
+                assert.are.equal(T(_("Mark “%1” as"), title(1)), topWidget().text)
+                tap(find(topWidget(), C_("Status of single book", "On hold")).dimen)
+                closeToasts()
+                assert.are.equal("abandoned", DocSettings:open(bookPath(1)):readSetting("summary").status)
+                assert.are.same({ all = count, reading = 0, new = count - 2, complete = 1, abandoned = 1 }, view.counts)
+                tap(view.title_button.dimen)
+                tap(find(topWidget(), C_("Status of group of books", "On hold")).dimen)
+                assert.are.same({ "s01.txt" }, names(view.shown))
+                tap(find(view, _("Select")).dimen)
+                tap(find(view, _("Select all")).dimen)
+                tap(find(fm, "eink/mark").dimen)
+                tap(find(topWidget(), C_("Status of single book", "Reading")).dimen)
+                closeToasts()
+                assert.are.equal("reading", DocSettings:open(bookPath(1)):readSetting("summary").status)
+                -- out of the 搁置 filter now
+                assert.are.same({}, view.shown)
+                fm:onClose()
+            end)
+            for i = 1, 2 do
+                DocSettings:open(bookPath(i)):purge()
+                require("ui/widget/booklist").resetBookInfoCache(bookPath(i))
+            end
+            G_reader_settings:delSetting("shelf_filter")
+            assert(ok, err)
+        end)
+
+        it("keeps both title rows apart and 44dp to tap at the largest interface font size", function()
+            local Font = require("ui/font")
+            local saved = G_reader_settings:readSetting("ui_font_scale")
+            Font:setUIScale(1.35)
+            local ok, err = pcall(function()
+                local fm, view = openShelf(home)
+                local touch, screen_w = dp(44), Screen:getWidth()
+                local row = view:titleRect()
+                local title, import, select = view.title_button, view.import_button, view.select_button
+                assert.is_true(title.dimen.x + title.dimen.w < import.dimen.x)
+                assert.is_true(import.dimen.x + import.dimen.w < select.dimen.x)
+                assert.are.equal(screen_w - dp(22), select.dimen.x + select.dimen.w)
+                tap(select.dimen)
+                tap(find(view, _("Select all")).dimen)
+                -- the longest labels: 取消全选 and the count of the whole shelf
+                local all, cancel = find(view, _("Deselect all")), find(view, _("Cancel"))
+                assert.is_truthy(find(view, selectedTitle(count)))
+                for __, target in ipairs{ all, cancel, find(fm, "eink/shelf.remove"), find(fm, "eink/mark") } do
+                    assert.is_true(target.dimen.w >= touch and target.dimen.h >= touch)
+                end
+                assert.is_true(all.dimen.y >= row.y and all.dimen.y + all.dimen.h <= row.y + row.h)
+                -- the count is whole, and (centered on the screen) clear of both
+                local heading = find(view, selectedTitle(count))
+                local w = heading:getSize().w
+                assert.is_false(heading:isTruncated())
+                assert.is_true((screen_w - w) / 2 > all.dimen.x + all.dimen.w)
+                assert.is_true((screen_w + w) / 2 < cancel.dimen.x)
+                fm:onClose()
+            end)
+            Font:setUIScale(1)
+            if saved == nil then G_reader_settings:delSetting("ui_font_scale") end
+            assert(ok, err)
         end)
     end)
 
@@ -814,12 +1248,13 @@ describe("Shelf home (FileManager replacement)", function()
                 assert.are.equal(Palette.paper:getColor8().a, gray(x, band.y + dp(4)))
                 gesture("hold", x, band.y + math.floor(band.h / 2))
                 assert.are.equal(fm, topWidget())
-                -- what shows of it is the book
+                assert.is_nil(view.selected)
+                -- what shows of it is the book: a long press selects it
                 gesture("hold", x, band.y - dp(10))
-                assert.are_not.equal(fm, topWidget())
-                assert.are.equal(next_book.title, topWidget().title)
-                topWidget():onClose()
-                UIManager:forceRePaint()
+                assert.are.equal(fm, topWidget())
+                assert.is_truthy(find(view, T(NC_("Shelf", "1 book selected", "%1 books selected", 1), 1)))
+                assert.are.same({ next_book }, view:selectedBooks())
+                tap(find(view, _("Cancel")).dimen)
                 -- turning the page brings that row to the top
                 tap(capsule(fm).next_rect)
                 assert.are.equal(grid.y, find(view, next_book.title).dimen.y)
@@ -845,7 +1280,7 @@ describe("Shelf home (FileManager replacement)", function()
             fm:onClose()
         end)
 
-        it("repaints the title row when indexing ends under a book's sheet, which only repaints itself on closing", function()
+        it("repaints the title row when indexing ends under the filter menu, which only repaints itself on closing", function()
             stub.jobs = {}
             local added = {}
             local ok, err = pcall(function()
@@ -856,12 +1291,10 @@ describe("Shelf home (FileManager replacement)", function()
                 UIManager:forceRePaint()
                 local progress = T(_("Indexing books %1 / %2…"), 0, 42)
                 assert.is_truthy(find(view, progress))
-                -- a book's long-press sheet covers the lower part of the shelf
-                local cell = find(view, view.shown[1].title)
-                gesture("hold", cell.dimen.x + dp(10), cell.dimen.y + dp(10))
-                local sheet = topWidget()
-                assert.are_not.equal(fm, sheet)
-                assert.is_false(view:titleRect():intersectWith(sheet.sheet_dimen))
+                -- the filter menu is over part of the shelf
+                tap(view.title_button.dimen)
+                local menu = topWidget()
+                assert.are_not.equal(fm, menu)
                 -- indexing ends under it: the cache now has every book
                 for __, book in ipairs(view.books) do
                     if book.needs_extract then
@@ -873,18 +1306,19 @@ describe("Shelf home (FileManager replacement)", function()
                 stub.extracting = false
                 view:pollExtraction()
                 UIManager:forceRePaint()
-                assert.is_nil(view.extracting)
-                -- a tap beside the sheet closes it; the title row was repainted without the progress
-                gesture("tap", math.floor(Screen:getWidth() / 2), dp(20))
                 restore()
-                assert.are.equal(fm, topWidget())
-                assert.is_nil(find(view, progress))
+                assert.is_nil(view.extracting)
+                -- the title row was repainted without the progress, under the menu
                 local title_repainted = false
                 for __, r in ipairs(refreshes) do
                     assert.are.equal("ui", r.type or "ui")
-                    if r.region and r.region:intersectWith(view:titleRect()) then title_repainted = true end
+                    if r.requested and r.region:intersectWith(view:titleRect()) then title_repainted = true end
                 end
                 assert.is_true(title_repainted)
+                -- a tap beside the menu closes it
+                gesture("tap", Screen:getWidth() - dp(10), view.dimen.h - dp(10))
+                assert.are.equal(fm, topWidget())
+                assert.is_nil(find(view, progress))
             end)
             for __, file in ipairs(added) do stub.rows[file] = nil end
             while topWidget() ~= FileManager.instance do UIManager:close(topWidget()) end

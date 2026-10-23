@@ -6,6 +6,7 @@ screens need them:
 
     Chip{ text, count, selected, callback }
     TabBar{ tabs = { { id, icon } }, current, height, on_change } -- the tab icons of the bottom band
+    ActionBar{ items = { { icon, callback } }, enabled, height } -- actions in their place (selection mode)
     BottomSheet{ title, header, rows = { { text, callback, checked } } } -- shown with BottomSheet:show()
 
 and the cover grids of 书架 and 书源:
@@ -15,6 +16,7 @@ and the cover grids of 书架 and 书源:
     cover(book, w, h, image_bb, keep_image) -- the image cropped to fill (freed with the widget unless keep_image),
                                             -- or the typographic cover from book.title/authors
     finishedBadge() -- the 读完 tag at a finished book's top right corner
+    SelectableCover{ selection } -- a cover with selection mode's ring, check and frame
 ]]
 
 local BottomContainer = require("ui/widget/container/bottomcontainer")
@@ -38,6 +40,7 @@ local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local util = require("util")
 local Screen = Device.screen
 local _ = require("gettext")
@@ -211,6 +214,49 @@ local function finishedBadge()
     }
 end
 
+-- Selection mode, after the Leaf5 reference (15-supplement/04-two-books-selected.png): a selected cover is framed in
+-- ink just outside its edges, and every cover has a 25dp ring centered 16.5dp in from its lower right corner.
+local SELECTED_FRAME = dp(4.3)
+local RING = dp(25)
+local RING_INSET = dp(16.5)
+local rings = {}
+
+--- `cover` in selection mode. `selection()` is read at each paint: nil outside selection mode (the cover alone),
+-- false for a cover not selected (an empty ring), true for a selected one (a check in the ring, and the frame).
+-- So a change of selection only needs a repaint of `getSelectionRect()`.
+local SelectableCover = WidgetContainer:extend{
+    selection = nil,
+}
+
+function SelectableCover:init()
+    self.dimen = Geom:new{ w = self[1]:getSize().w, h = self[1]:getSize().h }
+end
+
+function SelectableCover:paintTo(bb, x, y)
+    self.dimen.x, self.dimen.y = x, y
+    self[1]:paintTo(bb, x, y)
+    local selected = self.selection()
+    if selected == nil then return end
+    local w, h = self.dimen.w, self.dimen.h
+    if selected then
+        bb:paintBorder(x - SELECTED_FRAME, y - SELECTED_FRAME, w + 2 * SELECTED_FRAME, h + 2 * SELECTED_FRAME,
+            SELECTED_FRAME, Palette.ink)
+    end
+    if not rings[selected] then
+        rings[selected] = IconWidget:new{ icon = selected and "eink/ring.check" or "eink/ring",
+            width = RING, height = RING, alpha = true }
+    end
+    local half = math.floor(RING / 2)
+    rings[selected]:paintTo(bb, x + w - RING_INSET - half, y + h - RING_INSET - half)
+end
+
+--- The screen rect that a change of selection repaints: the cover and its frame, where it was last painted.
+function SelectableCover:getSelectionRect()
+    local d = self.dimen
+    return Geom:new{ x = d.x - SELECTED_FRAME, y = d.y - SELECTED_FRAME, w = d.w + 2 * SELECTED_FRAME,
+        h = d.h + 2 * SELECTED_FRAME }
+end
+
 --- A region that calls `callback` on tap and `hold_callback` on long-press. With `clip` (a screen rect),
 -- it only takes the gestures inside it, as when it is painted partly under something else.
 local Tappable = InputContainer:extend{
@@ -318,6 +364,30 @@ function TabBar:init()
     end
 end
 
+--- Actions in the tab icons' place, laid out as TabBar: selection mode's 移出书架 and 标记为. While not `enabled`
+-- (nothing selected), they are gray as in the reference and take no taps.
+local ActionBar = HorizontalGroup:extend{
+    items = nil, -- { { icon, callback } }
+    enabled = true,
+    height = nil,
+}
+
+function ActionBar:init()
+    local size = dp(28)
+    for _, item in ipairs(self.items) do
+        table.insert(self, Tappable:new{
+            callback = function()
+                if self.enabled then item.callback() end
+            end,
+            CenterContainer:new{
+                dimen = Geom:new{ w = TabBar.cell_w, h = self.height },
+                IconWidget:new{ icon = item.icon, width = size, height = size, alpha = true,
+                    dim = not self.enabled or nil },
+            },
+        })
+    end
+end
+
 --- Sheet frame with 16dp top corners; it bleeds past the bottom and side edges of the screen.
 local SheetFrame = FrameContainer:extend{
     radius = dp(16),
@@ -420,7 +490,9 @@ return {
     Tappable = Tappable,
     Chip = Chip,
     TabBar = TabBar,
+    ActionBar = ActionBar,
     BottomSheet = BottomSheet,
+    SelectableCover = SelectableCover,
     pill = pill,
     shelfGrid = shelfGrid,
     gridGeometry = gridGeometry,

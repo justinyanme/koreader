@@ -10,6 +10,7 @@ is KOReader's own (BookList); a book without a sidecar is "new".
 
 local BookList = require("ui/widget/booklist")
 local DataStorage = require("datastorage")
+local DocSettings = require("docsettings")
 local DocumentRegistry = require("document/documentregistry")
 local filemanagerutil = require("apps/filemanager/filemanagerutil")
 local ReadHistory = require("readhistory")
@@ -210,11 +211,25 @@ function Shelf.removed()
     return removed
 end
 
---- Hides a book from the shelf. The file stays where it is.
-function Shelf.remove(file)
+--- Hides books (a list of their files) from the shelf. The files stay where they are.
+-- The settings are written at once, so the books stay hidden even if KOReader does not quit cleanly.
+function Shelf.remove(files)
     local removed = G_reader_settings:readSetting("shelf_removed") or {}
-    removed[file] = os.time()
+    for _, file in ipairs(files) do
+        removed[file] = os.time()
+    end
     G_reader_settings:saveSetting("shelf_removed", removed)
+    G_reader_settings:flush()
+end
+
+--- Sets a book's status (书籍状态: "reading", "complete" or "abandoned"), as KOReader's own status buttons do.
+-- A book never opened gets its settings file for it.
+function Shelf.setStatus(file, status)
+    local doc_settings = DocSettings:open(file)
+    local summary = doc_settings:readSetting("summary") or {}
+    summary.status = status
+    filemanagerutil.saveSummary(doc_settings, summary)
+    BookList.setBookInfoCacheProperty(file, "status", status)
 end
 
 return Shelf

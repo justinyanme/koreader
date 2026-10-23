@@ -2,18 +2,24 @@
 The 书架 tab, after WeChat Read's shelf on the Leaf5 (00-entry/01-bookshelf.png): a full-width
 search field, the title row, and a paged cover grid. The title names the status filter
 (书架, or 在读 ▾) and opens the filter menu; 导入 at the right of the row opens the import page
-(apps/shelf/importpage); the order is set in 设置 → 书架. The grid fills
-the content area: the next page's first row shows cut off at its foot, under the bottom band
-that ShelfFileManager draws with the tab icons and the page capsule.
+(apps/shelf/importpage), and 选择 after it enters selection mode; the order is set in 设置 → 书架.
+The grid fills the content area: the next page's first row shows cut off at its foot, under the
+bottom band that ShelfFileManager draws with the tab icons and the page capsule.
+
+Selection mode (CONTEXT.md, 选择模式; 15-supplement/03–06): 选择 enters it with no book selected,
+a long press on a cover with that book selected. Taps then select covers instead of opening them,
+on every page; the title row reads 全选 (取消全选 once the whole filtered shelf is selected), the
+count, and 取消. The band swaps the tab icons for 移出书架 (hides the books, never deletes a file)
+and 标记为 (读完, 在读, 搁置), each asked in a confirm layer; either one ends selection mode.
 
 Every interaction repaints only what changed with a "ui" refresh (DESIGN.md, Refresh
-mapping): from the title row down for a filter, the grid and the bottom band for a page;
-returning from the reader is already a "full" refresh.
+mapping): from the title row down for a filter or entering selection mode, the grid and the
+bottom band for a page, the cover and the title row for a cover selected; returning from the
+reader is already a "full" refresh.
 ]]
 
-local BookList = require("ui/widget/booklist")
 local CenterContainer = require("ui/widget/container/centercontainer")
-local DocSettings = require("docsettings")
+local ConfirmLayer = require("ui/widget/confirmlayer")
 local Event = require("ui/event")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
@@ -24,14 +30,15 @@ local IconWidget = require("ui/widget/iconwidget")
 local ImportPage = require("apps/shelf/importpage")
 local InputDialog = require("ui/widget/inputdialog")
 local LeftContainer = require("ui/widget/container/leftcontainer")
-local Notification = require("ui/widget/notification")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local Palette = require("ui/palette")
+local RightContainer = require("ui/widget/container/rightcontainer")
 local SelectionBubble = require("ui/widget/selectionbubble")
 local Shelf = require("apps/shelf/shelf")
 local ShelfWidgets = require("apps/shelf/shelfwidgets")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
+local Toast = require("ui/widget/toast")
 local TopContainer = require("ui/widget/container/topcontainer")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -46,6 +53,8 @@ local Screen = require("device").screen
 local T = ffiUtil.template
 local _ = require("gettext")
 local C_ = _.pgettext
+local N_ = _.ngettext
+local NC_ = _.npgettext
 
 local function dp(n) return Screen:scaleBySize(n) end
 
@@ -56,6 +65,7 @@ local HEADER_H = SEARCH_TOP + SEARCH_H
 local TITLE_ROW_H = dp(76) -- from the search field to the grid
 local TITLE_MID = dp(46) -- the title's middle, under the search field
 local TITLE_TAP_H = dp(44)
+local TITLE_ACTION_GAP = dp(24) -- between 导入 and 选择
 local GRID_Y = HEADER_H + TITLE_ROW_H
 local EXTRACT_CHUNK = 40 -- books per background job, well under BookInfoManager's 5 minute watchdog
 
@@ -65,6 +75,13 @@ local filter_texts = {
     new = C_("Status of group of books", "New"),
     complete = C_("Status of group of books", "Finished"),
     abandoned = C_("Status of group of books", "On hold"),
+}
+-- what 标记为 offers, in this order
+local mark_statuses = { "complete", "reading", "abandoned" }
+local mark_texts = {
+    complete = C_("Status of single book", "Finished"),
+    reading = C_("Status of single book", "Reading"),
+    abandoned = C_("Status of single book", "On hold"),
 }
 local sort_texts = {
     recent = _("Recently read"),
@@ -91,6 +108,7 @@ local ShelfView = WidgetContainer:extend{
     ui = nil, -- the FileManager
     width = nil,
     height = nil,
+    selected = nil, -- in selection mode, the set of selected files; nil outside it
 }
 
 function ShelfView:init()
@@ -303,7 +321,9 @@ function ShelfView:buildHeader()
     }
     if query then
         table.insert(field, ShelfWidgets.Tappable:new{
-            callback = function() self:setQuery(nil) end,
+            callback = function()
+                if not self.selected then self:setQuery(nil) end
+            end,
             CenterContainer:new{ dimen = Geom:new{ w = clear_w, h = inner_h },
                 IconWidget:new{ icon = "close", width = dp(20), height = dp(20) } },
         })
@@ -313,7 +333,9 @@ function ShelfView:buildHeader()
         HorizontalGroup:new{
             HorizontalSpan:new{ width = GUTTER },
             ShelfWidgets.Tappable:new{
-                callback = function() self:showSearch() end,
+                callback = function()
+                    if not self.selected then self:showSearch() end
+                end,
                 FrameContainer:new{
                     radius = math.floor(SEARCH_H / 2),
                     bordersize = border,
@@ -336,23 +358,39 @@ function ShelfView:titleText()
     return filter_texts[self.filter] .. " ▾"
 end
 
---- A text action of the title row (导入): a circled line icon before 16dp bold ink text, 44dp tall to tap.
-function ShelfView:textAction(icon, label, callback)
+--- A text action of the title row (导入, 选择, 全选, 取消): 16dp bold ink text after an optional circled line icon,
+-- at least 44dp to tap; a short label sits at the `align` side ("left" or "right") of its target.
+function ShelfView:textAction(icon, label, callback, align)
     local icon_size = dp(20)
-    local content = HorizontalGroup:new{
-        align = "center",
-        IconWidget:new{ icon = icon, width = icon_size, height = icon_size, alpha = true },
-        HorizontalSpan:new{ width = dp(4) },
-        TextWidget:new{ text = label, face = Font:getFace("ui_title"), fgcolor = Palette.ink },
-    }
+    local content = HorizontalGroup:new{ align = "center" }
+    if icon then
+        table.insert(content, IconWidget:new{ icon = icon, width = icon_size, height = icon_size, alpha = true })
+        table.insert(content, HorizontalSpan:new{ width = dp(4) })
+    end
+    table.insert(content, TextWidget:new{ text = label, face = Font:getFace("ui_title"), fgcolor = Palette.ink })
+    local size = content:getSize()
+    local container = align == "left" and LeftContainer or align == "right" and RightContainer or CenterContainer
     return ShelfWidgets.Tappable:new{
         callback = callback,
-        CenterContainer:new{ dimen = Geom:new{ w = content:getSize().w, h = math.max(TITLE_TAP_H, content:getSize().h) },
+        container:new{ dimen = Geom:new{ w = math.max(TITLE_TAP_H, size.w), h = math.max(TITLE_TAP_H, size.h) },
             content },
     }
 end
 
+--- The title row's vertical place: `row` (tap_h tall) centered on TITLE_MID, in TITLE_ROW_H.
+local function placeTitleRow(row, tap_h)
+    return VerticalGroup:new{
+        align = "left",
+        VerticalSpan:new{ width = TITLE_MID - math.floor(tap_h / 2) },
+        row,
+        VerticalSpan:new{ width = TITLE_ROW_H - TITLE_MID - math.ceil(tap_h / 2) },
+    }
+end
+
 function ShelfView:buildTitleRow()
+    if self.selected then
+        return self:buildSelectionRow()
+    end
     local title = TextWidget:new{
         text = self:titleText(),
         face = Font:getFace("ui_headword", 22),
@@ -367,8 +405,10 @@ function ShelfView:buildTitleRow()
     }
     self.import_button = self:textAction("eink/plus.circle", C_("Shelf", "Import"),
         function() ImportPage.show(self.ui) end)
+    self.select_button = self:textAction("eink/check.circle", _("Select"), function() self:startSelection() end)
     -- between the title and the actions at the right: the indexing progress, right-aligned
     local free_w = self.width - 2 * GUTTER - title:getSize().w - self.import_button:getSize().w
+        - TITLE_ACTION_GAP - self.select_button:getSize().w
     local row = HorizontalGroup:new{ align = "center", HorizontalSpan:new{ width = GUTTER }, self.title_button }
     if self.extracting then
         local gap = dp(16)
@@ -384,12 +424,37 @@ function ShelfView:buildTitleRow()
     end
     table.insert(row, HorizontalSpan:new{ width = free_w })
     table.insert(row, self.import_button)
-    return VerticalGroup:new{
-        align = "left",
-        VerticalSpan:new{ width = TITLE_MID - math.floor(tap_h / 2) },
-        row,
-        VerticalSpan:new{ width = TITLE_ROW_H - TITLE_MID - math.ceil(tap_h / 2) },
+    table.insert(row, HorizontalSpan:new{ width = TITLE_ACTION_GAP })
+    table.insert(row, self.select_button)
+    return placeTitleRow(row, tap_h)
+end
+
+--- Selection mode's title row: 全选 (or 取消全选) at the left, the count centered on the screen, 取消 at the right.
+function ShelfView:buildSelectionRow()
+    local count = #self:selectedBooks()
+    local all_selected = count > 0 and count == #self.shown
+    local left = self:textAction(nil, all_selected and _("Deselect all") or _("Select all"),
+        function() self:selectAll(not all_selected) end, "left")
+    local right = self:textAction(nil, _("Cancel"), function() self:endSelection() end, "right")
+    local side_w = math.max(left:getSize().w, right:getSize().w)
+    local heading = TextWidget:new{
+        text = count == 0 and _("Select books") or T(NC_("Shelf", "1 book selected", "%1 books selected", count), count),
+        face = Font:getFace("ui_title"),
+        fgcolor = Palette.ink,
+        max_width = self.width - 2 * (GUTTER + side_w + dp(8)),
     }
+    local heading_x = math.floor((self.width - heading:getSize().w) / 2)
+    local tap_h = math.max(left:getSize().h, right:getSize().h, heading:getSize().h)
+    local row = HorizontalGroup:new{
+        align = "center",
+        HorizontalSpan:new{ width = GUTTER },
+        left,
+        HorizontalSpan:new{ width = heading_x - GUTTER - left:getSize().w },
+        heading,
+        HorizontalSpan:new{ width = self.width - GUTTER - right:getSize().w - heading_x - heading:getSize().w },
+        right,
+    }
+    return placeTitleRow(row, tap_h)
 end
 
 function ShelfView:buildGrid(per_page)
@@ -436,9 +501,27 @@ function ShelfView:buildCell(book, clip)
         badge.overlap_align = "right"
         cover = OverlapGroup:new{ dimen = Geom:new{ w = g.cover_w, h = g.cover_h }, cover, badge }
     end
+    -- entering and leaving selection mode, or selecting, only repaints: the covers are not built again
+    cover = ShelfWidgets.SelectableCover:new{
+        selection = function() return self.selected and self.selected[book.file] == true end,
+        cover,
+    }
     return ShelfWidgets.Tappable:new{
-        callback = function() self:openBook(book) end,
-        hold_callback = function() self:showBookSheet(book) end,
+        -- in selection mode, a tap or a long press selects; neither opens the book
+        callback = function()
+            if self.selected then
+                self:toggleSelected(book, cover)
+            else
+                self:openBook(book)
+            end
+        end,
+        hold_callback = function()
+            if self.selected then
+                self:toggleSelected(book, cover)
+            else
+                self:startSelection(book)
+            end
+        end,
         clip = clip,
         VerticalGroup:new{
             align = "left",
@@ -572,31 +655,147 @@ function ShelfView:openBook(book)
     filemanagerutil.openFile(self.ui, book.file)
 end
 
-function ShelfView:setStatus(book, status)
-    local doc_settings = DocSettings:open(book.file)
-    local summary = doc_settings:readSetting("summary") or {}
-    summary.status = status
-    filemanagerutil.saveSummary(doc_settings, summary)
-    BookList.setBookInfoCacheProperty(book.file, "status", status)
-    book.status = status
-    self:update("title")
-end
-
-function ShelfView:removeBook(book)
-    Shelf.remove(book.file)
-    for i, b in ipairs(self.books) do
-        if b == book then
-            table.remove(self.books, i)
-            break
+--- The selected books of the filtered shelf, on every page, in shelf order.
+function ShelfView:selectedBooks()
+    local books = {}
+    if not self.selected then return books end
+    for _, book in ipairs(self.shown) do
+        if self.selected[book.file] then
+            table.insert(books, book)
         end
     end
+    return books
+end
+
+--- Enters selection mode, with `book` selected if given (a long press on its cover), else none (选择).
+function ShelfView:startSelection(book)
+    self.selected = {}
+    if book then
+        self.selected[book.file] = true
+    end
+    self:refreshSelection()
+end
+
+--- Leaves selection mode (取消, Back), selecting nothing more.
+function ShelfView:endSelection()
+    if not self.selected then return end
+    self.selected = nil
+    self:refreshSelection()
+end
+
+--- 全选 (`on`) selects every book of the filtered shelf, not only the page shown; 取消全选 clears the selection.
+function ShelfView:selectAll(on)
+    self.selected = {}
+    if on then
+        for _, book in ipairs(self.shown) do
+            self.selected[book.file] = true
+        end
+    end
+    self:refreshSelection()
+end
+
+--- Selects or leaves out one book; `cover` is its SelectableCover, the only cover to repaint.
+function ShelfView:toggleSelected(book, cover)
+    self.selected[book.file] = not self.selected[book.file] or nil
+    self:refreshSelection(cover:getSelectionRect())
+end
+
+--- Rebuilds the title row and the band for the selection, and repaints them with `rect` ("ui"), by default
+-- everything from the title row down. The covers read the selection when painted.
+function ShelfView:refreshSelection(rect)
+    self[1][2]:free()
+    self[1][2] = self:buildTitleRow()
+    local band_changed = self.ui:updateBottomBar()
+    if not self:isShowing() then return end
+    local title = self:titleRect()
+    if rect then
+        UIManager:setDirty(self.ui, "ui", title)
+    else
+        rect = Geom:new{ x = title.x, y = title.y, w = self.width, h = self.height - HEADER_H }
+    end
+    UIManager:setDirty(self.ui, "ui", rect)
+    if band_changed then
+        UIManager:setDirty(self.ui, "ui", self.ui.tabbar_dimen)
+    end
+end
+
+--- What the band shows in selection mode, in the tab icons' place: `items`, 移出书架 and 标记为, `enabled` once a
+-- book is selected. nil outside selection mode.
+function ShelfView:bandActions()
+    if not self.selected then return end
+    return {
+        enabled = #self:selectedBooks() > 0,
+        items = {
+            { icon = "eink/shelf.remove", callback = function() self:confirmRemove(self:selectedBooks()) end },
+            { icon = "eink/mark", callback = function() self:confirmMark() end },
+        },
+    }
+end
+
+--- Asks in a confirm layer over the shelf; Cancel (or a tap on the page, or Back) keeps the selection as it is.
+function ShelfView:confirm(question, actions)
+    local layer = ConfirmLayer:new{ text = question, actions = actions }
+    UIManager:show(layer, "ui", layer:getRefreshRegion())
+end
+
+--- 移出书架 for `books` (the selection, or the book of 文件's sheet), once confirmed.
+function ShelfView:confirmRemove(books)
+    local question = #books == 1 and T(_("Remove “%1” from the shelf? The file stays on the device."), books[1].title)
+        or T(N_("Remove 1 book from the shelf? The file stays on the device.",
+            "Remove %1 books from the shelf? The files stay on the device.", #books), #books)
+    self:confirm(question, { { text = C_("Shelf", "Remove"), callback = function() self:removeBooks(books) end } })
+end
+
+--- 标记为 for the selected books: 读完, 在读 or 搁置.
+function ShelfView:confirmMark()
+    local books = self:selectedBooks()
+    local question = #books == 1 and T(_("Mark “%1” as"), books[1].title)
+        or T(N_("Mark 1 book as", "Mark %1 books as", #books), #books)
+    local actions = {}
+    for _, status in ipairs(mark_statuses) do
+        table.insert(actions, { text = mark_texts[status], callback = function() self:markBooks(books, status) end })
+    end
+    self:confirm(question, actions)
+end
+
+--- Hides `books` from the shelf, leaving their files where they are, and ends selection mode if on.
+function ShelfView:removeBooks(books)
+    local files, removed = {}, {}
+    for _, book in ipairs(books) do
+        table.insert(files, book.file)
+        removed[book] = true
+    end
+    Shelf.remove(files)
+    for i = #self.books, 1, -1 do
+        if removed[self.books[i]] then
+            table.remove(self.books, i)
+        end
+    end
+    self.selected = nil
     self:update("title")
-    UIManager:show(Notification:new{
-        text = T(_("Removed from shelf. The file is still in %1"), filemanagerutil.abbreviate(util.splitFilePathName(book.file))),
+    local text = #books == 1
+        and T(_("Removed from shelf. The file is still in %1"), filemanagerutil.abbreviate(util.splitFilePathName(books[1].file)))
+        or T(N_("Removed 1 book from the shelf. The file stays on the device.",
+            "Removed %1 books from the shelf. The files stay on the device.", #books), #books)
+    UIManager:show(Toast:new{ text = text, close_refresh_type = "ui" }) -- it is over covers
+end
+
+--- Sets the status of `books`, which is saved with each book, and ends selection mode if on.
+function ShelfView:markBooks(books, status)
+    for _, book in ipairs(books) do
+        Shelf.setStatus(book.file, status)
+        book.status = status
+    end
+    self.selected = nil
+    self:update("title")
+    UIManager:show(Toast:new{
+        text = T(N_("Marked 1 book as %2", "Marked %1 books as %2", #books), #books, mark_texts[status]),
+        close_refresh_type = "ui",
     })
 end
 
---- The long-press sheet; its rows are also what tests drive.
+--- The book sheet that 文件 shows on a long press (FilesChooser); its rows are also what tests drive.
+-- Its status rows and 移出书架 take the same paths as selection mode's actions.
 function ShelfView:getBookActions(book)
     return {
         {
@@ -609,21 +808,21 @@ function ShelfView:getBookActions(book)
         },
         book.status == "complete" and {
             text = _("Mark as reading"),
-            callback = function() self:setStatus(book, "reading") end,
+            callback = function() self:markBooks({ book }, "reading") end,
         } or {
             text = _("Mark as finished"),
-            callback = function() self:setStatus(book, "complete") end,
+            callback = function() self:markBooks({ book }, "complete") end,
         },
         book.status == "abandoned" and {
             text = _("Mark as reading"),
-            callback = function() self:setStatus(book, "reading") end,
+            callback = function() self:markBooks({ book }, "reading") end,
         } or {
             text = _("Put on hold"),
-            callback = function() self:setStatus(book, "abandoned") end,
+            callback = function() self:markBooks({ book }, "abandoned") end,
         },
         {
             text = _("Remove from shelf"),
-            callback = function() self:removeBook(book) end,
+            callback = function() self:confirmRemove({ book }) end,
         },
     }
 end

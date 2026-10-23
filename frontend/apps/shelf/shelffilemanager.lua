@@ -2,6 +2,8 @@
 The redesigned home: FileManager with the bottom band of WeChat Read's shelf: the
 tab icons 书源 / 书架 / 我 at the left and the page capsule at the right, which
 turns the shelf's pages (it is gray on the other tabs, which page themselves).
+In the shelf's selection mode, the actions on the selected books take the tab
+icons' place.
 
 Requiring this module registers it in apps/replacements. It keeps the
 original FileManager layout as 文件, so modules and plugins that rely on
@@ -76,11 +78,15 @@ function ShelfFileManager:setupLayout()
     FileManager.setupLayout(self)
     self.files_ui = self[1]
 
+    -- a rebuild (rotation) keeps selection mode and what is selected
+    local selected
     if self.shelf_view then
+        selected = self.shelf_view.selected
         self.shelf_view:stop()
         self.shelf_view:free()
     end
-    self.shelf_view = ShelfView:new{ ui = self, width = self.content_dimen.w, height = self.content_dimen.h }
+    self.shelf_view = ShelfView:new{ ui = self, width = self.content_dimen.w, height = self.content_dimen.h,
+        selected = selected }
     -- a rebuild (rotation) keeps the 我的 subpage and its list page
     local me_state = self.me_view and self.me_view:getState()
     if self.me_view then self.me_view:free() end
@@ -105,24 +111,33 @@ function ShelfFileManager:setupLayout()
     end
 end
 
--- What the bottom band shows: the current tab (or 文件), and the page of 书架 or 文件 (one page, gray, on 我).
+-- What the bottom band shows: the current tab (or 文件), and the page of 书架 or 文件 (one page, gray, on 我);
+-- on 书架 in selection mode, its actions instead of the tabs, and whether they are enabled.
 function ShelfFileManager:bottomBarState()
-    local page, pages = 1, 1
+    local page, pages, actions = 1, 1, nil
     if self.current_tab == "shelf" then
         page, pages = self.shelf_view.page, self.shelf_view.pages
+        actions = self.shelf_view:bandActions()
     elseif self.current_tab == "files" then
         page, pages = self.file_chooser.page, self.file_chooser.page_num or 1
     end
-    return table.concat({ self.current_tab, page, pages }, "/"), page, pages
+    local left = actions and (actions.enabled and "actions" or "actions-off") or "tabs"
+    return table.concat({ self.current_tab, page, pages, left }, "/"), page, pages, actions
 end
 
---- The bottom band: the tab icons (the back arrow on 文件), and the capsule turning the pages of 书架 or 文件.
--- Its paper ground covers the cut-off row of covers above it.
+--- The bottom band: the tab icons (the back arrow on 文件, the selection's actions on 书架 in selection mode),
+-- and the capsule turning the pages of 书架 or 文件. Its paper ground covers the cut-off row of covers above it.
 function ShelfFileManager:buildBottomBar()
-    local state, page, pages = self:bottomBarState()
+    local state, page, pages, actions = self:bottomBarState()
     self.bottom_bar_state = state
     local tab_bar
-    if self.current_tab ~= "files" then
+    if actions then
+        tab_bar = ShelfWidgets.ActionBar:new{
+            items = actions.items,
+            enabled = actions.enabled,
+            height = EinkControls.BottomBar.height - Size.border.default,
+        }
+    elseif self.current_tab ~= "files" then
         local tabs = {}
         for _, tab in ipairs(self.tabs) do
             if not tab.available or tab.available(self) then
@@ -262,9 +277,13 @@ function ShelfFileManager:onShelfSortChanged(sort)
     self.shelf_view:setSort(sort)
 end
 
--- Only reached on 书架 (file_chooser handles Back itself while 文件 shows it).
+-- Only reached on 书架 (file_chooser handles Back itself while 文件 shows it): it leaves selection mode first.
 -- "Parent folder" means nothing here, so Back exits or prompts as by default.
 function ShelfFileManager:onBack()
+    if self.current_tab == "shelf" and self.shelf_view.selected then
+        self.shelf_view:endSelection()
+        return true
+    end
     if G_reader_settings:readSetting("back_in_filemanager", "default") == "default" then
         return FileChooser.onBack(self.file_chooser) -- not 文件's own Back, which goes up a folder
     end
