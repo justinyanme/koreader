@@ -2,11 +2,11 @@
 Groups of the reorganized settings (apps/settings/einksettings.lua), next to the
 original menus' reader_menu_order.lua and filemanager_menu_order.lua.
 
-Each row is backed by items of the original menus, by id, or by an item of the redesign's own:
+Each row is backed by items of the original menus, by id:
     id      row id, the target of the "ShowEinkSettings" event (as are group ids)
     items   original menu item ids; one item opens its own entries, several are listed together
     file    an element table the original menu embeds without an id (instead of items)
-    item    function returning a menu item of the redesign's own (instead of items), built each time
+    build   function returning a menu item of the new settings' own (instead of items)
     toggle  the single item is a checkbox, shown as a toggle on the row
     choice  the entries up to the first separator are one single choice, shown with a check mark
     value   function(item) returning the row's current value; by default the "Name: value" text or checked radio entry
@@ -29,7 +29,7 @@ return {
         { id = "footer", text = C_("Settings", "Status bar"), items = { "status_bar" } },
         { id = "end_action", text = _("After finishing a book"), items = { "document_end_action" } },
         { id = "highlight_style", text = C_("Settings", "Highlight style"), choice = true,
-          item = function() return require("apps/reader/modules/readerhighlightbubble").genDefaultStyleMenuItem() end },
+          build = function() return require("apps/reader/modules/readerhighlightbubble").genDefaultStyleMenuItem() end },
     } },
     { id = "screen", text = C_("Settings group", "Screen"), rows = {
         { id = "refresh", text = _("Refresh and ghosting"), items = { "screen_eink_opt" } },
@@ -51,6 +51,10 @@ return {
             "autosuspend", "autoshutdown", "autostandby", "ignore_sleepcover", "ignore_open_sleepcover",
             "cover_events", "pageturn_power", "charging_led", "ignore_battery_optimizations",
         } },
+    } },
+    { id = "shelf", text = _("Shelf"), rows = {
+        { id = "shelf_sort", text = _("Sort by"), choice = true,
+          build = function() return require("apps/shelf/shelfview").sortMenuItem() end },
     } },
     { id = "advanced", text = C_("Settings group", "Advanced"), rows = {
         { id = "plugins", text = _("Plugins"), items = { "plugin_management" } },

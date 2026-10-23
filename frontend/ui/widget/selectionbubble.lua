@@ -2,10 +2,10 @@
 Selection popover of the e-ink redesign (see DESIGN.md, Selection popover), as
 in WeChat Read: a paper card with a 1dp ink outline and 13dp corners, and an
 outlined 16 × 8dp arrow pointing at the selection. In a row with icons, cells
-show an icon over a short label and are 62dp wide at least; other rows are
-labels in 44dp cells. Rows are split by rule-gray lines.
-It sits above the selection when there is room, below it otherwise, and 16dp
-from the screen edges.
+show an icon over a short label and are 62dp wide at least, and a widget cell
+keeps its widget; other rows are labels or widgets in 44dp cells. Rows are split
+by rule-gray lines. It sits above the selection when there is room, below it
+otherwise, and 16dp from the screen edges.
 
 The rest of the screen is a transparent scrim: a tap there closes the popover.
 The owner refreshes; getRefreshRegion() is the popover and its arrow.
@@ -13,8 +13,8 @@ The owner refreshes; getRefreshRegion() is the popover and its arrow.
 @usage
     local bubble = SelectionBubble:new{
         rows = { {
-            { icon = "eink/highlight", text = _("Highlight"), callback = ... },
             { icon = "eink/copy", text = _("Copy"), callback = ... },
+            { widget = swatch, selected = true, callback = ... },
         } },
         anchor_rects = selection_screen_rects,
         tap_close_callback = function() ... end,
@@ -43,6 +43,7 @@ local BubbleCell = InputContainer:extend{
     width = nil,
     height = nil,
     content = nil, -- widget
+    selected = false,
     callback = nil,
 }
 
@@ -50,6 +51,15 @@ function BubbleCell:init()
     self.dimen = Geom:new{ w = self.width, h = self.height }
     self[1] = CenterContainer:new{ dimen = self.dimen:copy(), self.content }
     self.ges_events = { TapSelect = { GestureRange:new{ ges = "tap", range = self.dimen } } }
+end
+
+function BubbleCell:paintTo(bb, x, y)
+    InputContainer.paintTo(self, bb, x, y)
+    if self.selected then
+        local inset = Screen:scaleBySize(5) -- clear of the card's outline
+        bb:paintBorder(x + inset, y + inset, self.width - 2 * inset, self.height - 2 * inset,
+            Screen:scaleBySize(2), Palette.ink, Screen:scaleBySize(8))
+    end
 end
 
 function BubbleCell:onTapSelect()
@@ -60,7 +70,7 @@ function BubbleCell:onTapSelect()
 end
 
 local SelectionBubble = InputContainer:extend{
-    rows = nil, -- array of rows; a row is an array of { icon =, text =, callback = }
+    rows = nil, -- array of rows; a row is an array of { icon =, text = } or { widget = }, with selected =, callback =
     anchor_rects = nil, -- screen rects of the selection
     tap_close_callback = nil, -- called when a tap outside the popover closes it
 }
@@ -95,6 +105,7 @@ function SelectionBubble:init()
                 width = w,
                 height = heights[r],
                 content = contents[r][c],
+                selected = cell.selected,
                 callback = cell.callback,
             })
         end
@@ -126,7 +137,7 @@ function SelectionBubble:rowContents(row, max_cell_w)
         local cell_w = Screen:scaleBySize(62)
         for c, cell in ipairs(row) do
             -- the label's line box already leaves room below it
-            contents[c] = VerticalGroup:new{
+            contents[c] = cell.widget or VerticalGroup:new{
                 VerticalSpan:new{ width = Screen:scaleBySize(10) },
                 cell.icon and IconWidget:new{ icon = cell.icon, width = icon_size, height = icon_size, alpha = true }
                     or VerticalSpan:new{ width = icon_size },
@@ -148,7 +159,7 @@ function SelectionBubble:rowContents(row, max_cell_w)
     else
         local cell_pad = Screen:scaleBySize(13)
         for c, cell in ipairs(row) do
-            contents[c] = TextWidget:new{
+            contents[c] = cell.widget or TextWidget:new{
                 text = cell.text,
                 face = Font:getFace("ui_label_large"),
                 fgcolor = Palette.ink,

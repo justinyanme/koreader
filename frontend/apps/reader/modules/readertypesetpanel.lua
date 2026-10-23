@@ -1,21 +1,25 @@
 --[[--
-Typeset panel of the e-ink redesign (see DESIGN.md, Bottom sheet, and the
-prototype's typeSheet): font size, font, line spacing and margins of reflowable
-books in one bottom sheet, opened from the toolbar's "Font" ("ShowConfigMenu").
-"More layout options" pages the same sheet to weight, render mode, embedded
-fonts and styles, and links into the existing hyphenation and style tweak menus.
+排版面板 of the e-ink redesign (see DESIGN.md, Panels): font size, font, line
+spacing and margins of reflowable books in one panel between the page and the
+reader toolbar's bottom bar, opened from the toolbar's "Font" ("ShowConfigMenu").
+The bottom bar keeps showing; the top bar hides, as in WeChat Read. The pill at
+the right of its title row opens the layout options page (weight, render mode,
+embedded fonts and styles, and links into the existing hyphenation and style
+tweak menus), nested in the toolbar: the bottom bar then holds only a back
+arrow, back to the panel.
 
 Replaces ReaderConfig (apps/replacements reader_config slot) for reflowable
 books on touch devices. Fixed-layout books and devices without touch keep the
 original bottom bar, which stays reachable for every book through the
 "ShowOriginalConfigMenu" event. Also registers the chapter page header.
 
-Showing, updating and closing the sheet only refresh its rect ("ui"). A type
+Showing and closing the panel refresh ("ui") only its rect and the toolbar's
+bars it shows or hides, with the page under what they no longer cover; updating
+it refreshes only its rect. A type
 change re-lays the page out, which the reader refreshes as it does for a page
 turn ("partial", promoted to "full" by the user's full refresh setting).
 ]]
 
-local BottomSheet = require("ui/widget/bottomsheet")
 local CanvasContext = require("document/canvascontext")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
@@ -34,8 +38,10 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local Palette = require("ui/palette")
+local Panel = require("ui/widget/panel")
 local ReaderChapterHeader = require("apps/reader/modules/readerchapterheader")
 local ReaderConfig = require("apps/reader/modules/readerconfig")
+local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -92,47 +98,57 @@ local function controlRow(label, control)
     }
 end
 
--- Full-width tappable row: label on the left, an optional widget on the right.
-local Row = InputContainer:extend{
-    label = nil, -- widget
-    right = nil, -- widget
-    height = nil,
-    callback = nil,
-}
-
-function Row:init()
-    local w = BottomSheet.getContentWidth()
-    local right_w = self.right and self.right:getSize().w or 0
-    self.dimen = Geom:new{ w = w, h = self.height }
-    self[1] = HorizontalGroup:new{
-        LeftContainer:new{ dimen = Geom:new{ w = w - right_w, h = self.height }, self.label },
-        self.right,
-    }
-    if self.callback then
-        self.ges_events = { TapSelect = { GestureRange:new{ ges = "tap", range = self.dimen } } }
-    end
-end
-
-function Row:onTapSelect()
-    self.callback()
-    return true
-end
-
 local function ruleAbove(widget)
     return VerticalGroup:new{
-        LineWidget:new{ dimen = Geom:new{ w = BottomSheet.getContentWidth(), h = Screen:scaleBySize(1) }, background = Palette.rule },
+        LineWidget:new{ dimen = Geom:new{ w = Panel.getContentWidth(), h = Screen:scaleBySize(1) }, background = Palette.rule },
         widget,
     }
 end
 
 local function linkRow(label, callback)
     local chev = Screen:scaleBySize(18)
-    return ruleAbove(Row:new{
+    return ruleAbove(Panel.Row:new{
         height = Screen:scaleBySize(48),
-        label = text(label, "ui_label_large", Palette.ink, BottomSheet.getContentWidth() - chev),
+        label = text(label, "ui_label_large", Palette.ink, Panel.getContentWidth() - chev),
         right = IconWidget:new{ icon = "eink/chev", width = chev, height = chev, alpha = true },
         callback = callback,
     })
+end
+
+-- Outline pill naming a page of the panel, with a chevron: the entry at the right of the title row.
+-- The whole 44dp row height is its touch target.
+local EntryPill = InputContainer:extend{
+    text = nil,
+    callback = nil,
+}
+
+function EntryPill:init()
+    local h = Screen:scaleBySize(29)
+    local bw = Size.border.default
+    local chev = Screen:scaleBySize(14)
+    local pad = Screen:scaleBySize(12)
+    local label = HorizontalGroup:new{
+        align = "center",
+        text(self.text, "ui_label", Palette.ink),
+        HorizontalSpan:new{ width = Screen:scaleBySize(4) },
+        IconWidget:new{ icon = "eink/chev", width = chev, height = chev, alpha = true },
+    }
+    local w = label:getSize().w + 2 * (pad + bw)
+    self.dimen = Geom:new{ w = w, h = Screen:scaleBySize(44) }
+    self[1] = CenterContainer:new{
+        dimen = self.dimen:copy(),
+        FrameContainer:new{
+            bordersize = bw, padding = 0, radius = math.floor(h / 2),
+            color = Palette.ink, background = Palette.paper,
+            CenterContainer:new{ dimen = Geom:new{ w = w - 2 * bw, h = h - 2 * bw }, label },
+        },
+    }
+    self.ges_events = { TapSelect = { GestureRange:new{ ges = "tap", range = self.dimen } } }
+end
+
+function EntryPill:onTapSelect()
+    self.callback()
+    return true
 end
 
 -- Font tile: a sample in the face over its name; 2dp ink border when selected, 1dp rule gray otherwise.
@@ -170,7 +186,7 @@ function FontCard:onTapSelect()
 end
 
 local ReaderTypesetPanel = ReaderConfig:extend{
-    sheet = nil, -- BottomSheet while shown
+    panel = nil, -- ui/widget/panel while shown by the toolbar
     page = nil, -- "main" or "more"
 }
 
@@ -205,18 +221,17 @@ function ReaderTypesetPanel:init()
     end
 end
 
+--- Reflowable books on touch devices, with the reader toolbar to host the panel.
 function ReaderTypesetPanel:usesPanel()
-    return self.ui.rolling ~= nil and Device:isTouchDevice()
+    return self.ui.rolling ~= nil and Device:isTouchDevice() and self.ui.menu.showPanel ~= nil
 end
 
 function ReaderTypesetPanel:onShowConfigMenu()
     if not self:usesPanel() then
         return ReaderConfig.onShowConfigMenu(self)
     end
-    if not self.sheet then
-        self.sheet = BottomSheet:new{ on_close = function() self.sheet = nil end }
-        self:showPage("main", true)
-        UIManager:show(self.sheet, "ui", self.sheet:getRefreshRegion())
+    if not self.panel then
+        self:showPage("main")
     end
     self.ui:handleEvent(Event:new("HandledAsSwipe")) -- cancel any pan scroll made
     return true
@@ -224,18 +239,18 @@ end
 
 --- The original bottom bar, for reflowable books too.
 function ReaderTypesetPanel:onShowOriginalConfigMenu()
-    self:closeSheet()
+    self:closeWithToolbar()
     return ReaderConfig.onShowConfigMenu(self)
 end
 
 function ReaderTypesetPanel:onCloseConfigMenu()
-    self:closeSheet()
+    self:closePanel()
     self:closeMenu()
     ReaderConfig.onCloseConfigMenu(self)
 end
 
 function ReaderTypesetPanel:onSetDimensions(dimen)
-    self:closeSheet(true)
+    self:closeWithToolbar(true)
     self:closeMenu()
     ReaderConfig.onSetDimensions(self, dimen)
     if self.ui.rolling and self.ui.postReaderReadyCallback == nil then
@@ -247,47 +262,50 @@ function ReaderTypesetPanel:onSetDimensions(dimen)
 end
 
 function ReaderTypesetPanel:onCloseWidget()
-    self:closeSheet(true)
+    self:closeWithToolbar(true)
     self:closeMenu()
 end
 
-function ReaderTypesetPanel:closeSheet(no_refresh)
-    local sheet = self.sheet
-    if not sheet then return end
-    self.sheet = nil
-    sheet.on_close = nil
-    if no_refresh then
-        UIManager:close(sheet)
-    else
-        sheet:onClose()
+--- Closes the panel, if it shows; the toolbar stays.
+function ReaderTypesetPanel:closePanel()
+    if self.panel then
+        self.ui.menu:closePanel() -- calls the panel's on_close
     end
 end
 
---- Shows a page of the sheet ("main" or "more"); `building` skips the refresh while the sheet is not shown yet.
-function ReaderTypesetPanel:showPage(page, building)
-    local sheet = self.sheet
-    if not sheet then return end
+--- Closes the panel, if it shows, and the toolbar with it.
+function ReaderTypesetPanel:closeWithToolbar(no_refresh)
+    if self.panel then
+        self.ui.menu:hideToolbar(no_refresh) -- calls the panel's on_close
+    end
+end
+
+--- Shows a page of the panel in the toolbar: "main", or "more" (the layout options, nested with a way back).
+function ReaderTypesetPanel:showPage(page)
     self.page = page
-    local content
-    if page == "more" then
-        sheet.title = _("More layout options")
-        sheet.on_back = function() self:showPage("main") end
-        content = self:moreContent()
-    else
-        sheet.title = _("Font & layout")
-        sheet.on_back = nil
-        content = self:mainContent()
+    local panel = Panel:new{
+        content = self:pageContent(),
+        on_back = page == "more" and function() self:showPage("main") end or nil,
+        hide_top_bar = true,
+    }
+    panel.on_close = function()
+        if self.panel == panel then
+            self.panel = nil
+        end
     end
-    if building then
-        sheet.content = content
-        sheet:build()
-    else
-        sheet:setContent(content) -- "ui" on the sheet's rect
-    end
+    self.panel = panel
+    self.ui.menu:showPanel("font", panel)
 end
 
-function ReaderTypesetPanel:refreshSheet()
-    self:showPage(self.page)
+function ReaderTypesetPanel:pageContent()
+    return self.page == "more" and self:moreContent() or self:mainContent()
+end
+
+--- Re-renders the shown page with the current values ("ui" on the panel's rect).
+function ReaderTypesetPanel:refreshPanel()
+    if self.panel then
+        self.panel:setContent(self:pageContent())
+    end
 end
 
 -- Same path as ConfigDialog: record the option, then apply it.
@@ -459,7 +477,7 @@ function ReaderTypesetPanel:fontCards(width)
             selected = face ~= nil and self.ui.font.font_face == face,
             callback = function()
                 self:setCardFont(card[1])
-                self:refreshSheet()
+                self:refreshPanel()
             end,
         })
         table.insert(row, HorizontalSpan:new{ width = gap })
@@ -477,9 +495,9 @@ end
 ------------------------------------------------------------------------
 -- Existing menus, opened on their own
 
---- Shows a menu item table (the original menu's format) as a single-tab menu, after closing the sheet.
+--- Shows a menu item table (the original menu's format) as a single-tab menu, after closing the panel and the toolbar.
 function ReaderTypesetPanel:showMenu(item_table)
-    self:closeSheet()
+    self:closeWithToolbar()
     self:closeMenu()
     local TouchMenu = require("ui/widget/touchmenu")
     local tab = { icon = "appbar.typeset", max_per_page = item_table.max_per_page }
@@ -526,22 +544,31 @@ end
 -- Pages
 
 function ReaderTypesetPanel:mainContent()
-    local w = BottomSheet.getContentWidth()
+    local w = Panel.getContentWidth()
     local control_w = w - LABEL_W
     local size = self.configurable.font_size
+    local entry = EntryPill:new{ text = _("More layout options"), callback = function() self:showPage("more") end }
     return VerticalGroup:new{
         align = "left",
+        HorizontalGroup:new{
+            LeftContainer:new{
+                dimen = Geom:new{ w = w - entry:getSize().w, h = entry:getSize().h },
+                text(_("Font settings"), "ui_title_large", Palette.ink, w - entry:getSize().w),
+            },
+            entry,
+        },
+        VerticalSpan:new{ width = Screen:scaleBySize(4) },
         controlRow(T(C_("Typeset panel", "Font size %1"), string.format("%g", size)),
             EinkControls.TickStepper:new{
                 count = #FONT_SIZES, width = control_w,
                 value = nearestIndex(FONT_SIZES, size),
                 on_change = function(i)
                     self:setFontSize(FONT_SIZES[i])
-                    self:refreshSheet()
+                    self:refreshPanel()
                 end,
                 on_step = function(direction)
                     self:stepFontSize(direction)
-                    self:refreshSheet()
+                    self:refreshPanel()
                 end,
             }),
         controlRow(_("Font"), self:fontCards(control_w)),
@@ -551,7 +578,7 @@ function ReaderTypesetPanel:mainContent()
                 value = indexOf(LINE_SPACINGS, self.configurable.line_spacing),
                 on_change = function(i)
                     self:apply("line_spacing", LINE_SPACINGS[i], "SetLineSpace")
-                    self:refreshSheet()
+                    self:refreshPanel()
                 end,
             }),
         controlRow(_("Margins"),
@@ -560,11 +587,9 @@ function ReaderTypesetPanel:mainContent()
                 value = self:marginStep(),
                 on_change = function(i)
                     self:setMarginStep(i)
-                    self:refreshSheet()
+                    self:refreshPanel()
                 end,
             }),
-        VerticalSpan:new{ width = Screen:scaleBySize(10) },
-        linkRow(_("More layout options: weight, hyphenation, indent, style tweaks"), function() self:showPage("more") end),
     }
 end
 
@@ -579,18 +604,18 @@ end
 function ReaderTypesetPanel:toggleRow(label, name, event)
     local toggle = EinkControls.Toggle:new{ checked = self.configurable[name] == 1 }
     toggle.callback = function(on)
-        UIManager:setDirty(self.sheet, "fast", toggle.dimen)
+        UIManager:setDirty(self.panel.show_parent, "fast", toggle.dimen)
         self:apply(name, on and 1 or 0, event, on)
     end
-    return ruleAbove(Row:new{
+    return ruleAbove(Panel.Row:new{
         height = Screen:scaleBySize(52) - Screen:scaleBySize(1),
-        label = text(label, "ui_label_large", Palette.ink, BottomSheet.getContentWidth() - toggle:getSize().w),
+        label = text(label, "ui_label_large", Palette.ink, Panel.getContentWidth() - toggle:getSize().w),
         right = toggle,
     })
 end
 
 function ReaderTypesetPanel:moreContent()
-    local control_w = BottomSheet.getContentWidth() - LABEL_W
+    local control_w = Panel.getContentWidth() - LABEL_W
     local weight = self:option("font_base_weight")
     local render = self:option("block_rendering_mode")
     return VerticalGroup:new{
@@ -601,7 +626,7 @@ function ReaderTypesetPanel:moreContent()
                 value = nearestIndex(weight.values, self.configurable.font_base_weight),
                 on_change = function(i)
                     self:apply("font_base_weight", weight.values[i], "SetFontBaseWeight")
-                    self:refreshSheet()
+                    self:refreshPanel()
                 end,
             }),
         controlRow(_("Render Mode"),
@@ -610,7 +635,7 @@ function ReaderTypesetPanel:moreContent()
                 value = indexOf(render.values, self.configurable.block_rendering_mode),
                 on_change = function(i)
                     self:apply("block_rendering_mode", render.values[i], "SetBlockRenderingMode", render.args[i])
-                    self:refreshSheet()
+                    self:refreshPanel()
                 end,
             }),
         self:toggleRow(_("Embedded Fonts"), "embedded_fonts", "ToggleEmbeddedFonts"),

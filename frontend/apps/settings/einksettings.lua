@@ -1,5 +1,5 @@
 --[[--
-Settings of the e-ink redesign (see the prototype's settings subpage): five groups,
+Settings of the e-ink redesign (see the prototype's settings subpage): groups
 laid out in ui/elements/eink_settings_order.lua, ending with the original menu.
 
 A full-screen page (ui/widget/fullscreenpage), opened by the "ShowEinkSettings"
@@ -197,8 +197,9 @@ function EinkSettings:rowItems(row)
     local items = {}
     if row.file then
         table.insert(items, dofile(row.file))
-    elseif row.item then
-        table.insert(items, row.item())
+    end
+    if row.build then
+        table.insert(items, row.build())
     end
     for _, id in ipairs(row.items or {}) do
         local item = self.by_id[id]

@@ -110,6 +110,21 @@ describe("Reorganized settings", function()
     end
 
     -- the tile labelled `label` in a toolbar panel
+    -- Opens the reader toolbar's more panel as a reader does: a tap in the middle, then 更多 in the top bar.
+    local function openMorePanel(ui)
+        tap(Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() })
+        local function moreButton(w)
+            if type(w) ~= "table" then return end
+            if w.icon == "eink/more" and w.callback then return w end
+            for __, c in ipairs(w) do
+                local f = moreButton(c)
+                if f then return f end
+            end
+        end
+        tap(moreButton(ui.menu.bars.top).dimen)
+        return ui.menu.panel
+    end
+
     local function findTile(w, label)
         if type(w) ~= "table" then return end
         if w.label == label and w.callback then return w end
@@ -201,6 +216,7 @@ describe("Reorganized settings", function()
         { "screen", "Screen", { "Refresh and ghosting", "Sleep screen", "Night mode" } },
         { "network", "Network & sync", { "Wi-Fi", "Progress sync", "Wireless transfer and library" } },
         { "device", "Device", { "Physical buttons", "Gestures", "Power and sleep" } },
+        { "shelf", "Shelf", { "Sort by" } },
         { "advanced", "Advanced", { "Plugins", "All settings (original)" } },
     }
 
@@ -213,7 +229,7 @@ describe("Reorganized settings", function()
             fm:onClose()
         end)
 
-        it("shows exactly five groups with the issue's rows", function()
+        it("shows exactly six groups with the issues' rows", function()
             local page = openSettings(fm)
             local groups = {}
             for __, entry in ipairs(page.home) do
@@ -231,7 +247,8 @@ describe("Reorganized settings", function()
                         ["Highlight style"] = "Settings" })[name]
                     table.insert(rows, ctx and C_(ctx, name) or _(name))
                 end
-                translated[i] = { g[1], C_("Settings group", g[2]), rows }
+                -- 书架 reuses the shelf tab's own name
+                translated[i] = { g[1], g[1] == "shelf" and _("Shelf") or C_("Settings group", g[2]), rows }
             end
             assert.are.same(translated, groups)
             assert.are.equal(_("Settings"), page.title)
@@ -548,17 +565,13 @@ describe("Reorganized settings", function()
         end)
 
         it("opens from the toolbar's more panel: refresh and ghosting, and all settings", function()
-            ui.menu:openPanel("more")
-            local Panels = require("apps/reader/modules/readertoolbarpanels")
-            assert.is_truthy(Panels)
-            local tile = findTile(ui.menu.sheet, _("Refresh and ghosting"))
-            tile:onTapSelect()
+            tap(findTile(openMorePanel(ui), _("Refresh and ghosting")).dimen)
             local page = topWidget()
             assert.is_true(isSettings(page))
             assert.are.equal(_("Refresh and ghosting"), page.title)
+            assert.is_nil(ui.menu.bars)
             page:closeMenu(true)
-            ui.menu:openPanel("more")
-            findTile(ui.menu.sheet, _("All settings")):onTapSelect()
+            tap(findTile(openMorePanel(ui), _("All settings")).dimen)
             page = topWidget()
             assert.is_true(isSettings(page))
             assert.are.equal(_("Settings"), page.title)
@@ -619,11 +632,10 @@ describe("Reorganized settings", function()
 
         it("opens the same page from the toolbar, pages it, and goes back to the book", function()
             local page_no = ui:getCurrentPage()
-            ui.menu:openPanel("more")
-            UIManager:forceRePaint()
+            local panel = openMorePanel(ui)
             local page
             local refreshes = refreshesOf(function()
-                tap(findTile(ui.menu.sheet, _("All settings")).dimen)
+                tap(findTile(panel, _("All settings")).dimen)
                 page = topWidget()
             end)
             assert.is_true(isSettings(page))
