@@ -477,11 +477,17 @@ end
 function Translator:getTargetLanguage()
     local lang = G_reader_settings:readSetting("translator_to_language")
     if not lang then
-        -- Fallback to the UI language the user has selected
-        lang = G_reader_settings:readSetting("language")
+        -- Fallback to the UI language the user has selected, else to the one in use (e-ink fork: on Android the
+        -- UI follows the system language without any language setting, and translations went to English)
+        lang = G_reader_settings:readSetting("language") or _.current_lang
         if lang and lang ~= "" then
-            -- convert "zh-CN" and "zh-TW" to "zh"
-            lang = lang:match("(.*)-") or lang
+            -- e-ink fork: KOReader's languages are named zh_CN, zh_TW, pt_BR...
+            lang = lang:gsub("_", "-")
+            if lang == "zh-TW" or lang == "zh-HK" then
+                return "zh-TW" -- Chinese (Traditional)
+            end
+            -- convert "zh-CN" to "zh", and drop any other region
+            lang = lang:match("^(.-)-") or lang
             if lang == "C" then
                 lang="en"
             end

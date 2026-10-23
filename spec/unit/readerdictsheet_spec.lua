@@ -244,6 +244,20 @@ describe("ReaderDictSheet module", function()
             assert.are.equal("[ə'baut]", phonetic)
             assert.are.same({ pos = "prep.", text = "关于", dict = "Demo" }, senses[1])
         end)
+
+        it("should parse an HTML entry's blocks as senses, without its style and scripts", function()
+            local phonetic, senses = ReaderDictSheet.parseEntry{ {
+                dict = "Html", word = "x", is_html = true,
+                definition = "<style>b { color: red }</style><div>[ʃi]</div><div><b>n.</b> 一种演示</div>"
+                    .. "<p>adj. 另一种 &amp; 别的</p><script>alert(1)</script><ul><li>例句一</li></ul>",
+            } }
+            assert.are.equal("[ʃi]", phonetic)
+            assert.are.same({
+                { pos = "n.", text = "一种演示", dict = "Html" },
+                { pos = "adj.", text = "另一种 & 别的", dict = "Html" },
+                { text = "例句一", dict = "Html" },
+            }, senses)
+        end)
     end)
 
     describe("with an EPUB", function()
@@ -437,13 +451,17 @@ describe("ReaderDictSheet module", function()
                 target("fr_FR")
                 target("C")
                 target("zh_CN", "ja")
+                -- the same as the translator's own (its menu, the upstream popup's Translate button)
+                G_reader_settings:delSetting("translator_to_language")
+                GetText.current_lang = "zh_CN"
+                assert.are.equal("zh", Translator:getTargetLanguage())
             end)
             GetText.current_lang = "C"
             G_reader_settings:delSetting("translator_to_language")
             NetworkMgr.isOnline:revert()
             revertTranslator()
             assert(ok, err)
-            assert.are.same({ "zh-CN", "zh-TW", "fr", "en", "ja" }, targets)
+            assert.are.same({ "zh", "zh-TW", "fr", "en", "ja" }, targets)
         end)
 
         it("should show the offline state of the translation, and translate once Wi-Fi is on", function()
@@ -565,6 +583,44 @@ describe("ReaderDictSheet module", function()
                 assert.is_nil(ui.dictionary.dict_window)
                 assert.is_nil(ui.dictionary.lookup_page)
                 assert.spy(closed).was_called(1)
+            end)
+            mock_time:uninstall()
+            assert(ok, err)
+        end)
+
+        it("should go back to the book when a lookup is cancelled after a long wait, as right away", function()
+            local mock_time = require("mock_time")
+            mock_time:install()
+            UIManager:_checkTasks()
+            local ok, err = pcall(function()
+                ui.highlight:onHold(nil, { pos = Geom:new{ x = 400, y = 110 } })
+                ui.highlight:onHoldRelease()
+                UIManager:forceRePaint()
+                ui.highlight:closeBubble()
+                local closed = spy.new(function() end)
+                ui.dictionary.enabled_dict_names = { "Demo" }
+                stub(ui.dictionary, "rawSdcv").invokes(function(_, _, _, _, trap)
+                    local cancelled = false
+                    trap.dismiss_callback = function() cancelled = true end
+                    -- past upstream's 3 s, after which a cancelled lookup shows "interrupted" in its popup
+                    mock_time:increase(3.5)
+                    UIManager:_checkTasks()
+                    UIManager:forceRePaint()
+                    back(lookupPage())
+                    return cancelled, {}
+                end)
+                ui:handleEvent(Event:new("LookupWord", "sojourner", false, nil, ui.highlight, nil, closed))
+                UIManager:forceRePaint()
+                -- nothing says "interrupted": the page is gone, as the back arrow asked
+                assert.are.equal(ui, topWidget())
+                assert.is_nil(ui.dictionary.dict_window)
+                assert.are.equal(0, #DictQuickLookup.window_list)
+                assert.spy(closed).was_called(1)
+                -- the selection stays a moment, as when going back from results
+                assert.is_truthy(ui.highlight.selected_text)
+                mock_time:increase(G_defaults:readSetting("DELAY_CLEAR_HIGHLIGHT_S") + 0.1)
+                UIManager:_checkTasks()
+                assert.is_nil(ui.highlight.selected_text)
             end)
             mock_time:uninstall()
             assert(ok, err)
@@ -805,10 +861,23 @@ describe("ReaderDictSheet module", function()
         end)
 
         it("should show the Wikipedia intro when online, and the full article from its card", function()
+          local mock_time = require("mock_time")
+          mock_time:install()
+          UIManager:_checkTasks() -- the clock is now the mock's
+          local ok, err = pcall(function()
             local Wikipedia = require("ui/wikipedia")
+            local Blitbuffer = require("ffi/blitbuffer")
             stubSdcv(ui.dictionary)
             stub(NetworkMgr, "isOnline").returns(true)
-            stub(Wikipedia, "searchAndGetIntros").returns({ [7] = { title = "Sojourner", extract = "A sojourner is a traveller.", index = 0 } })
+            -- a thumbnail, as with wikipedia_show_image, loaded by the popup that shows it
+            local loads = 0
+            local image = { width = 40, height = 40, title = "Sojourner" }
+            image.load_bb_func = function(_, highres)
+                loads = loads + 1
+                image[highres and "hi_bb" or "bb"] = Blitbuffer.new(40, 40, Blitbuffer.TYPE_BB8)
+            end
+            image.load_bb_func()
+            stub(Wikipedia, "searchAndGetIntros").returns({ [7] = { title = "Sojourner", extract = "A sojourner is a traveller.", index = 0, images = { image } } })
             ui:handleEvent(Event:new("LookupWord", "sojourner"))
             UIManager:forceRePaint()
             local page = lookupPage()
@@ -820,16 +889,31 @@ describe("ReaderDictSheet module", function()
             for _, r in ipairs(refreshes) do
                 assert.are.same(page.body_rect, r.region)
             end
-            tapWidget(button(page, "Wikipedia EN"))
-            local popup = topWidget()
-            assert.is_true(popup.is_wiki)
-            assert.are.equal("Sojourner", popup.results[1].word)
-            -- closing the article comes back to the cards
-            popup:onClose()
-            UIManager:forceRePaint()
-            assert.are.equal(page, lookupPage())
-            assert.are.equal(page, ui.dictionary.dict_window)
-            assert.is_true(hasText(page, "A sojourner is a traveller."))
+            for round = 1, 2 do
+                tapWidget(button(page, "Wikipedia EN"))
+                local popup = topWidget()
+                assert.is_true(popup.is_wiki)
+                assert.are.equal("Sojourner", popup.results[1].word)
+                if round == 2 then
+                    -- the popup loads its image again, instead of drawing the one the first popup freed
+                    assert.is_nil(image.bb)
+                    mock_time:increase(1)
+                    UIManager:_checkTasks()
+                    assert.is_true(loads >= 2)
+                    assert.is_truthy(image.bb)
+                end
+                -- closing the article frees its image and comes back to the cards
+                popup:onClose()
+                UIManager:forceRePaint()
+                assert.is_nil(image.bb)
+                assert.is_nil(image.hi_bb)
+                assert.are.equal(page, lookupPage())
+                assert.are.equal(page, ui.dictionary.dict_window)
+                assert.is_true(hasText(page, "A sojourner is a traveller."))
+            end
+          end)
+          mock_time:uninstall()
+          assert(ok, err)
         end)
 
         it("should search the book for the headword", function()
@@ -875,13 +959,85 @@ describe("ReaderDictSheet module", function()
             assert.are.equal(2, #DictQuickLookup.window_list)
             assert.are.equal(DictQuickLookup.window_list[2], topWidget())
             DictQuickLookup.window_list[2]:onClose()
+            -- the vocabulary builder's own button in the popup adds the word: the card says so once back
+            ui.vocabbuilder:removeWord("sojourner")
+            assert.is_truthy(seek(page, "Add to vocabulary builder"))
+            local add = button(top, "Add to vocabulary builder")
+            assert.is_truthy(add)
+            tapWidget(add)
+            assert.is_true(ui.vocabbuilder:hasWord("sojourner"))
             top:onClose()
             UIManager:forceRePaint()
             assert.are.equal(page, lookupPage())
+            assert.is_truthy(seek(page, "In vocabulary builder"))
+            assert.is_nil(seek(page, "Add to vocabulary builder"))
+            ui.vocabbuilder:removeWord("sojourner")
             assert.spy(closed).was_not_called()
             assert.is_truthy(ui.highlight.selected_text)
             back(page)
             assert.spy(closed).was_called(1)
+        end)
+
+        it("should continue a sense taller than a page from its next line, cutting nothing", function()
+            local words = {}
+            for i = 1, 700 do words[i] = "w" .. i end
+            local long = table.concat(words, " ")
+            DICT.longsense = { Demo = "n. " .. long .. "\nv. after it" }
+            stubSdcv(ui.dictionary)
+            ui:handleEvent(Event:new("LookupWord", "longsense"))
+            UIManager:forceRePaint()
+            DICT.longsense = nil
+            local page = lookupPage()
+            assert.is_true(page.page_count > 2)
+            -- the slices of the sense, page after page, follow each other line by line, with no ellipsis
+            local next_line, total, tags = 1, nil, 0
+            for p = 1, page.page_count do
+                find(page, function(w)
+                    if w.text == long then
+                        assert.are.equal(next_line, w.virtual_line_num)
+                        assert.is_nil(w.line_with_ellipsis)
+                        next_line = w.virtual_line_num + w.lines_per_page
+                        total = #w.vertical_string_list
+                    elseif w.text == "n." then
+                        tags = tags + 1
+                    end
+                end)
+                assert.is_truthy(button(page, "Demo"), "page " .. p)
+                if p < page.page_count then nextPage(page) end
+            end
+            assert.are.equal(total + 1, next_line)
+            assert.are.equal(1, tags) -- the part of speech only on its first line
+            assert.is_nil(seek(page, "Tap the card for the rest of the entry."))
+            assert.is_truthy(seek(page, "after it"))
+        end)
+
+        it("should measure the senses once, not on every change of a card", function()
+            local senses = {}
+            for i = 1, 100 do senses[i] = ("n. sense %d of a long entry"):format(i) end
+            local entry = table.concat(senses, "\n")
+            DICT.manysenses = { Demo = entry, Other = entry }
+            stubSdcv(ui.dictionary)
+            stub(NetworkMgr, "isOnline").returns(false)
+            ui:handleEvent(Event:new("LookupWord", "manysenses"))
+            UIManager:forceRePaint()
+            DICT.manysenses = nil
+            local page = lookupPage()
+            local wiki = seek(page, "Wikipedia")
+            local TextBoxWidget = require("ui/widget/textboxwidget")
+            local built = 0
+            local new = TextBoxWidget.new
+            TextBoxWidget.new = function(...)
+                built = built + 1
+                return new(...)
+            end
+            local ok, err = pcall(function()
+                tapWidget(wiki) -- offline: the card changes, and so do the pages
+            end)
+            TextBoxWidget.new = new
+            NetworkMgr.isOnline:revert()
+            assert(ok, err)
+            assert.is_true(hasText(page, "Wikipedia is an online lookup. Turn on Wi-Fi and try again."))
+            assert.is_true(built < 40, built .. " text boxes built")
         end)
 
         it("should say an entry was cut after its 100th sense", function()

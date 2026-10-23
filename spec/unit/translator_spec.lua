@@ -19,6 +19,32 @@ describe("Translator module", function()
         return romanizations
     end
 
+    it("should translate into the interface language in use unless a target is set", function()
+        local GetText = require("gettext")
+        local function target(language, current_lang)
+            G_reader_settings:saveSetting("language", language)
+            GetText.current_lang = current_lang or "C"
+            return Translator:getTargetLanguage()
+        end
+        local ok, err = pcall(function()
+            assert.is.same("zh", target("zh_CN"))
+            assert.is.same("zh-TW", target("zh_TW"))
+            assert.is.same("pt", target("pt_BR"))
+            assert.is.same("en", target("C"))
+            -- no language setting: the interface follows the system (Android), the translation too
+            assert.is.same("zh", target(nil, "zh_CN"))
+            assert.is.same("en", target(nil))
+            -- one of the languages of the menu, which shows it
+            assert.is.same("Chinese (Simplified)", Translator:getLanguageName(target(nil, "zh_CN"), ""))
+            G_reader_settings:saveSetting("translator_to_language", "ja")
+            assert.is.same("ja", target(nil, "zh_CN"))
+        end)
+        G_reader_settings:delSetting("language")
+        G_reader_settings:delSetting("translator_to_language")
+        GetText.current_lang = "C"
+        assert(ok, err)
+    end)
+
     it("should return server", function()
         assert.is.same("https://translate.googleapis.com/", Translator:getTransServer())
         G_reader_settings:saveSetting("trans_server", "http://translate.google.nl")

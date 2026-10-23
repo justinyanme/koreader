@@ -8,8 +8,9 @@ manager keeps the upstream popup. A lookup opens a full-screen page (ui/widget/f
 cards, from the top:
 - the headword with its phonetic, or the selection; 查询中… under it while the lookup runs;
 - one card per dictionary that has the word, named on the card, with its senses by part of speech. A card that
-  does not fit continues on the next page under its name. A tap opens that dictionary's full entry in the
-  upstream popup (rich HTML entries, plugin buttons), over the page: closing it comes back to the cards;
+  does not fit continues on the next page under its name, and so does a sense taller than a page, from its next
+  line. A tap opens that dictionary's full entry in the upstream popup (rich HTML entries, plugin buttons), over
+  the page: closing it comes back to the cards, updated (a word added to the vocabulary builder there);
 - when no dictionary has it: a card saying why (not in the local dictionaries, none installed or enabled, the
   selection too long), with 在线翻译 for a word that is not CJK;
 - the online translation (Translator), named as needing the network: for a selection of several words that is
@@ -89,8 +90,11 @@ local BOTTOM = dp(13) -- between the last card and the bottom bar
 local CARD_GAP = dp(13)
 local CARD_PAD = dp(20)
 local CARD_RADIUS = dp(14)
+-- the reference's outline is 2px on the Leaf5, where 1dp (Size.border.default) rounds up to 3px
+local CARD_BORDER = dp(0.94)
 local HEADING_GAP = dp(12) -- between a card's heading and its body
 local UNIT_GAP = dp(8) -- between senses
+local POS_GAP = dp(8) -- between a part of speech and its sense
 local LEADING = 0.9 -- extra line spacing of card text (of its size): loose, as in the reference
 local HEADWORD_LEADING = 0.3 -- but not of the headword, whose card is as tall as one line in the reference
 local INTRO_LINES = 4 -- the Wikipedia intro is clamped, as the reference's encyclopedia card
@@ -337,21 +341,6 @@ local function byDictionary(results)
     return groups
 end
 
---- The translator's target language: its own setting, else the interface language in use. Translator reads only
--- the language setting, which is unset when the interface follows the system (Android), and then says English.
-local function targetLanguage()
-    if G_reader_settings:has("translator_to_language") then
-        return Translator:getTargetLanguage()
-    end
-    local lang = G_reader_settings:readSetting("language") or _.current_lang
-    if not lang or lang == "" or lang == "C" then return "en" end
-    lang = lang:gsub("_", "-")
-    if lang:match("^zh") then -- the translate server's codes
-        return (lang == "zh-TW" or lang == "zh-HK") and "zh-TW" or "zh-CN"
-    end
-    return (lang:match("^%a+") or "en"):lower()
-end
-
 --- The main translation in a translate server response, or nil.
 local function translationOf(result)
     if type(result) ~= "table" or type(result[1]) ~= "table" then return end
@@ -365,16 +354,13 @@ local function translationOf(result)
     return text ~= "" and text or nil
 end
 
-local function textBox(text, face, width, max_lines, max_h, leading)
+--- Text of a card, clamped to max_lines with an ellipsis if given.
+local function textBox(text, face, width, max_lines, leading)
     local args = { text = text, face = face, fgcolor = Palette.ink, width = width, line_height = leading or LEADING }
     local box = TextBoxWidget:new(args)
-    local h = max_h
     if max_lines and #box.vertical_string_list > max_lines then
-        h = math.min(h or math.huge, max_lines * box:getLineHeight())
-    end
-    if h and box:getSize().h > h then
+        args.height = max_lines * box:getLineHeight()
         box:free()
-        args.height = h
         args.height_overflow_show_ellipsis = true
         box = TextBoxWidget:new(args)
     end
@@ -404,7 +390,7 @@ function LookupPage:init()
     FullscreenPage.init(self)
     self.ui = self.dictionary.ui
     self.column_w = math.min(COLUMN_W, self.dimen.w - 2 * GUTTER)
-    self.inner_w = self.column_w - 2 * (CARD_PAD + Size.border.default)
+    self.inner_w = self.column_w - 2 * (CARD_PAD + CARD_BORDER)
     if self.results then
         self:readResults()
     end
@@ -428,6 +414,17 @@ function LookupPage:readResults()
         if g.phonetic then
             self.phonetic = g.phonetic
             break
+        end
+    end
+    -- the units of each dictionary's card, kept with their heights once measured
+    for __, g in ipairs(self.groups) do -- not _, which is gettext
+        g.units = {}
+        if g.phonetic and g.phonetic ~= self.phonetic then -- another one than beside the headword
+            table.insert(g.units, { text = g.phonetic })
+        end
+        for __, sense in ipairs(g.senses) do table.insert(g.units, sense) end
+        if g.cut then
+            table.insert(g.units, { text = _("Tap the card for the rest of the entry.") })
         end
     end
     self.pages = nil
@@ -480,30 +477,15 @@ function LookupPage:cards()
     local cards = { { kind = "headword" } }
     if not self.results then return cards end
     local phrase = isPhrase(self.word)
-    for __, g in ipairs(self.groups) do -- not _, which is gettext
-        local units = {}
-        if g.phonetic and g.phonetic ~= self.phonetic then -- another one than beside the headword
-            table.insert(units, { text = g.phonetic })
-        end
-        for __, sense in ipairs(g.senses) do table.insert(units, sense) end
-        if g.cut then
-            table.insert(units, { text = _("Tap the card for the rest of the entry.") })
-        end
-        table.insert(cards, { kind = "dict", group = g, title = g.dict, units = units })
+    for __, g in ipairs(self.groups) do
+        table.insert(cards, { kind = "dict", group = g, title = g.dict, units = g.units })
     end
     -- the translation takes a phrase that no dictionary has, unless none is there
     if self.not_found and (not phrase or self.results[1].dict ~= "") then
         table.insert(cards, { kind = "empty" })
     end
     if self.translation then
-        local units
-        if self.translation.text then
-            units = {}
-            for para in self.translation.text:gmatch("[^\n]+") do
-                table.insert(units, { text = para })
-            end
-        end
-        table.insert(cards, { kind = "translation", title = _("Online translation"), units = units })
+        table.insert(cards, { kind = "translation", title = _("Online translation"), units = self.translation.units })
     end
     table.insert(cards, { kind = "wiki" })
     if self:showsVocabulary() then
@@ -518,7 +500,7 @@ end
 --- A card: paper, 1dp ink outline, 14dp radius, 20dp padding.
 function LookupPage:cardFrame(content, callback)
     local card = FrameContainer:new{
-        bordersize = Size.border.default,
+        bordersize = CARD_BORDER,
         color = Palette.ink,
         background = Palette.paper,
         radius = CARD_RADIUS,
@@ -559,21 +541,40 @@ function LookupPage:heading(title, caption, chev)
     }
 end
 
-function LookupPage:unitWidget(unit, max_h)
-    if not unit.pos then
-        return textBox(unit.text, bodyFace(), self.inner_w, nil, max_h)
+--- A sense or a paragraph, after its part of speech if any; returns the widget and its text box.
+-- from, count: only these lines of the text (measured), for a unit taller than a page that continues on the next.
+function LookupPage:unitWidget(unit, from, count)
+    local tag = unit.pos and TextWidget:new{ text = unit.pos, face = Font:getFace("ui_title", 16), fgcolor = Palette.ink }
+    local indent = tag and tag:getSize().w + POS_GAP or 0
+    local args = { text = unit.text, face = bodyFace(), fgcolor = Palette.ink, width = self.inner_w - indent, line_height = LEADING }
+    if from then
+        args.virtual_line_num = from
+        args.height = count * unit.line_h
     end
-    local tag = TextWidget:new{ text = unit.pos, face = Font:getFace("ui_title", 16), fgcolor = Palette.ink }
-    local gap = dp(8)
-    local text = textBox(unit.text, bodyFace(), self.inner_w - tag:getSize().w - gap, nil, max_h)
+    local box = TextBoxWidget:new(args)
+    if not tag then
+        return box, box
+    end
+    if from and from > 1 then -- the rest of a sense: under its text, without the part of speech again
+        tag:free()
+        return HorizontalGroup:new{ align = "top", HorizontalSpan:new{ width = indent }, box }, box
+    end
     -- the tag sits on the first line of the text
-    local lift = math.max(0, math.floor((text:getLineHeight() - tag:getSize().h) / 2))
+    local lift = math.max(0, math.floor((box:getLineHeight() - tag:getSize().h) / 2))
     return HorizontalGroup:new{
         align = "top",
         VerticalGroup:new{ VerticalSpan:new{ width = lift }, tag },
-        HorizontalSpan:new{ width = gap },
-        text,
-    }
+        HorizontalSpan:new{ width = POS_GAP },
+        box,
+    }, box
+end
+
+--- Measures a unit once: its height, its number of lines and their height.
+function LookupPage:measure(unit)
+    if unit.h then return end
+    local widget, box = self:unitWidget(unit)
+    unit.h, unit.lines, unit.line_h = widget:getSize().h, #box.vertical_string_list, box:getLineHeight()
+    widget:free()
 end
 
 --- A state line, its reason and at most one pill, inside a card (DESIGN.md, Loading, empty and error states).
@@ -617,7 +618,7 @@ function LookupPage:headwordCard()
             },
         })
     else
-        table.insert(group, textBox(self.headword or self.word, face, self.inner_w, HEADWORD_LINES, nil, HEADWORD_LEADING))
+        table.insert(group, textBox(self.headword or self.word, face, self.inner_w, HEADWORD_LINES, HEADWORD_LEADING))
     end
     if not self.results then
         table.insert(group, VerticalSpan:new{ width = dp(8) })
@@ -653,16 +654,16 @@ function LookupPage:emptyCard()
     return self:cardFrame(self:stateBlock(title, reason, pill))
 end
 
---- A card with units: its heading, then units first..last.
-function LookupPage:unitsCard(card, first, last, max_unit_h)
+--- A card with units: its heading, then the blocks of its units on this page (see paginate()).
+function LookupPage:unitsCard(card, blocks)
     local group = VerticalGroup:new{ align = "left" }
     -- the translation says it is online, unless its offline state says so already
     local caption = card.kind == "translation" and not self.translation.offline and _("Needs a network connection") or nil
     table.insert(group, self:heading(card.title, caption, card.kind == "dict"))
     if card.units then
-        for i = first, last do
-            table.insert(group, VerticalSpan:new{ width = i == first and HEADING_GAP or UNIT_GAP })
-            table.insert(group, self:unitWidget(card.units[i], max_unit_h))
+        for i, block in ipairs(blocks) do
+            table.insert(group, VerticalSpan:new{ width = i == 1 and HEADING_GAP or UNIT_GAP })
+            table.insert(group, (self:unitWidget(block.unit, block.from, block.count)))
         end
     else
         table.insert(group, VerticalSpan:new{ width = HEADING_GAP })
@@ -742,9 +743,11 @@ function LookupPage:searchCard()
         function() self:onSearchBook() end)
 end
 
-function LookupPage:buildCard(card, first, last, max_unit_h)
+--- A card of a page (see paginate()): part.card, with part.blocks of its units.
+function LookupPage:buildCard(part)
+    local card = part.card
     if card.kind == "headword" then return self:headwordCard()
-    elseif card.kind == "dict" or card.kind == "translation" then return self:unitsCard(card, first, last, max_unit_h)
+    elseif card.kind == "dict" or card.kind == "translation" then return self:unitsCard(card, part.blocks)
     elseif card.kind == "empty" then return self:emptyCard()
     elseif card.kind == "wiki" then return self:wikiCard()
     elseif card.kind == "vocab" then return self:vocabCard()
@@ -758,8 +761,10 @@ local function heightOf(widget)
     return h
 end
 
---- Splits the cards into pages of `avail` height: { { { card =, first =, last =, max_unit_h = } ... } ... }.
--- A card with units continues on the next page, under its heading again; a unit taller than a page is clamped.
+--- Splits the cards into pages of `avail` height: { { { card =, blocks = } ... } ... }, where a block is a unit
+-- (whole, or `count` lines `from` one). A card with units continues on the next page, under its heading again. A
+-- unit that fits a page moves there whole; one taller than a page fills the rest of this one and goes on, line by
+-- line, on the next ones. Nothing is cut.
 function LookupPage:paginate(avail)
     local pages, page, used = {}, {}, 0
     local function push()
@@ -770,37 +775,44 @@ function LookupPage:paginate(avail)
         used = used + (#page > 0 and CARD_GAP or 0) + h
         table.insert(page, part)
     end
-    for _, card in ipairs(self:cards()) do
-        local n = card.units and #card.units or 0
-        if n == 0 then
-            local h = heightOf(self:buildCard(card, 1, 0))
+    for __, card in ipairs(self:cards()) do
+        if not (card.units and #card.units > 0) then
+            local part = { card = card, blocks = {} }
+            local h = heightOf(self:buildCard(part))
             if #page > 0 and used + CARD_GAP + h > avail then push() end
-            place({ card = card, first = 1, last = 0 }, h)
+            place(part, h)
         else
-            local frame_h = heightOf(self:buildCard(card, 1, 0))
-            local unit_h = {}
-            for i, unit in ipairs(card.units) do unit_h[i] = heightOf(self:unitWidget(unit)) end
-            local i = 1
-            while i <= n do
+            local frame_h = heightOf(self:buildCard{ card = card, blocks = {} })
+            local capacity = avail - frame_h - HEADING_GAP -- for units, on a page of their own
+            local units, i, from = card.units, 1, 1 -- the next line to place: line `from` of unit i
+            while i <= #units do
                 local room = avail - used - (#page > 0 and CARD_GAP or 0) - frame_h
-                local last, h = i - 1, 0
-                while last < n do
-                    local next_h = unit_h[last + 1] + (last >= i and UNIT_GAP or HEADING_GAP)
-                    if h + next_h > room then break end
-                    h, last = h + next_h, last + 1
+                local blocks, h = {}, 0
+                while i <= #units do
+                    local unit = units[i]
+                    self:measure(unit)
+                    local gap = #blocks > 0 and UNIT_GAP or HEADING_GAP
+                    local lines = unit.lines - from + 1
+                    local rest_h = from == 1 and unit.h or lines * unit.line_h
+                    if h + gap + rest_h <= room then
+                        table.insert(blocks, { unit = unit, from = from > 1 and from or nil, count = from > 1 and lines or nil })
+                        h, i, from = h + gap + rest_h, i + 1, 1
+                    else
+                        local fit = math.floor((room - h - gap) / unit.line_h)
+                        if fit < 1 and #blocks == 0 and #page == 0 then
+                            fit = 1 -- a line taller than a page still shows
+                        end
+                        if rest_h > capacity and fit >= 1 then -- too tall for any page: as much as fits here
+                            table.insert(blocks, { unit = unit, from = from, count = fit })
+                            h, from = h + gap + fit * unit.line_h, from + fit
+                        end
+                        break
+                    end
                 end
-                if last >= i then
-                    place({ card = card, first = i, last = last }, frame_h + h)
-                    i = last + 1
-                    if i <= n then push() end
-                elseif #page > 0 then
-                    push() -- try again at the top of a new page
-                else -- a unit taller than a whole page: clamped
-                    local max_h = math.max(dp(20), room - HEADING_GAP)
-                    place({ card = card, first = i, last = i, max_unit_h = max_h }, frame_h + HEADING_GAP + max_h)
-                    i = i + 1
-                    if i <= n then push() end
+                if #blocks > 0 then
+                    place({ card = card, blocks = blocks }, frame_h + h)
                 end
+                if i <= #units then push() end
             end
         end
     end
@@ -814,7 +826,7 @@ function LookupPage:buildContent(rect)
     local column = VerticalGroup:new{ align = "left" }
     for i, part in ipairs(self.pages[self.page]) do
         if i > 1 then table.insert(column, VerticalSpan:new{ width = CARD_GAP }) end
-        table.insert(column, self:buildCard(part.card, part.first, part.last, part.max_unit_h))
+        table.insert(column, self:buildCard(part))
     end
     return VerticalGroup:new{
         align = "left",
@@ -865,13 +877,21 @@ function LookupPage:requestTranslation()
     Trapper:wrap(function()
         -- in a subprocess, as upstream: closing the page (our dismiss_callback) abandons it
         local completed, result = Trapper:dismissableRunInSubprocess(function()
-            local ok, res = pcall(Translator.loadPage, Translator, text, targetLanguage(), Translator:getSourceLanguage())
+            local ok, res = pcall(Translator.loadPage, Translator, text,
+                Translator:getTargetLanguage(), Translator:getSourceLanguage())
             return ok and res or nil
         end, self)
         self.dismiss_callback = nil
         if self.closed or not completed then return end
         local translated = translationOf(result)
-        self.translation = translated and { text = translated } or { failed = true }
+        if translated then
+            self.translation = { text = translated, units = {} }
+            for para in translated:gmatch("[^\n]+") do
+                table.insert(self.translation.units, { text = para })
+            end
+        else
+            self.translation = { failed = true }
+        end
         self:update("translation")
     end)
 end
@@ -959,17 +979,28 @@ function LookupPage:onSearchBook()
 end
 
 --- Opens a full entry in the upstream popup: a dictionary's results, or Wikipedia's without group. The popup opens
--- over the page without the selection, so that its own search and highlight buttons are off (the page has them);
--- closing it comes back to the cards.
+-- over the page without the selection, so that its own search and highlight buttons are off (the page has them).
+-- Closing it comes back to the cards, updated: its plugin buttons may have added the word to the vocabulary builder.
 function LookupPage:onFullEntry(group)
     self.dictionary._lookup_start_time = nil -- no input block: this is not a slow lookup
     local module = group and self.dictionary or self.ui.wikipedia
+    local results = group and group.results or self.wiki.results
+    local function closed()
+        -- the popup frees the images it loaded (Wikipedia thumbnails), but leaves them in the results: forget
+        -- them, for the next popup to load them again
+        for __, r in ipairs(results) do
+            for __, im in ipairs(r.images or {}) do
+                im.bb, im.hi_bb = nil, nil
+            end
+        end
+        if not self.closed then self:update() end
+    end
     local highlight = module.highlight
     module.highlight = nil
     if group then
-        ReaderDictionary.showDict(self.dictionary, self.word, group.results, self.boxes, self.link)
+        ReaderDictionary.showDict(self.dictionary, self.word, results, self.boxes, self.link, closed)
     else
-        module:showDict(self.headword, self.wiki.results, self.boxes)
+        module:showDict(self.headword, results, self.boxes, nil, closed)
     end
     module.highlight = highlight
     self.dictionary.dict_window = self -- upstream's showDict took it for the popup
