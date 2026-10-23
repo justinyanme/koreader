@@ -45,6 +45,13 @@ describe("ReaderToolbar module", function()
         ui:onClose()
     end
 
+    local function closeToasts()
+        for i = #UIManager._window_stack, 1, -1 do
+            local w = UIManager._window_stack[i].widget
+            if w.toast then UIManager:close(w) end
+        end
+    end
+
     local function topWidget()
         return UIManager._window_stack[#UIManager._window_stack].widget
     end
@@ -156,7 +163,44 @@ describe("ReaderToolbar module", function()
     end
 
     local function bookmarkButton(bars)
-        return find(bars.top, function(w) return (w.icon == "eink/bookmark" or w.icon == "eink/bookmark-on") and w.callback end)
+        return find(bars.top, function(w) return (w.icon == "eink/bookmark-add" or w.icon == "eink/bookmark-on") and w.callback end)
+    end
+
+    for __, file in ipairs{ sample_epub, sample_pdf } do
+        it("should synchronize the bookmark, marker and toast across reopening " .. file, function()
+            local ui = openReader(file)
+            tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
+            UIManager:forceRePaint()
+            local refreshes = refreshesOf(function() tapWidget(bookmarkButton(ui.menu.bars)) end)
+            assert.is_nil(ui.menu.bars)
+            assert.is_true(ui.view.dogear_visible)
+            assert.are.equal(_("Bookmark added"), topWidget().text)
+            local marker = ui.view.dogear:getRefreshRegion()
+            assert.are.equal(Screen:scaleBySize(17), marker.w)
+            assert.are.equal(Screen:scaleBySize(42), marker.h)
+            assert.are.equal(Screen:getWidth() - Screen:scaleBySize(25) - marker.w, marker.x)
+            assert.is_true(inked(marker.x, marker.y, marker.x + marker.w, marker.y + marker.h))
+            for _, r in ipairs(refreshes) do
+                assert.is_true(r.mode == "ui" or r.mode == "fast")
+                assert.is_true(r.region.h < Screen:getHeight())
+            end
+            closeToasts()
+            closeReader(ui)
+            ui = openReader(file, true)
+            assert.is_true(ui.view.dogear_visible)
+            tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
+            UIManager:forceRePaint()
+            assert.are.equal("eink/bookmark-on", bookmarkButton(ui.menu.bars).icon)
+            tapWidget(bookmarkButton(ui.menu.bars))
+            assert.is_nil(ui.menu.bars)
+            assert.is_false(ui.view.dogear_visible)
+            assert.are.equal(_("Bookmark removed"), topWidget().text)
+            closeToasts()
+            closeReader(ui)
+            ui = openReader(file, true)
+            assert.is_false(ui.view.dogear_visible)
+            closeReader(ui)
+        end)
     end
 
     describe("with an EPUB", function()
@@ -249,19 +293,22 @@ describe("ReaderToolbar module", function()
             UIManager:forceRePaint()
         end)
 
-        it("should put the bookmark and more at the right of the top bar, in that order, with no back or search", function()
+        it("should put bookmark, shelf state and more at the right of the top bar, in that order, with no back or search", function()
             tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
             UIManager:forceRePaint()
             local bars = ui.menu.bars
             local sw = Screen:getWidth()
             assert.are.equal(Screen:scaleBySize(50), bars.top_rect.h)
             local bookmark, more = bookmarkButton(bars), moreButton(bars)
+            local shelf = findIcon(bars.top, "eink/shelf")
+            assert.is_truthy(shelf)
             assert.is_truthy(bookmark)
             assert.is_truthy(more)
             assert.are.equal(sw, more.dimen.x + more.dimen.w)
-            assert.are.equal(more.dimen.x, bookmark.dimen.x + bookmark.dimen.w)
+            assert.are.equal(shelf.dimen.x, bookmark.dimen.x + bookmark.dimen.w)
+            assert.are.equal(more.dimen.x, shelf.dimen.x + shelf.dimen.w)
             -- 76dp apart, as in WeChat Read
-            assert.are.equal(Screen:scaleBySize(76), more.dimen.x - bookmark.dimen.x)
+            assert.are.equal(Screen:scaleBySize(76), shelf.dimen.x - bookmark.dimen.x)
             assert.is_true(bookmark.dimen.h >= Screen:scaleBySize(44))
             for _, icon in ipairs{ "eink/back", "eink/arrow.left", "eink/search", "eink/light" } do
                 assert.is_nil(findIcon(bars.top, icon), icon)
@@ -553,13 +600,16 @@ describe("ReaderToolbar module", function()
             local panel = openFromToolbar("eink/progress")
             local bars = ui.menu.bars
             tapWidget(bookmarkButton(bars))
-            UIManager:forceRePaint()
+            assert.is_nil(ui.menu.bars)
+            closeToasts()
+            panel = openFromToolbar("eink/progress")
+            bars = ui.menu.bars
             assert.are.equal("eink/bookmark-on", bookmarkButton(bars).icon)
 
             tapWidget(findText(panel, _("Next chapter")))
             UIManager:forceRePaint()
             assert.are_not.equal(start_page, ui:getCurrentPage())
-            assert.are.equal("eink/bookmark", bookmarkButton(bars).icon)
+            assert.are.equal("eink/bookmark-add", bookmarkButton(bars).icon)
 
             tapWidget(find(panel, function(w)
                 return w.callback and w.dimen and find(w, function(c)
@@ -572,6 +622,7 @@ describe("ReaderToolbar module", function()
             tapWidget(bookmarkButton(bars)) -- remove the test bookmark
             UIManager:forceRePaint()
             assert.is_false(ui.bookmark:isPageBookmarked())
+            closeToasts()
             ui.menu:hideToolbar()
             UIManager:forceRePaint()
         end)
@@ -782,6 +833,16 @@ describe("ReaderToolbar module", function()
                     UIManager:close(ui.highlight.highlight_dialog)
                 end
                 UIManager:forceRePaint()
+                local saved = require("util").tableDeepCopy(ui.annotation.annotations)
+                -- Bookmarking this page and undoing it must leave its existing highlight intact.
+                for __ = 1, 2 do
+                    tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
+                    UIManager:forceRePaint()
+                    tapWidget(bookmarkButton(ui.menu.bars))
+                    closeToasts()
+                    UIManager:forceRePaint()
+                end
+                assert.are.same(saved, ui.annotation.annotations)
                 local cx = math.floor(Screen:getWidth() / 2)
                 local box
                 for _, b in ipairs(ui.view.highlight.visible_boxes) do

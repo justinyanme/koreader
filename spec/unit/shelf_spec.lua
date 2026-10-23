@@ -189,6 +189,144 @@ describe("Shelf home (FileManager replacement)", function()
         Replacements.filemanager = nil
     end)
 
+    describe("shelf state from the reader toolbar", function()
+        local home, old_menu
+        before_each(function()
+            old_menu = Replacements.reader_menu
+            Replacements.reader_menu = require("apps/reader/modules/readertoolbar")
+            G_reader_settings:delSetting("shelf_removed")
+            G_reader_settings:delSetting("shelf_filter")
+            home = makeHome("reader_shelf_home", {
+                { name = "book.epub", source = "juliet.epub", status = "complete" },
+                { name = "book.pdf", source = "sample.pdf", status = "abandoned" },
+            })
+        end)
+        after_each(function()
+            closeToasts()
+            if ReaderUI.instance then ReaderUI.instance:onClose() end
+            if FileManager.instance then FileManager.instance:onClose() end
+            Replacements.reader_menu = old_menu
+            G_reader_settings:delSetting("shelf_removed")
+            ffiUtil.purgeDir(home)
+        end)
+
+        local function toolbar()
+            gesture("tap", Screen:getWidth() / 2, Screen:getHeight() / 2)
+            return ReaderUI.instance.menu.bars
+        end
+
+        for __, name in ipairs{ "book.epub", "book.pdf" } do
+            it("confirms hiding, keeps it hidden on exit and reopen, and explicitly restores " .. name, function()
+                local path = home .. "/" .. name
+                local original = util.readFromFile(path)
+                ReaderUI:doShowReader(path)
+                UIManager:forceRePaint()
+                local page = ReaderUI.instance:getCurrentPage()
+                tap(find(toolbar(), "eink/shelf-on").dimen)
+                local layer = topWidget()
+                assert.are.equal(require("ui/widget/confirmlayer"), getmetatable(layer).__index)
+                assert.is_truthy(layer.text:find(ReaderUI.instance.doc_props.display_title, 1, true))
+                tap(find(layer, _("Cancel")).dimen)
+                assert.are.equal(page, ReaderUI.instance:getCurrentPage())
+                assert.is_nil(G_reader_settings:readSetting("shelf_removed"))
+                tap(find(toolbar(), "eink/shelf-on").dimen)
+                press("Back")
+                assert.are.equal(ReaderUI.instance, topWidget())
+                tap(find(toolbar(), "eink/shelf-on").dimen)
+                tap(find(topWidget(), C_("Shelf", "Remove")).dimen)
+                assert.are.equal(_("Removed from shelf"), toastText())
+                assert.are.equal(page, ReaderUI.instance:getCurrentPage())
+                assert.are.equal(original, util.readFromFile(path))
+                -- Make elapsed time deterministic: closing updates history later than removal.
+                G_reader_settings:readSetting("shelf_removed")[path] = os.time() - 10
+                local bars = toolbar()
+                assert.is_truthy(find(bars, "eink/shelf"))
+                tap(find(bars.bottom, "eink/arrow.left").dimen)
+                local fm = FileManager.instance
+                assert.are.equal(1, #fm.shelf_view.books)
+                assert.are_not.equal(path, fm.shelf_view.books[1].file)
+                fm:onClose()
+                -- Reopen the file through the real ReaderUI entry, without adding it back implicitly.
+                ReaderUI:doShowReader(path)
+                UIManager:forceRePaint()
+                bars = toolbar()
+                assert.is_truthy(find(bars, "eink/shelf"))
+                tap(find(bars, "eink/shelf").dimen)
+                assert.are.equal(_("Added to shelf"), toastText())
+                bars = toolbar()
+                assert.is_truthy(find(bars, "eink/shelf-on"))
+                tap(find(bars.bottom, "eink/arrow.left").dimen)
+                fm = FileManager.instance
+                assert.are.equal(2, #fm.shelf_view.books)
+                assert.are.equal(1, fm.shelf_view.counts.complete)
+                assert.are.equal(1, fm.shelf_view.counts.abandoned)
+                assert.are.equal(original, util.readFromFile(path))
+            end)
+        end
+
+        it("shares removal and restoration between a shelf symlink and its target opened from history", function()
+            local target = ffiUtil.realpath("spec/front/unit/data/juliet.epub")
+            local link = home .. "/linked.epub"
+            assert(lfs.link(target, link, true))
+            -- A persisted removal from the old shelf may use the link's path.
+            G_reader_settings:saveSetting("shelf_removed", { [link] = os.time() })
+            ReaderUI:doShowReader(target)
+            UIManager:forceRePaint()
+            local bars = toolbar()
+            assert.is_truthy(find(bars, "eink/shelf"))
+            tap(find(bars, "eink/shelf").dimen)
+            bars = toolbar()
+            assert.is_truthy(find(bars, "eink/shelf-on"))
+            tap(find(bars.bottom, "eink/arrow.left").dimen)
+            assert.are.equal(3, #FileManager.instance.shelf_view.books)
+            FileManager.instance:onClose()
+            ReaderUI:doShowReader(target)
+            UIManager:forceRePaint()
+            tap(find(toolbar(), "eink/shelf-on").dimen)
+            tap(find(topWidget(), C_("Shelf", "Remove")).dimen)
+            bars = toolbar()
+            tap(find(bars.bottom, "eink/arrow.left").dimen)
+            assert.are.equal(2, #FileManager.instance.shelf_view.books)
+            assert.are.equal("link", lfs.symlinkattributes(link, "mode"))
+            assert.are.equal("file", lfs.attributes(target, "mode"))
+        end)
+
+        it("immediately hides every alias when a shelf cover is removed in selection mode", function()
+            local target, link = home .. "/book.epub", home .. "/linked.epub"
+            assert(lfs.link(target, link, true))
+            local fm, view = openShelf(home)
+            assert.are.equal(3, #view.books)
+            local cell = find(view, "linked")
+            assert.is_truthy(cell)
+            gesture("hold", cell.dimen.x + view.grid.cover_w / 2, cell.dimen.y + view.grid.cover_h / 2)
+            tap(find(fm, "eink/shelf.remove").dimen)
+            tap(find(topWidget(), C_("Shelf", "Remove")).dimen)
+            assert.are.equal(1, #view.books)
+            assert.are.equal(home .. "/book.pdf", view.books[1].file)
+            assert.are.equal("file", lfs.attributes(target, "mode"))
+            assert.are.equal("link", lfs.symlinkattributes(link, "mode"))
+            closeToasts()
+            fm:onClose()
+            fm, view = openShelf(home)
+            assert.are.equal(1, #view.books)
+        end)
+
+        it("explains the home-folder rule for an outside book without pretending it was added", function()
+            local path = ffiUtil.realpath("spec/front/unit/data/juliet.epub")
+            ReaderUI:doShowReader(path)
+            UIManager:forceRePaint()
+            tap(find(toolbar(), "eink/shelf").dimen)
+            local message = topWidget()
+            assert.are.equal(T(_("To add this book to the shelf, place its file in the home folder:\n%1"), home), message.text)
+            UIManager:close(message)
+            local bars = toolbar()
+            assert.is_nil(find(bars, "eink/shelf-on"))
+            tap(find(bars.bottom, "eink/arrow.left").dimen)
+            assert.are.equal(2, #FileManager.instance.shelf_view.books)
+            assert.are.equal("file", lfs.attributes(path, "mode"))
+        end)
+    end)
+
     describe("with a small library", function()
         local home
         local function bookPath(name) return home .. "/" .. name end
@@ -425,7 +563,7 @@ describe("Shelf home (FileManager replacement)", function()
             fm:onClose()
         end)
 
-        it("removes a book from the shelf but keeps the file, until the book is opened again", function()
+        it("keeps a removed book hidden even when its reading history changes", function()
             local fm, view = openShelf(home)
             view:getBookActions(bookNamed(view, "d.txt"))[5].callback() -- Remove from shelf, once confirmed
             UIManager:forceRePaint()
@@ -438,11 +576,11 @@ describe("Shelf home (FileManager replacement)", function()
             assert.is_nil(bookNamed(view, "d.txt"))
             assert.are.equal(1, view.counts.new)
             fm:onClose()
-            -- opened again (from 文件 or anywhere): back on the shelf
+            -- Reading and closing update history, but must not undo an explicit removal.
             ReadHistory:addItem(bookPath("d.txt"), os.time() + 10)
             fm, view = openShelf(home)
-            assert.is_truthy(bookNamed(view, "d.txt"))
-            assert.is_nil(G_reader_settings:readSetting("shelf_removed")[bookPath("d.txt")])
+            assert.is_nil(bookNamed(view, "d.txt"))
+            assert.is_truthy(G_reader_settings:readSetting("shelf_removed")[bookPath("d.txt")])
             fm:onClose()
             ReadHistory:removeItemByPath(bookPath("d.txt"))
             lfs.touch(bookPath("d.txt"), 800, 800)

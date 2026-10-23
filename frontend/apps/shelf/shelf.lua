@@ -114,7 +114,7 @@ function Shelf.load(scanned, bim, cover_specs)
     local books = {}
     for _, found in ipairs(scanned) do
         local file = found.file
-        if not removed[file] then
+        if not removed[ffiUtil.realpath(file) or file] then
             local info = cache[file]
             local use_meta = info and not info.ignore_meta
             local book_info = BookList.getBookInfo(file)
@@ -192,31 +192,53 @@ function Shelf.view(books, filter, sort, query)
     return shown, counts
 end
 
---- Returns the hidden books ({ [file] = time removed }). A book opened after its removal is back
--- on the shelf, and entries whose file is gone are pruned.
+--- Returns the hidden books ({ [file] = time removed }), pruning missing files.
 function Shelf.removed()
     local removed = G_reader_settings:readSetting("shelf_removed")
     if not removed then return {} end
-    local changed = false
+    local kept, changed = {}, false
     for file, removed_at in pairs(removed) do
-        local hist_idx = ReadHistory:getIndexByFile(file)
-        if not lfs.attributes(file, "mode") or (hist_idx and ReadHistory.hist[hist_idx].time > removed_at) then
-            removed[file] = nil
-            changed = true
+        local path = ffiUtil.realpath(file)
+        if path then
+            kept[path] = math.max(kept[path] or 0, removed_at)
         end
+        changed = changed or path ~= file
     end
     if changed then
-        G_reader_settings:saveSetting("shelf_removed", removed)
+        G_reader_settings:saveSetting("shelf_removed", kept)
     end
-    return removed
+    return kept
+end
+
+--- A symlink on the shelf and its target opened from history share one shelf state.
+function Shelf.isRemoved(file)
+    return Shelf.removed()[ffiUtil.realpath(file) or file] ~= nil
+end
+
+--- Whether the file belongs to the home scan, including its exclusions, before hiding books.
+function Shelf.isInHome(file)
+    -- Reuse the scan's rules (including symlink and app-folder exclusions).
+    local path = ffiUtil.realpath(file) or file
+    for _, found in ipairs(Shelf.scan(Shelf.homeDir())) do
+        if (ffiUtil.realpath(found.file) or found.file) == path then return true end
+    end
+    return false
+end
+
+--- Restores a hidden book, without changing its file or book status.
+function Shelf.restore(file)
+    local removed = Shelf.removed()
+    removed[ffiUtil.realpath(file) or file] = nil
+    G_reader_settings:saveSetting("shelf_removed", removed)
+    G_reader_settings:flush()
 end
 
 --- Hides books (a list of their files) from the shelf. The files stay where they are.
 -- The settings are written at once, so the books stay hidden even if KOReader does not quit cleanly.
 function Shelf.remove(files)
-    local removed = G_reader_settings:readSetting("shelf_removed") or {}
+    local removed = Shelf.removed()
     for _, file in ipairs(files) do
-        removed[file] = os.time()
+        removed[ffiUtil.realpath(file) or file] = os.time()
     end
     G_reader_settings:saveSetting("shelf_removed", removed)
     G_reader_settings:flush()

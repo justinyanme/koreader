@@ -773,14 +773,14 @@ end
 
 --- Hides `books` from the shelf, leaving their files where they are, and ends selection mode if on.
 function ShelfView:removeBooks(books)
-    local files, removed = {}, {}
+    local files = {}
     for _, book in ipairs(books) do
         table.insert(files, book.file)
-        removed[book] = true
     end
     Shelf.remove(files)
+    local removed = Shelf.removed()
     for i = #self.books, 1, -1 do
-        if removed[self.books[i]] then
+        if removed[ffiUtil.realpath(self.books[i].file) or self.books[i].file] then
             table.remove(self.books, i)
         end
     end
