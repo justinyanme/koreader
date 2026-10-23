@@ -132,7 +132,7 @@ function SelectionBubble:rowContents(row, max_cell_w)
     end
     local contents, row_w, height = {}, 0, Screen:scaleBySize(44)
     if has_icon then
-        local pad = Screen:scaleBySize(8)
+        local pad = Screen:scaleBySize(6) -- 删除划线 still fits a 62dp cell, so it takes 划线's place exactly
         local icon_size = Screen:scaleBySize(28)
         local cell_w = Screen:scaleBySize(62)
         for c, cell in ipairs(row) do

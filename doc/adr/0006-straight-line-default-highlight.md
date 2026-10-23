@@ -18,7 +18,7 @@ ADR-0003 的前提是微信读书的划线有马克笔、直线、波浪线三�
 
 ## Consequences
 
-- 判断有没有“显式保存过”，只看全局的 `highlight_drawing_style`。在触屏设备上（新的划线界面只在触屏设备上启用），本 fork 一直让它优先于每本书的 `highlight_drawer`（`ReaderHighlightBubble:onReadSettings`）。上游每次关书都会把当前样式写进这本书的 `highlight_drawer`（`ReaderHighlight:onSaveSettings`），看不出是不是用户自己选的。所以全局值不存在时，新划线一律用直线，不退回到每本书自动存下的值；否则打开过的书都会继续用马克笔。没有触屏的设备仍走上游的划线界面和上游的样式规则。
-- 单独改某一条已有划线的样式，是 KOReader 原有的能力，不能因为样式行去掉就丢掉。按 DECISIONS 的总原则，它挪到次级入口，不回到选词浮层。具体放在哪里由实现 K07 的票决定，并在那张票的 PR 里写明。设置里的划线样式只管以后的新划线，不改已有划线。
+- 判断有没有“显式保存过”，只看全局的 `highlight_drawing_style`。在触屏设备上（新的划线界面只在触屏设备上启用），本 fork 一直让它优先于每本书的 `highlight_drawer`（`ReaderHighlightBubble:onReadSettings`）。上游每次关书都会把当前样式写进这本书的 `highlight_drawer`（`ReaderHighlight:onSaveSettings`），看不出是不是用户自己选的。所以全局值不存在时，新划线一律用直线，不退回到每本书自动存下的值；否则打开过的书都会继续用马克笔。这本书原来的 `highlight_drawer` 关书时原样写回，不被直线默认改掉（`ReaderHighlightBubble:onSaveSettings`），这样用上游 KOReader 或非触屏设备打开同一份笔记文件时，样式不变。没有触屏的设备仍走上游的划线界面和上游的样式规则。
+- 新界面不再提供单条划线改样式。实现 K07 时试过把它放到“长按删除划线”这个次级入口，但那是隐藏手势，长按不够久会被当成点按，直接删掉划线，误删风险太大，所以去掉了（PR #76 review）。全局样式只在 设置 → 阅读 → 划线样式 选，它只管以后的新划线，不改已有划线。已有划线按各自记录的样式照常显示，马克笔和波浪线都不受影响。点按划线出的是新浮层，所以上游按条改样式的对话框在触屏设备上也不再出现；没有触屏的设备仍走上游界面，可以照旧改。
 - 波浪线仍然是 fork 独有的样式，ADR-0003 记下的代价不变：用上游 KOReader 打开同一本书时，波浪线划线不会显示。`readerhighlight.lua` 和 `readerview.lua` 里把波浪线标成 fork 独有样式、指向 ADR-0003 的注释继续有效；`readerhighlightbubble.lua` 里给样式行写的那条注释，随样式行一起删掉。
 - 想法不属于划线样式。只有想法、没有显式划线的条目，正文里只画想法标记，不画直线（DECISIONS J05）。
