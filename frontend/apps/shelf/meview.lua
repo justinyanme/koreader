@@ -6,8 +6,9 @@ circled icon, a title over a subtitle and a chevron: 全部书笔记, 生词本,
 The name is the nickname set here, else the KOSync user name, else the device model (Me.name()); a tap on it edits
 the nickname, and saving it empty goes back to the others. A tap on the reading time opens the statistics plugin's
 reading progress, as 更多 → 阅读统计 does in the reader; without the plugin the time says so and takes no tap.
-版本更新 shows the version running and checks for a new one as the original menu's Update does; on a device
-without KOReader's updates it is dimmed and takes no tap.
+版本更新 shows the version running, and a tap shows KOReader's About with how to update this build: a new APK.
+It never checks KOReader's updates (OTA), which would install upstream KOReader over this build; the original
+menu keeps its Update entry.
 
 Subpages open over the content area, above the tab bar, with a nav bar and a
 paged list. Entering, leaving and paging repaint the content area (or the list
@@ -386,13 +387,24 @@ function MeView:homeRows()
         },
         {
             icon = "eink/me.update",
-            -- @translators On the Me page: checks for a new version of KOReader. Chinese: 版本更新
+            -- @translators On the Me page: shows the version running and how to update it. Chinese: 版本更新
             title = C_("Me page", "Version update"),
             -- @translators On the Me page, under 版本更新: the version running.
             subtitle = T(_("Current version %1"), Version:getShortVersion()),
-            callback = Device:hasOTAUpdates() and function() require("ui/otamanager"):fetchAndProcessUpdate() end or nil,
+            callback = function() self:showVersion() end,
         },
     }
+end
+
+--- KOReader's About (as in the original menu's Help), and that this build is updated by installing a new APK.
+function MeView:showVersion()
+    UIManager:show(InfoMessage:new{
+        text = T(_("KOReader %1\n\nA document viewer for E Ink devices.\n\nLicensed under Affero GPL v3. All dependencies are free software.\n\nhttp://koreader.rocks"),
+            BD.ltr(Version:getCurrentRevision()))
+            -- @translators On the Me page, after KOReader's About: this fork is built by its owner and is not updated over the air. Chinese: 本机为自编译的定制版本，更新请安装新的 APK。
+            .. "\n\n" .. _("This is a custom build made for this device. To update it, install a new APK."),
+        icon = "koreader",
+    })
 end
 
 function MeView:buildHome()

@@ -425,8 +425,10 @@ function BookList.setBookInfoCache(file, doc_settings)
     if annotations then
         book_info.has_annotations = #annotations > 0
     else
+        -- before annotations: highlights per page, and bookmarks, which become annotations too (page bookmarks as well)
         local highlight = doc_settings:readSetting("highlight")
-        book_info.has_annotations = highlight and next(highlight) and true
+        local bookmarks = doc_settings:readSetting("bookmarks")
+        book_info.has_annotations = (highlight and next(highlight) or bookmarks and next(bookmarks)) and true or nil
     end
     BookList.book_info_cache[file] = book_info
     bookInfoChanged(file)

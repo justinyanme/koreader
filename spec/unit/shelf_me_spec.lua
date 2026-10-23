@@ -1,5 +1,5 @@
 describe("Shelf home, 我 tab", function()
-    local BookList, DataStorage, Device, DocSettings, Event, FileManager, Geom, LuaSettings, Me, Palette, ReadHistory
+    local BookList, DataStorage, Device, DocSettings, Event, FileManager, Geom, LuaSettings, Me, ReadHistory
     local ReaderUI, Replacements, SQ3, Screen, UIManager, Version
     local ffiUtil, lfs, T, _, C_, N_
     local home, saved_settings, saved_hist, saved_dbs
@@ -14,17 +14,39 @@ describe("Shelf home, 我 tab", function()
         return os.time{ year = t.year, month = t.month, day = t.day - offset, hour = hour }
     end
 
-    local function seedStats(path)
+    -- A statistics database as the plugin keeps it: page reading sessions `{ start_time, seconds }` of one book,
+    -- the index on their start times, and the book's total.
+    local function writeStats(path, sessions)
         os.remove(path)
         local conn = SQ3.open(path)
-        conn:exec("CREATE TABLE page_stat_data (id_book integer, page integer, start_time integer, duration integer, total_pages integer);")
+        conn:exec([[
+            CREATE TABLE book (id integer PRIMARY KEY autoincrement, title text, authors text, notes integer,
+                last_open integer, highlights integer, pages integer, series text, language text, md5 text,
+                total_read_time integer, total_read_pages integer);
+            CREATE TABLE page_stat_data (id_book integer, page integer NOT NULL DEFAULT 0,
+                start_time integer NOT NULL DEFAULT 0, duration integer NOT NULL DEFAULT 0,
+                total_pages integer NOT NULL DEFAULT 0, UNIQUE (id_book, page, start_time));
+            CREATE INDEX page_stat_data_start_time ON page_stat_data(start_time);
+        ]])
+        local total = 0
+        for i, session in ipairs(sessions) do
+            conn:exec(string.format("INSERT INTO page_stat_data VALUES (1, %d, %d, %d, 100);", i, session[1], session[2]))
+            total = total + session[2]
+        end
+        conn:exec(string.format("INSERT INTO book (id, title, total_read_time, total_read_pages) VALUES (1, 'A book', %d, %d);",
+            total, #sessions))
+        conn:close()
+    end
+
+    local function seedStats(path)
+        local sessions = {}
         for offset, minutes in pairs(reading) do
             -- two sessions per day, to check they add up
             local first = math.floor(minutes * 60 / 3)
-            conn:exec(string.format("INSERT INTO page_stat_data VALUES (1, 1, %d, %d, 100);", dayAt(offset, 9), first))
-            conn:exec(string.format("INSERT INTO page_stat_data VALUES (1, 2, %d, %d, 100);", dayAt(offset, 21), minutes * 60 - first))
+            table.insert(sessions, { dayAt(offset, 9), first })
+            table.insert(sessions, { dayAt(offset, 21), minutes * 60 - first })
         end
-        conn:close()
+        writeStats(path, sessions)
     end
 
     local function seedVocab(path)
@@ -73,12 +95,12 @@ describe("Shelf home, 我 tab", function()
 
     local tap -- defined below
 
-    -- 我 opened with a tap on its tab; with `statistics`, as the statistics plugin
+    -- 我 opened with a tap on its tab; with `statistics`, in place of the statistics plugin (not loaded otherwise)
     local function openMe(statistics)
         FileManager:showFiles(home)
         UIManager:forceRePaint()
         local fm = FileManager.instance
-        fm.statistics = statistics
+        if statistics then fm.statistics = statistics end
         local tab
         local function findTab(w)
             if type(w) ~= "table" or tab then return end
@@ -209,7 +231,6 @@ describe("Shelf home, 我 tab", function()
         Geom = require("ui/geometry")
         LuaSettings = require("luasettings")
         Me = require("apps/shelf/me")
-        Palette = require("ui/palette")
         ReadHistory = require("readhistory")
         ReaderUI = require("apps/reader/readerui")
         Replacements = require("apps/replacements")
@@ -434,32 +455,116 @@ describe("Shelf home, 我 tab", function()
         fm:onClose()
     end)
 
-    it("checks for a new version from 版本更新 where KOReader updates the device, and dims it elsewhere", function()
+    it("shows the version and how to update this build from 版本更新, never checking KOReader's updates", function()
         local OTAManager = require("ui/otamanager")
-        local orig_has, orig_fetch = Device.hasOTAUpdates, OTAManager.fetchAndProcessUpdate
+        local InfoMessage = require("ui/widget/infomessage")
+        local orig_has, orig_check, orig_fetch = Device.hasOTAUpdates, OTAManager.checkUpdate, OTAManager.fetchAndProcessUpdate
         local checks = 0
+        OTAManager.checkUpdate = function() checks = checks + 1 end
         OTAManager.fetchAndProcessUpdate = function() checks = checks + 1 end
         local ok, err = pcall(function()
-            Device.hasOTAUpdates = function() return true end
-            local fm, view = openMe()
-            local row = shownRows(view)[6]
-            assert.are.equal(C_("Me page", "Version update"), row[1])
-            tap(row[3].dimen)
-            assert.are.equal(1, checks)
-            fm:onClose()
+            -- even where KOReader could update the device: its updates are upstream builds, which would replace this one
+            for __, has_ota in ipairs{ true, false } do
+                Device.hasOTAUpdates = function() return has_ota end
+                local fm, view = openMe()
+                local row = shownRows(view)[6]
+                assert.are.equal(C_("Me page", "Version update"), row[1])
+                assert.are.equal(T(_("Current version %1"), Version:getShortVersion()), row[2])
+                assert.is_truthy(find(row[3], function(w) return w.icon == "eink/me.chev" end))
+                tap(row[3].dimen)
+                local info = topWidget()
+                assert.are.equal(InfoMessage, getmetatable(info).__index)
+                -- KOReader's About, then how this build is updated
+                assert.is_truthy(info.text:find(T(_("KOReader %1\n\nA document viewer for E Ink devices.\n\nLicensed under Affero GPL v3. All dependencies are free software.\n\nhttp://koreader.rocks"),
+                    require("ui/bidi").ltr(Version:getCurrentRevision())), 1, true))
+                assert.is_truthy(info.text:find(_("This is a custom build made for this device. To update it, install a new APK."), 1, true))
+                assert.are.equal(0, checks)
+                tap(info.dimen) -- a tap closes it
+                assert.are.equal(fm, topWidget())
+                fm:onClose()
+            end
+        end)
+        Device.hasOTAUpdates, OTAManager.checkUpdate, OTAManager.fetchAndProcessUpdate = orig_has, orig_check, orig_fetch
+        assert(ok, err)
+    end)
 
-            Device.hasOTAUpdates = function() return false end
+    it("counts days in a row up to yesterday while today has none yet, and as far back as they go", function()
+        -- the fixture's days: today, 1 and 2 days ago, then 4 and 10 days ago
+        Me.now = function() return dayAt(-1, 12) end -- tomorrow: nothing read yet
+        local fm, view = openMe(fakeStatistics())
+        assert.are.equal(3, view.home.streak)
+        assert.is_truthy(table.concat(texts(view)):find("| " .. T(_("This week %1 h %2 min | %3-day streak"), 0, 0, 3):match("| (.*)$"), 1, true))
+        fm:onClose()
+        Me.now = function() return dayAt(3, 12) end -- nothing 3 days ago, the day before was read, not the one before it
+        fm, view = openMe(fakeStatistics())
+        assert.are.equal(1, view.home.streak)
+        fm:onClose()
+        Me.now = function() return dayAt(5, 12) end -- nothing that day nor the day before
+        fm, view = openMe(fakeStatistics())
+        assert.are.equal(0, view.home.streak)
+        fm:onClose()
+        Me.now = os.time
+
+        -- streaks longer than the days looked at first (60): up to the first of them, past it, and far past it
+        local saved = Me.stats_db
+        Me.stats_db = ffiUtil.realpath(DataStorage:getDataDir()) .. "/me_spec_streak.sqlite3"
+        for _, case in ipairs{ { days = 60, gap = true }, { days = 61, gap = true }, { days = 400 } } do
+            local sessions = {}
+            for offset = 0, case.days - 1 do
+                table.insert(sessions, { dayAt(offset, 10), 600 })
+            end
+            if case.gap then -- a day read after a day without reading
+                table.insert(sessions, { dayAt(case.days + 1, 10), 600 })
+            end
+            writeStats(Me.stats_db, sessions)
+            fm, view = openMe(fakeStatistics())
+            assert.are.equal(case.days, view.home.streak)
+            fm:onClose()
+        end
+        os.remove(Me.stats_db)
+        Me.stats_db = saved
+    end)
+
+    it("opens the reading progress of the statistics plugin itself, loaded as KOReader loads it", function()
+        local saved = Me.stats_db
+        local plugin_db = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
+        local had_db = lfs.attributes(plugin_db, "mode") == "file"
+        load_plugin("statistics.koplugin")
+        local ok, err = pcall(function()
+            -- the plugin makes its database as it first loads, and says so; a tap dismisses that
+            FileManager:showFiles(home)
+            UIManager:forceRePaint()
+            local fm = FileManager.instance
+            assert.are.equal("filemanagerstatistics", fm.statistics.name) -- the plugin, as the file manager names it
+            if topWidget() ~= fm then tap(topWidget().dimen) end
+            assert.are.equal(fm, topWidget())
+            fm:onClose()
+            -- a book read today and yesterday, as the plugin records it
+            local conn = SQ3.open(plugin_db)
+            conn:exec("INSERT INTO book (title, authors, notes, last_open, highlights, pages, series, language, md5, "
+                .. "total_read_time, total_read_pages) VALUES ('Romeo and Juliet', 'N/A', 0, 0, 0, 100, 'N/A', 'en', 'me_spec', 5400, 2);")
+            local id = tonumber(conn:rowexec("SELECT id FROM book WHERE md5 = 'me_spec';"))
+            conn:exec(string.format("INSERT INTO page_stat_data VALUES (%d, 1, %d, 3600, 100);", id, dayAt(0, 9)))
+            conn:exec(string.format("INSERT INTO page_stat_data VALUES (%d, 2, %d, 1800, 100);", id, dayAt(1, 9)))
+            conn:close()
+            Me.stats_db = plugin_db
+            local view
             fm, view = openMe()
-            row = shownRows(view)[6]
-            assert.is_nil(row[3].callback)
-            assert.are.equal(T(_("Current version %1"), Version:getShortVersion()), row[2])
-            assert.are.equal(Palette.ink_3, textWidget(row[3], row[1]).fgcolor)
-            assert.is_nil(find(row[3], function(w) return w.icon == "eink/me.chev" end))
-            tap(row[3].dimen)
-            assert.are.equal(1, checks)
+            assert.is_true(view.home.total_minutes >= 90)
+            assert.is_true(view.home.streak >= 2)
+            tap(view.time_tap.dimen)
+            local progress = topWidget()
+            assert.are.equal(package.loaded["readerprogress"], getmetatable(progress).__index)
+            progress:onClose()
+            UIManager:forceRePaint()
+            assert.are.equal(fm, topWidget())
             fm:onClose()
         end)
-        Device.hasOTAUpdates, OTAManager.fetchAndProcessUpdate = orig_has, orig_fetch
+        Me.stats_db = saved
+        disable_plugins()
+        if not had_db then
+            for _, suffix in ipairs{ "", "-wal", "-shm", "-journal" } do os.remove(plugin_db .. suffix) end
+        end
         assert(ok, err)
     end)
 
@@ -667,16 +772,10 @@ describe("Shelf home, 我 tab", function()
     it("counts a week from Monday 00:00", function()
         local saved = Me.stats_db
         Me.stats_db = ffiUtil.realpath(DataStorage:getDataDir()) .. "/me_spec_week.sqlite3"
-        os.remove(Me.stats_db)
-        local conn = SQ3.open(Me.stats_db)
-        conn:exec("CREATE TABLE page_stat_data (id_book integer, page integer, start_time integer, duration integer, total_pages integer);")
         local sunday = os.time{ year = 2026, month = 10, day = 18, hour = 23, min = 59, sec = 0 }
         local monday = os.time{ year = 2026, month = 10, day = 19, hour = 0, min = 0, sec = 0 }
-        conn:exec(string.format("INSERT INTO page_stat_data VALUES (1, 1, %d, 600, 100);", sunday))
-        conn:exec(string.format("INSERT INTO page_stat_data VALUES (1, 2, %d, 1200, 100);", monday))
         -- 30s more, on the Monday after: minutes are rounded, as the statistics plugin's pages do
-        conn:exec(string.format("INSERT INTO page_stat_data VALUES (1, 3, %d, 30, 100);", monday + 3600))
-        conn:close()
+        writeStats(Me.stats_db, { { sunday, 600 }, { monday, 1200 }, { monday + 3600, 30 } })
 
         Me.now = function() return sunday + 30 end
         local fm, view = openMe(fakeStatistics())
@@ -743,9 +842,22 @@ describe("Shelf home, 我 tab", function()
         BookList.resetBookInfoCache(path)
         ReadHistory:addItem(path, 3000, true)
 
+        -- and one with bookmarks only, no highlight
+        local bookmarked = home .. "/bookmarked.epub"
+        ffiUtil.copyFile("spec/front/unit/data/juliet.epub", bookmarked)
+        doc_settings = DocSettings:open(bookmarked)
+        doc_settings:saveSetting("doc_props", { title = "Bookmarked only" })
+        doc_settings:saveSetting("bookmarks", {
+            { datetime = "2020-02-01 10:00:00", page = "/body/p[2].0", text = "Page 2 @ 2020-02-01 10:00:00" },
+        })
+        doc_settings:flush()
+        BookList.resetBookInfoCache(bookmarked)
+        ReadHistory:addItem(bookmarked, 2500, true)
+
         local fm, view = openMe()
-        assert.are.equal(7, view.home.note_count)
+        assert.are.equal(8, view.home.note_count)
         tap(tappable(view, C_("Me page", "Notes in all books")).dimen)
+        assert.is_truthy(textWidget(view, T(_("%1 · %2 notes"), "Bookmarked only", 1)))
         local legacy = view.books[1]
         assert.are.equal("Legacy", legacy.title)
         assert.are.equal(3, #legacy.notes)
@@ -761,6 +873,7 @@ describe("Shelf home, 我 tab", function()
         fm:onClose()
 
         table.remove(ReadHistory.hist, ReadHistory:getIndexByFile(ffiUtil.realpath(path)))
+        table.remove(ReadHistory.hist, ReadHistory:getIndexByFile(ffiUtil.realpath(bookmarked)))
     end)
 
     it("shows sync and transfer entries, plugins that are off as disabled", function()

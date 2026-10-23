@@ -5,7 +5,10 @@ Reading time comes from the statistics plugin's database, words from the
 vocabulary builder's database, and notes (highlights, thoughts and bookmarks, see
 CONTEXT.md) from the sidecars of the books in reading history (the books the
 exporter's "all books" covers). Both databases are only read; a missing or
-unreadable one reads as empty. The name is the nickname set on the tab, else the
+unreadable one reads as empty. The tab reads them each time it is shown, so no
+query goes through all the reading the statistics hold: the total is the
+plugin's per-book totals, and days are looked up over a range of start times,
+which the plugin's index on them serves. The name is the nickname set on the tab, else the
 KOSync user name, else the device model.
 The home page needs counts only; notes and words are loaded by their subpages.
 ]]
@@ -57,13 +60,13 @@ local function firstNumber(res, column)
     return res and res[column] and tonumber(res[column][1]) or 0
 end
 
---- Minutes read: `{ total_minutes, week_minutes }`, all recorded time and this week's, from Monday 00:00 to today,
--- rounded as the statistics plugin's pages round them.
+--- Minutes read: `{ total_minutes, week_minutes }`, all recorded time (the plugin's per-book totals) and this week's,
+-- from Monday 00:00 to today, rounded as the statistics plugin's pages round them.
 function Me.readingTime(now)
     local t = os.date("*t", now or Me.now())
     local monday = dayStart(t, -((t.wday + 5) % 7)) -- os.date counts from Sunday = 1
-    local res = query(Me.stats_db, string.format("SELECT sum(duration), "
-        .. "sum(CASE WHEN start_time >= %d AND start_time < %d THEN duration ELSE 0 END) FROM page_stat_data;",
+    local res = query(Me.stats_db, string.format("SELECT (SELECT sum(total_read_time) FROM book), "
+        .. "(SELECT sum(duration) FROM page_stat_data WHERE start_time >= %d AND start_time < %d);",
         monday, dayStart(t, 1)))
     return {
         total_minutes = math.floor(firstNumber(res, 1) / 60 + 0.5),
@@ -71,18 +74,28 @@ function Me.readingTime(now)
     }
 end
 
+local STREAK_WINDOW = 60 -- days looked at first; doubled while a streak reaches back to the first of them
+
 --- Consecutive days with reading, up to today, or up to yesterday while today has none yet.
 function Me.streak(now)
     local t = os.date("*t", now or Me.now())
-    local res = query(Me.stats_db, string.format(
-        "SELECT DISTINCT %s AS d FROM page_stat_data WHERE start_time < %d ORDER BY d DESC;", DAY_SQL, dayStart(t, 1)))
-    local days = res and res[1] or {}
-    local offset = days[1] == os.date("%Y-%m-%d", dayStart(t, 0)) and 0 or -1
-    local streak = 0
-    while days[streak + 1] and days[streak + 1] == os.date("%Y-%m-%d", dayStart(t, offset - streak)) do
-        streak = streak + 1
+    local window = STREAK_WINDOW
+    while true do
+        local res = query(Me.stats_db, string.format("SELECT %s AS d FROM page_stat_data "
+            .. "WHERE start_time >= %d AND start_time < %d GROUP BY d ORDER BY d DESC;",
+            DAY_SQL, dayStart(t, -window), dayStart(t, 1)))
+        local days = res and res[1] or {}
+        local offset = days[1] == os.date("%Y-%m-%d", dayStart(t, 0)) and 0 or -1
+        local streak = 0
+        while days[streak + 1] and days[streak + 1] == os.date("%Y-%m-%d", dayStart(t, offset - streak)) do
+            streak = streak + 1
+        end
+        -- unless it reaches the window's first day, where it may go on before it
+        if offset - streak + 1 > -window then
+            return streak
+        end
+        window = window * 2
     end
-    return streak
 end
 
 local function bookTitle(file, doc_settings)
