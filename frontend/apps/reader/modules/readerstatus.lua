@@ -250,7 +250,9 @@ end
 -- Otherwise we change status from reading/abandoned to complete or from complete to reading.
 function ReaderStatus:markBook(mark_read)
     local summary = self.ui.doc_settings:readSetting("summary")
-    summary.status = (not mark_read and summary.status == "complete") and "reading" or "complete"
+    -- A finished book reaching its end again (automatic marking) keeps the day it was finished.
+    if mark_read and summary.status == "complete" then return end
+    BookList.setSummaryStatus(summary, (not mark_read and summary.status == "complete") and "reading" or "complete")
     summary.modified = os.date("%Y-%m-%d", os.time())
     BookList.setBookInfoCacheProperty(self.document.file, "status", summary.status)
 end

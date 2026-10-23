@@ -66,6 +66,9 @@ local ImageViewer = InputContainer:extend{
     -- sensitivity for hold (trigger full refresh) vs pan (move image)
     pan_threshold = Screen:scaleBySize(5),
 
+    -- refresh of our area once closed
+    close_refresh_type = "flashui",
+
     _scale_to_fit = nil, -- state of toggle between our 2 pre-defined scales (scale to fit / original size)
     _panning = false,
     -- Default centering on center of image if oversized
@@ -886,7 +889,7 @@ function ImageViewer:onCloseWidget()
 
     -- NOTE: Assume there's no image beneath us, so, no dithering request
     UIManager:setDirty(nil, function()
-        return "flashui", self.main_frame.dimen
+        return self.close_refresh_type, self.main_frame.dimen
     end)
 end
 

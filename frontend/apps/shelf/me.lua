@@ -10,6 +10,7 @@ The home page needs counts only; notes and words are loaded by their subpages.
 
 local BookList = require("ui/widget/booklist")
 local DataStorage = require("datastorage")
+local FinishedBooks = require("finishedbooks")
 local ReadHistory = require("readhistory")
 local SQ3 = require("lua-ljsqlite3/init")
 local lfs = require("libs/libkoreader-lfs")
@@ -142,8 +143,8 @@ end
 
 --[[--
 `{ note_count, finished_this_year }` over the books in history. Only sidecars of books with
-annotations or a finished status are read. "Finished this year" approximates the date a book
-was finished by its summary's `modified` date, the last time its status was set.
+annotations or a finished status are read. A book counts in the year it was marked finished;
+one finished before that time was recorded, in the year of its summary's `modified` date.
 ]]
 function Me.counts(now)
     local year = os.date("%Y", now or Me.now())
@@ -151,7 +152,7 @@ function Me.counts(now)
     eachHistoryBook(function(info) return info.has_annotations or info.status == "complete" end,
         function(_, doc_settings, info)
             local summary = doc_settings:readSetting("summary")
-            if info.status == "complete" and summary and (summary.modified or ""):sub(1, 4) == year then
+            if info.status == "complete" and summary and FinishedBooks.day(summary):sub(1, 4) == year then
                 counts.finished_this_year = counts.finished_this_year + 1
             end
             if info.has_annotations then

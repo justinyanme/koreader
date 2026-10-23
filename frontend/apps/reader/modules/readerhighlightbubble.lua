@@ -17,6 +17,9 @@ Replaces ReaderHighlight (apps/replacements reader_highlight slot):
   after a long-press, the look-up is for the word pressed;
 - tapping a thought mark opens local quote/content cards, then full-screen detail
   with return to the quote, edit and source-aware deletion;
+- a tap on an image of the text, but not of a highlight or thought mark, shows
+  it in the image preview (ui/widget/imagepreview); on an image over half the
+  page, only in the middle of the page, its sides turning pages;
 - copying closes the popover and confirms with a toast;
 - a thought is written in a compact band above the keyboard, over a washed,
   inert page; Back discards the draft, Save persists it and shows a toast;
@@ -1014,7 +1017,113 @@ function ReaderHighlightBubble:onTap(arg, ges)
         self:showThoughtCard(chosen)
         return true
     end
-    return ReaderHighlight.onTap(self, arg, ges)
+    -- not the tap ending a long-press, nor those of select mode
+    local previews = not (self.hold_pos or self.select_mode)
+    return ReaderHighlight.onTap(self, arg, ges) or (previews and self:previewImage(ges))
+end
+
+-- Images with a side shorter than this, in their own pixels, are glyphs, bullets or rules set in the text
+-- (the reference book's list bullets are 50px): a tap on them stays a tap on the page.
+local PREVIEW_MIN_SIDE = 64
+
+--- The shorter side of an image from getImageFromPosition(), in its own pixels: of an SVG image (a function
+-- rendering it) at scale 1, of an animated one (a table of frames) its first frame; nil if unknown.
+local function shorterSide(image)
+    local first = type(image) == "table" and image[1] or image
+    local bb = type(first) == "function" and first(1) or first
+    if type(bb) ~= "cdata" then return end
+    local side = math.min(bb:getWidth(), bb:getHeight())
+    if first ~= bb and type(image) == "table" and image.image_disposable then
+        bb:free() -- a frame built for us; ImageViewer builds its own
+    end
+    return side
+end
+
+local function freeImage(image)
+    if type(image) == "function" then
+        image(false)
+    elseif image.free then
+        image:free()
+    end
+end
+
+--- The screen rect of the element starting at xpointer xp (such as "…/p[2]/img[1].0"), if pos falls in it:
+-- the segment of the range from it to the next child of its parent, images included (down to the line's
+-- baseline descent, for an image).
+local function elementRectAt(cre, xp, pos)
+    local parent, step = xp:match("^(.+)/([^/]+)%.0$")
+    if not parent or step:find("^text%(") then return end -- some text
+    -- its index among the parent's children: the last one it does not come before
+    local function from(k) return cre:compareXPointers(parent .. "." .. k, xp) == 1 end
+    if not from(0) then return end
+    local lo, hi = 0, 1
+    while from(hi) do lo, hi = hi, hi * 2 end
+    while hi - lo > 1 do
+        local mid = math.floor((lo + hi) / 2)
+        if from(mid) then lo = mid else hi = mid end
+    end
+    for _, box in ipairs(cre:getWordBoxesFromPositions(xp, parent .. "." .. lo + 1, true, true) or {}) do
+        if pos.x >= box.x0 and pos.x < box.x1 and pos.y >= box.y0 and pos.y < box.y1 then
+            return Geom:new{ x = box.x0, y = box.y0, w = box.x1 - box.x0, h = box.y1 - box.y0 }
+        end
+    end
+end
+
+--- The screen rect of the image at a page position of a reflowable book, if the position falls in it: the
+-- engine finds an image in a line of its own across the line. The word range there starts or ends at the
+-- image, which ends a word in a line of text.
+function ReaderHighlightBubble:imageRectAt(pos)
+    local cre = self.ui.document._document
+    local range = cre:getTextFromPositions(pos.x, pos.y, pos.x, pos.y, false, false)
+    if not range then return end
+    for _, xp in ipairs{ range.pos0, range.pos1 } do
+        local rect = elementRectAt(cre, xp, pos)
+        if rect then return rect end
+    end
+end
+
+--- Whether a screen position is in the middle of the page, where a tap shows the toolbar: outside the page
+-- turn zones of ReaderToolbar's layout, or of the view when the original menu takes the taps.
+function ReaderHighlightBubble:isMiddleOfPage(screen_pos)
+    local fx, fy = screen_pos.x / Screen:getWidth(), screen_pos.y / Screen:getHeight()
+    if self.ui.menu.getTapLayout then
+        for _, z in ipairs(self.ui.menu:getTapLayout()) do
+            if fx >= z[1] and fx < z[1] + z[3] and fy >= z[2] and fy < z[2] + z[4] then
+                return z[5] == "toolbar"
+            end
+        end
+        return true -- where ReaderToolbar:onTapPage() shows it too
+    end
+    for _, z in ipairs{ self.view:getTapZones() } do
+        if fx >= z.ratio_x and fx < z.ratio_x + z.ratio_w and fy >= z.ratio_y and fy < z.ratio_y + z.ratio_h then
+            return false
+        end
+    end
+    return true
+end
+
+--- Shows an image tapped in the text in the image preview: after links, thought marks and highlights,
+-- before the toolbar and page turns, for a tap on the image itself. An image over half the page (a
+-- cover, a plate, a picture book's page) leaves its sides to page turns: only the middle of the page,
+-- where the toolbar would show, opens it. Fixed-layout pages have no images to tell from the page.
+function ReaderHighlightBubble:previewImage(ges)
+    local pos = self.ui.rolling and self.view:screenToPageTransform(ges.pos)
+    local rect = pos and self:imageRectAt(pos)
+    if not rect then return end
+    if rect.w * rect.h > Screen:getWidth() * Screen:getHeight() / 2 and not self:isMiddleOfPage(ges.pos) then
+        return
+    end
+    -- the frames of an animated image, or for an SVG image a function rendering it at any scale
+    local image = self.ui.document:getImageFromPosition(pos, true, true)
+    if not image then return end
+    local side = shorterSide(image)
+    if side and side < PREVIEW_MIN_SIDE then
+        freeImage(image)
+        return
+    end
+    -- loaded on first use, as ReaderHighlight does ImageViewer
+    UIManager:show(require("ui/widget/imagepreview"):new{ image = image })
+    return true
 end
 
 --- A mark opens the local content cards; highlight text keeps its selection actions.
