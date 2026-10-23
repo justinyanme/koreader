@@ -8,7 +8,8 @@ place and closes it (see ReaderToolbar:showPanel()).
 
 A panel with `on_back` is nested: opened from another panel, such as the
 typeset panel's layout options (DESIGN.md's paragraph panel). The toolbar
-then hides the top bar and shows only a back arrow in the bottom bar.
+then hides the top bar and shows only a back arrow in the bottom bar. The expanded
+font panel also sets `hide_bottom_bar`, reaching the screen edge with its own collapse button.
 
 A panel either gets its `content`, or builds it in `buildContent()`, which
 `refresh()` calls again after a change.
@@ -46,6 +47,8 @@ local Panel = InputContainer:extend{
     content = nil, -- widget
     on_back = nil, -- function: leaves this nested panel for the one it was opened from
     hide_top_bar = false, -- the toolbar hides its top bar while this panel shows
+    hide_bottom_bar = false, -- the expanded font panel reaches the screen's bottom edge
+    padding_top = Screen:scaleBySize(16),
     on_close = nil, -- function, called once the panel is closed
     -- set by the toolbar while the panel shows
     bottom_y = nil, -- the panel sits right above this line
@@ -71,7 +74,7 @@ function Panel:build()
         padding = 0,
         padding_left = GUTTER,
         padding_right = GUTTER,
-        padding_top = Screen:scaleBySize(16),
+        padding_top = self.padding_top,
         padding_bottom = Screen:scaleBySize(20),
         self.content or VerticalSpan:new{ width = 0 },
     }
