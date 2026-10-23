@@ -95,10 +95,35 @@ end
 
 local function getExternalFontDir()
     if CanvasContext:hasSystemFonts() then
+        -- Enable Android's offline fonts on first use, keeping an explicit opt-out and the original menu in sync.
+        if CanvasContext:isAndroid() and not G_reader_settings:has("system_fonts") then
+            G_reader_settings:saveSetting("system_fonts", true)
+        end
         return require("ui/elements/font_settings"):getPath()
     else
         return os.getenv("EXT_FONT_DIR")
     end
+end
+
+function FontList:getSystemFontFace()
+    if self.system_font_face then return self.system_font_face end
+    local cre = require("document/credocument"):engineInit()
+    for _, face in ipairs(cre.getFontFaces()) do
+        local file, index = cre.getFontFaceFilenameAndFaceIndex(face)
+        if file and file:match("^/system/fonts/") then
+            local ok, ftsize = pcall(FT.newFaceSize, file, 16, index)
+            if ok then
+                local has_chinese = ftsize:hasGlyph(0x4E2D) -- 中
+                ftsize:done()
+                if has_chinese then
+                    self.system_font_face = face
+                    return face
+                end
+            end
+        end
+    end
+    self.system_font_face = "Noto Sans CJK SC"
+    return self.system_font_face
 end
 
 -- Query FreeType/HarfBuzz about font metadata

@@ -48,6 +48,7 @@ local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
 local Toast = require("ui/widget/toast")
 local UIManager = require("ui/uimanager")
+local util = require("util")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Widget = require("ui/widget/widget")
@@ -62,10 +63,9 @@ local FONT_SIZES = { 15, 16, 17, 18, 19, 20, 22, 24, 26, 28 }
 local LINE_SPACINGS = { 85, 95, 105, 115, 125, 135, 145, 155, 165 }
 local MARGINS = { 10, 14, 18, 23, 28, 36, 44, 56, 70 } -- dp, left and right; with the first round's 18 / 28 / 44
 local MAX_LINE_CHARS = 38 -- CJK characters per line
--- 思源宋体, not bundled. Only the first face of a .ttc collection is listed by crengine (as in ReaderFont).
+-- 思源宋体, when installed by the user or provided by the system.
 local SERIF_FACES = { "Source Han Serif SC", "Noto Serif CJK SC", "Noto Serif SC", "Source Han Serif CN", "Source Han Serif" }
 local CJK_SANS = "Noto Sans CJK SC" -- 思源黑体, bundled
-local LATIN_FACES = { serif = "Noto Serif", sans = "Noto Sans" }
 
 local LABEL_W = Screen:scaleBySize(64)
 
@@ -73,16 +73,10 @@ local function text(str, face, color, max_width)
     return TextWidget:new{ text = str, face = Font:getFace(face), fgcolor = color or Palette.ink, max_width = max_width }
 end
 
-local function hasFace(name)
-    for _, info in pairs(FontList.fontinfo) do
-        if info[1] and info[1].name == name then return true end
-    end
-    return false
-end
-
 local function serifFace()
+    local faces = require("document/credocument"):engineInit().getFontFaces()
     for _, face in ipairs(SERIF_FACES) do
-        if hasFace(face) then return face end
+        if util.arrayContains(faces, face) then return face end
     end
 end
 
@@ -158,29 +152,29 @@ function EntryPill:onTapSelect()
     return true
 end
 
--- Font tile: a sample in the face over its name; 2dp ink border when selected, 1dp rule gray otherwise.
+-- Font names preview their own face; the selected tile is ink with paper text.
 local FontCard = InputContainer:extend{
     width = nil,
-    sample = nil, -- widget
-    name = nil, -- string
+    name = nil,
+    face = nil,
     selected = false,
-    enabled = true,
     callback = nil,
 }
 
 function FontCard:init()
-    local h = Screen:scaleBySize(66)
-    local bw = self.selected and Screen:scaleBySize(2) or Screen:scaleBySize(1)
+    local h = Screen:scaleBySize(44)
+    local bw = Size.border.default
     self.dimen = Geom:new{ w = self.width, h = h }
     self[1] = FrameContainer:new{
-        bordersize = bw, padding = 0, radius = Screen:scaleBySize(10),
-        color = self.selected and Palette.ink or Palette.rule, background = Palette.paper,
+        bordersize = bw, padding = 0, radius = Screen:scaleBySize(9),
+        color = self.selected and Palette.ink or Palette.mark,
+        background = self.selected and Palette.ink or Palette.mark,
         CenterContainer:new{
             dimen = Geom:new{ w = self.width - 2 * bw, h = h - 2 * bw },
-            VerticalGroup:new{
-                self.sample,
-                VerticalSpan:new{ width = Screen:scaleBySize(2) },
-                text(self.name, "ui_micro", self.enabled and Palette.ink_2 or Palette.ink_3, self.width - 2 * bw),
+            TextWidget:new{
+                text = self.name, face = self.face or Font:getFace("ui_label"),
+                fgcolor = self.selected and Palette.paper or Palette.ink,
+                max_width = self.width - 2 * (bw + Screen:scaleBySize(6)),
             },
         },
     }
@@ -537,15 +531,6 @@ function ReaderTypesetPanel:isCJK()
     return tag:match("^zh") or tag:match("^ja") or tag:match("^ko")
 end
 
---- The face behind a font card ("serif" or "sans") for this book's language,
--- or nil for the CJK serif when it is not installed.
-function ReaderTypesetPanel:cardFace(kind)
-    if not self:isCJK() then
-        return LATIN_FACES[kind]
-    end
-    return kind == "sans" and CJK_SANS or serifFace()
-end
-
 function ReaderTypesetPanel:showSerifMissing()
     UIManager:show(InfoMessage:new{
         text = T(_("Source Han Serif is not installed. Put its font files in %1 and restart KOReader. Source Han Sans is used for now."),
@@ -553,56 +538,74 @@ function ReaderTypesetPanel:showSerifMissing()
     })
 end
 
-function ReaderTypesetPanel:setCardFont(kind)
-    local face = self:cardFace(kind)
-    if not face then
-        face = CJK_SANS
-        self:showSerifMissing()
-    end
-    self.ui.font:onSetFont(face)
-end
-
 function ReaderTypesetPanel:fontCards(width)
-    local gap = Screen:scaleBySize(10)
-    local card_w = math.floor((width - 2 * gap) / 3)
+    local gap = Screen:scaleBySize(6)
+    local columns = math.max(2, math.min(5, math.floor((width + gap) / Screen:scaleBySize(100))))
+    local card_w = math.floor((width - (columns - 1) * gap) / columns)
     local cre = require("document/credocument"):engineInit()
-    local function sample(face, color)
-        local file, index = cre.getFontFaceFilenameAndFaceIndex(face)
-        return TextWidget:new{
-            text = "永 Aa",
-            face = file and Font:getFace(file, 20, index) or Font:getFace("cfont", 20),
-            fgcolor = color,
-            max_width = card_w,
-        }
-    end
-    local row = HorizontalGroup:new{}
-    for __, card in ipairs{ { "serif", _("Source Han Serif") }, { "sans", _("Source Han Sans") } } do
-        local face = self:cardFace(card[1])
-        local name = card[2]
-        if not face then
-            name = T(_("%1 · not installed"), name)
+    local available = cre.getFontFaces()
+    local system_face = FontList:getSystemFontFace()
+    local current = self.ui.font.font_face
+    local faces, seen = {}, {}
+    local function add(face)
+        if not seen[face] and util.arrayContains(available, face) then
+            seen[face] = true
+            table.insert(faces, face)
         end
-        table.insert(row, FontCard:new{
-            width = card_w,
-            sample = sample(face or CJK_SANS, face and Palette.ink or Palette.ink_3),
-            name = name,
-            enabled = face ~= nil,
-            selected = face ~= nil and self.ui.font.font_face == face,
-            callback = function()
-                self:setCardFont(card[1])
-                self:refreshPanel()
-            end,
-        })
-        table.insert(row, HorizontalSpan:new{ width = gap })
     end
-    local icon_size = Screen:scaleBySize(20)
-    table.insert(row, FontCard:new{
-        width = width - 2 * (card_w + gap),
-        sample = IconWidget:new{ icon = "eink/plus", width = icon_size, height = icon_size, alpha = true },
-        name = _("More fonts"),
-        callback = function() self:showFontMenu() end,
-    })
-    return row
+    add(system_face)
+    -- Keep the common Latin faces within reach alongside the CJK system face.
+    add("Noto Sans")
+    add("Noto Serif")
+    for _, face in ipairs(available) do add(face) end
+    local count = math.min(#faces + 1, columns * 3)
+    local current_index = util.arrayContains(faces, current)
+    if current_index and current_index >= count then faces[count - 1] = current end
+    local grid = VerticalGroup:new{ align = "left" }
+    local row
+    for i = 1, count do
+        if (i - 1) % columns == 0 then
+            if row then table.insert(grid, VerticalSpan:new{ width = gap }) end
+            row = HorizontalGroup:new{}
+            table.insert(grid, row)
+        else
+            table.insert(row, HorizontalSpan:new{ width = gap })
+        end
+        if i == count then
+            table.insert(row, FontCard:new{
+                width = card_w, name = _("View more") .. " ›",
+                callback = function() self:showFontMenu() end,
+            })
+        else
+            local face = faces[i]
+            local file, index = cre.getFontFaceFilenameAndFaceIndex(face)
+            if not file then file, index = cre.getFontFaceFilenameAndFaceIndex(face, nil, true) end
+            local name = face == system_face and _("System font")
+                or (file and FontList:getLocalizedFontName(file, index)) or face
+            table.insert(row, FontCard:new{
+                width = card_w, name = name,
+                face = file and Font:getFace(file, 14 * Font.ui_scale, index),
+                selected = current == face,
+                callback = function()
+                    self.ui.font:onSetFont(face)
+                    self.ui.font:addToRecentlySelectedList(face)
+                    self:refreshPanel()
+                end,
+            })
+        end
+    end
+    local file, index = cre.getFontFaceFilenameAndFaceIndex(current)
+    local current_name = current == system_face and _("System font")
+        or (file and FontList:getLocalizedFontName(file, index)) or current
+    return VerticalGroup:new{
+        align = "left",
+        TextWidget:new{
+            text = T(_("Current selection · %1"), current_name),
+            face = Font:getFace("ui_title"), bold = true, max_width = width,
+        },
+        VerticalSpan:new{ width = Screen:scaleBySize(12) },
+        grid,
+    }
 end
 
 ------------------------------------------------------------------------
@@ -710,6 +713,9 @@ function ReaderTypesetPanel:showMenu(item_table)
     end
     local container = CenterContainer:new{ covers_header = true, ignore = "height", dimen = Screen:getSize() }
     local menu = TouchMenu:new{ width = Screen:getWidth(), tab_item_table = { tab }, show_parent = container }
+    if item_table.open_on_menu_item_id_func then
+        menu:updateItems(1, item_table.open_on_menu_item_id_func())
+    end
     menu.close_callback = function() self:closeMenu() end
     container[1] = menu
     self.menu_container = container
@@ -814,7 +820,7 @@ function ReaderTypesetPanel:mainContent()
             set = function(v) self:setMargin(v) end,
         },
         VerticalSpan:new{ width = Screen:scaleBySize(8) },
-        controlRow(_("Font"), self:fontCards(w - LABEL_W)),
+        self:fontCards(w),
     }
 end
 

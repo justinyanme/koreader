@@ -160,9 +160,13 @@ function ReaderFont:onSetDimensions(dimen)
 end
 
 function ReaderFont:onReadSettings(config)
+    cre = require("document/credocument"):engineInit()
     self.font_face = config:readSetting("font_face")
                   or G_reader_settings:readSetting("cre_font")
                   or self.ui.document.default_font
+    if not util.arrayContains(cre.getFontFaces(), self.font_face) then
+        self.font_face = FontList:getSystemFontFace()
+    end
     self.ui.document:setFontFace(self.font_face)
 
     local header_font = G_reader_settings:readSetting("header_font") or self.ui.document.header_font
@@ -304,14 +308,11 @@ end
 
 function ReaderFont:onSetFont(face)
     if face and self.font_face ~= face then
-        for _, fontinfo in pairs(FontList.fontinfo) do
-            if fontinfo[1].name == face then
-                self.font_face = face
-                self.ui.document:setFontFace(face)
-                -- signal readerrolling to update pos in new height
-                self.ui:handleEvent(Event:new("UpdatePos"))
-                return
-            end
+        if util.arrayContains(cre.getFontFaces(), face) then
+            self.font_face = face
+            self.ui.document:setFontFace(face)
+            -- signal readerrolling to update pos in new height
+            self.ui:handleEvent(Event:new("UpdatePos"))
         end
     end
 end
