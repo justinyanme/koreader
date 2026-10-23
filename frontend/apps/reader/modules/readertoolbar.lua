@@ -168,6 +168,7 @@ local ReaderToolbar = ReaderMenu:extend{
     panel = nil, -- ui/widget/panel open between the page and the bottom bar
     panel_name = nil, -- the entry of that panel: "progress", "brightness", "more" or "font"
     drawer = nil, -- the full-screen page shown over the book: the contents page or the notes page
+    notes_return = nil, -- filter of the notes list to reopen on Back after a card jump
     hint = nil, -- ReaderToolbarHint while the open-book hint shows
 }
 
@@ -416,6 +417,7 @@ function ReaderToolbar:onSetDimensions(dimen)
 end
 
 function ReaderToolbar:onCloseWidget()
+    self.notes_return = nil
     self:dismissHint()
     self:hideToolbar(true)
     self:closeDrawer()
@@ -425,6 +427,7 @@ end
 -- the original table of contents stays in the original menu, which calls ReaderToc directly.
 function ReaderToolbar:onShowToc()
     if not Device:isTouchDevice() then return end -- no D-pad navigation here: ReaderToc handles it
+    self.notes_return = nil
     self:hideToolbar(true) -- the page covers the bars
     self:closeDrawer()
     self.drawer = require("apps/reader/modules/readertocpage"):new{
@@ -436,10 +439,11 @@ function ReaderToolbar:onShowToc()
     return true
 end
 
---- "ShowNotes" opens the notes page (笔记页) of the book: every note, from the bottom bar (and any other
--- entry), or only its bookmarks (`filter` "bookmarks"), from the contents page's 书签.
+--- "ShowNotes" always opens all notes from the bottom bar, or bookmarks from the contents page's 书签.
+-- Only Back after a card jump restores the previous filter and list page.
 function ReaderToolbar:onShowNotes(filter)
     if not Device:isTouchDevice() then return end
+    self.notes_return = nil
     self:hideToolbar(true) -- the page covers the bars
     self:closeDrawer()
     local page
@@ -449,10 +453,17 @@ function ReaderToolbar:onShowNotes(filter)
         on_close = function()
             if self.drawer == page then self.drawer = nil end
         end,
+        on_jump = function() self.notes_return = { filter = page.filter } end,
     }
     self.drawer = page
     UIManager:show(page, "ui", page.dimen)
     return true
+end
+
+function ReaderToolbar:onBack()
+    if self.notes_return then
+        return self:onShowNotes(self.notes_return.filter)
+    end
 end
 
 --- The notes page shown follows the notes as they change (not consumed: other modules want it too).

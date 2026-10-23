@@ -4,8 +4,9 @@ thoughts and bookmarks) on a full-screen page (ui/widget/fullscreenpage), after 
 06-notes/01-notes-list.png, 02-notes-next-page.png and 06-empty-notes-completed-book.png, and
 05-bookmarks/04-bookmark-in-notes.png and 05-bookmarks-and-highlights-filter.png.
 
-Opened by "ShowNotes" (ReaderToolbar): the toolbar's 笔记 resumes the last list (all notes initially); the
-contents page's 书签 (and the search page's) lists only bookmarks, when the book has any. In the title band, 笔记, and 仅显示书签 at the right
+Opened by "ShowNotes" (ReaderToolbar): the toolbar's 笔记 lists all notes; the contents page's 书签 (and the
+search page's) lists only bookmarks, when the book has any. Back after a card jump restores the list left.
+In the title band, 笔记, and 仅显示书签 at the right
 while the book has bookmarks: a toggle, its bookmark icon filled while only the bookmarks are listed. On the
 first page, the overview card: the book title, → 已读到 x% · 共 N 条笔记, ↗ 时长 N 分钟 (with the statistics
 plugin only) and the cover. N counts every note (ReaderAnnotation:getNumberOfAnnotations()), whatever is
@@ -276,6 +277,7 @@ local NotesPage = FullscreenPage:extend{
     ui = nil,
     filter = nil, -- "bookmarks": only the bookmarks are listed (dropped when the book has none)
     on_close = nil, -- function, called once the page is closed
+    on_jump = nil, -- function, remembers the list for Back from the reader
 }
 
 function NotesPage:init()
@@ -291,9 +293,6 @@ function NotesPage:init()
     self.text_w = self.inner_w - DISC - DISC_GAP
     self.page_texts = setmetatable({}, { __mode = "k" }) -- bookmark => the text its page starts with, kept by refresh()
     local left = positions[self.ui.document]
-    if self.filter == nil and left then
-        self.filter = left.filter
-    end
     self:collect()
     if left and left.filter == self.filter then
         self:layOutTo(left.page)
@@ -693,6 +692,7 @@ function NotesPage:jump(item)
     if self.closed then return end
     self.closed = true
     UIManager:close(self, "partial", self.dimen)
+    if self.on_jump then self.on_jump() end
     self.ui.link:addCurrentLocationToStack()
     if self.ui.rolling then
         -- no margin marker: the jump focus marks the text itself
