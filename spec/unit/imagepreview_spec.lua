@@ -60,10 +60,11 @@ describe("Image preview", function()
     end
 
     -- PNG data of a w x h image inside a 4px ink frame: paper inside, or with `clear` transparent
-    -- (as such images usually are: black, with no opacity).
-    local function framedPng(w, h, clear)
+    -- (as such images usually are: black, with no opacity); with `stripe`, a 4px ink line from x = stripe.
+    local function framedPng(w, h, clear, stripe)
         return png(w, h, function(x, y)
             if x < 4 or y < 4 or x >= w - 4 or y >= h - 4 then return 0, 0xFF end
+            if stripe and x >= stripe and x < stripe + 4 then return 0, 0xFF end
             if clear then return 0, 0 end
             return 0xFF, 0xFF
         end)
@@ -121,7 +122,7 @@ describe("Image preview", function()
 <p><img src="bullet.png" alt=""/> An item of a list, after its bullet.</p>]]), mtime)
         epub:addFileFromMemory("OEBPS/c6.xhtml", xhtml([[
 <p style="text-align: center"><img src="framed.svg" alt=""/></p>]]), mtime)
-        epub:addFileFromMemory("OEBPS/wide.png", framedPng(400, 100), mtime)
+        epub:addFileFromMemory("OEBPS/wide.png", framedPng(400, 100, false, 80), mtime)
         epub:addFileFromMemory("OEBPS/linked.png", framedPng(300, 80), mtime)
         epub:addFileFromMemory("OEBPS/bullet.png", png(50, 50, function() return 0, 0xFF end), mtime)
         epub:addFileFromMemory("OEBPS/framed.svg", [[<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100">
@@ -330,7 +331,7 @@ describe("Image preview", function()
             assert.are.equal(location, ui.rolling:getBookLocation())
         end)
 
-        it("should zoom in twice the fitting size around a double tap, and fit again on the next one", function()
+        it("should zoom in twice the fitting size on a double tap, keeping the point tapped, and fit on the next one", function()
             tap(center(imageRect(ui)))
             UIManager:forceRePaint()
             local r = fitted(400, 100)
@@ -351,11 +352,14 @@ describe("Image preview", function()
             assert.is_true(isInk(W / 2, above))
             assert.is_true(isInk(2, H / 2))
 
-            -- around the point tapped: from the left quarter, the left frame stays in view
-            doubleTap(W / 4, H / 2)
+            -- the stripe a fifth of the way in stays under the finger, the left frame out of view
+            local stripe = math.floor(82 * W / 400)
+            assert.is_true(isInk(stripe, H / 2))
+            doubleTap(stripe, H / 2)
             UIManager:forceRePaint()
-            assert.is_true(isInk(5, H / 2))
-            assert.is_true(isPaper(W - 5, H / 2))
+            assert.is_true(isInk(stripe, H / 2))
+            assert.is_true(isPaper(stripe - 20, H / 2))
+            assert.is_true(isPaper(5, H / 2))
             assert.is_true(isPaper(W / 2, above))
         end)
 

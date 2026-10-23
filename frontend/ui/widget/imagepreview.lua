@@ -3,8 +3,8 @@ Image preview of the e-ink redesign (see DESIGN.md, Image preview): an image of 
 shown over the whole screen, centered on an ink ground, with no title or buttons, as WeChat
 Read shows a tapped illustration (09-images/02-image-preview.png).
 
-- a double tap zooms in to twice the fitting size around the point tapped, and the next one
-  fits it again (09-images/03-image-preview-zoom.png); ImageViewer's pinches, spreads, drags,
+- a double tap zooms in to twice the fitting size, the point tapped staying under the finger,
+  and the next one fits it again (09-images/03-image-preview-zoom.png); ImageViewer's pinches, spreads, drags,
   swipes and keys keep working;
 - a tap closes it, back to the same place in the text, and so do Back and ImageViewer's
   closing swipes; the side thirds still step through the frames of an animated image;
@@ -86,10 +86,14 @@ end
 function ImagePreview:onDoubleTap(_, ges)
     if self.scale_factor == 0 then -- fitting
         self:_refreshScaleFactor()
-        -- centered on the point tapped, as a spread is
-        self._center_x_ratio, self._center_y_ratio = self._image_wg:getPanByCenterRatio(
-            ges.pos.x - Screen:getWidth() / 2, ges.pos.y - Screen:getHeight() / 2)
-        self:_applyNewScaleFactor(self.scale_factor * self.double_tap_zoom)
+        -- The point tapped stays under the finger: the center moves from it (as ratios of the image) by its
+        -- offset from the middle of the screen at the new size. ImageWidget still centers a side that fits.
+        local dx, dy = ges.pos.x - Screen:getWidth() / 2, ges.pos.y - Screen:getHeight() / 2
+        local x, y = self._image_wg:getPanByCenterRatio(dx, dy)
+        local zoom = self.double_tap_zoom
+        self._center_x_ratio = x - dx / (self._image_wg:getCurrentWidth() * zoom)
+        self._center_y_ratio = y - dy / (self._image_wg:getCurrentHeight() * zoom)
+        self:_applyNewScaleFactor(self.scale_factor * zoom)
     else
         self.scale_factor = 0
         self._center_x_ratio, self._center_y_ratio = 0.5, 0.5
