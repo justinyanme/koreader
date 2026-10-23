@@ -40,6 +40,8 @@ describe("Interface font size", function()
         home = ffiUtil.realpath(DataStorage:getDataDir()) .. "/uifontsize_home"
         ffiUtil.purgeDir(home)
         lfs.mkdir(home)
+        -- one book, without a cover image: the shelf draws a cover with its title
+        ffiUtil.copyFile(sample_epub, home .. "/juliet.epub")
         G_reader_settings:saveSetting("home_dir", home)
     end)
 
@@ -127,6 +129,18 @@ describe("Interface font size", function()
         end
     end
 
+    -- every text widget showing `text` in a widget tree
+    local function findTexts(widget, text, found, seen)
+        found, seen = found or {}, seen or {}
+        if type(widget) ~= "table" or seen[widget] then return found end
+        seen[widget] = true
+        if widget.text == text and widget.face then table.insert(found, widget) end
+        for __, child in ipairs(widget) do
+            findTexts(child, text, found, seen)
+        end
+        return found
+    end
+
     -- the shown settings row named `name`, turning list pages until found
     local function row(page, name)
         for p = 1, #page.pages do
@@ -162,9 +176,9 @@ describe("Interface font size", function()
         tapAt(control.dimen.x + control:stepX(i), control.track_rect.y + math.floor(control.track_rect.h / 2))
     end
 
-    -- the size of a face of `role`, as the interface font size makes it at `scale`
-    local function roleSize(role, scale)
-        return Font.ui_sizemap[role] * scale
+    -- the size of a face of `role` (at its own size, or at `size`), as the interface font size makes it at `scale`
+    local function roleSize(role, scale, size)
+        return (size or Font.sizemap[role]) * scale
     end
 
     local names = {}
@@ -191,6 +205,20 @@ describe("Interface font size", function()
         assert.is_true(ok)
         assert.are.same({ "字体大小", "点击滑块设置界面字体大小", "书籍正文的字体大小需要在阅读器内调节，不受本设置影响",
             "小", "默认", "大", "较大", "特大" }, texts)
+    end)
+
+    it("lets KOReader's widgets shrink a role's face to fit without scaling it twice", function()
+        Font:setUIScale(1.35)
+        local InfoMessage = require("ui/widget/infomessage")
+        local face = Font:getFace("ui_label")
+        assert.is_near(roleSize("ui_label", 1.35), face.orig_size, 1e-9)
+        -- a one-line message too long for one line gets a smaller face, never a larger one
+        local msg = InfoMessage:new{ text = string.rep("A long line of text that cannot fit. ", 6), face = face, force_one_line = true }
+        assert.is_true(msg.face.size <= face.size)
+        msg:free()
+        -- getting the face again a step smaller, or bold, keeps to the scaled size
+        assert.is_true(Font:getFace(face.orig_font, face.orig_size - 1).size < face.size)
+        assert.are.equal(face.size, Font:getAdjustedFace(face, true).size)
     end)
 
     describe("from the shelf's settings", function()
@@ -303,8 +331,23 @@ describe("Interface font size", function()
             refreshes = refreshesOf(function() tap(settings.bar.back.dimen) end)
             assert.are.equal(fm, topWidget())
             assert.are.same({ { mode = "ui", region = settings.dimen } }, refreshes)
-            local empty = findText(fm, _("No books here yet."))
-            assert.is_near(roleSize("ui_label_large", 1.35), empty.face.orig_size, 1e-9)
+            -- the title, a role at a size of its own, follows; the cover's lettering keeps the cover's proportions
+            local shelf_title = findText(fm, _("Shelf"))
+            assert.is_near(roleSize("ui_headword", 1.35, 22), shelf_title.face.orig_size, 1e-9)
+            local book = fm.shelf_view.shown[1]
+            -- the cover's title is set on the cover's stock
+            local function onCover(w) return type(w.bgcolor) == "cdata" and w.bgcolor == Palette.cover_stock end
+            local cover_title, caption
+            for __, w in ipairs(findTexts(fm, book.title)) do
+                if onCover(w) then cover_title = w else caption = w end
+            end
+            assert.is_near(roleSize("ui_label", 1.35), caption.face.orig_size, 1e-9)
+            local cover_size = cover_title.face.orig_size
+            Font:setUIScale(1)
+            fm:reinit()
+            for __, w in ipairs(findTexts(fm, book.title)) do
+                if onCover(w) then assert.are.equal(cover_size, w.face.orig_size) end
+            end
         end)
 
         it("goes back with the Back key, and rebuilds nothing when the size did not change", function()

@@ -157,31 +157,28 @@ local Font = {
     faces = {},
 }
 
--- The interface font size of the e-ink redesign (see DESIGN.md, Typography) multiplies
--- the sizes of the ui_* roles, kept here at the default size; never the reading text or
--- the DPI. Faces got with a role's own size follow it, faces got with an explicit size don't.
-Font.ui_sizemap = {}
-for name, size in pairs(Font.sizemap) do
+-- The interface font size of the e-ink redesign (see DESIGN.md, Typography) multiplies the
+-- sizes of the ui_* roles, at their own size or another one given to getFace(); never the
+-- reading text or the DPI. Such a face is named after its font file (orig_font), so that
+-- getting it again at its orig_size, or a step smaller, isn't scaled twice. Don't give a role
+-- name to a widget that gets its face again by name at the face's orig_size (Button's
+-- text_font_face); and draw text that belongs to an image (generated covers) with the role's
+-- font file, which doesn't scale.
+local ui_roles = {}
+for name in pairs(Font.fontmap) do
     if name:find("^ui_") then
-        Font.ui_sizemap[name] = size
-    end
-end
-
-local function scaleUIRoles(scale)
-    Font.ui_scale = scale
-    for name, size in pairs(Font.ui_sizemap) do
-        Font.sizemap[name] = size * scale
+        ui_roles[name] = true
     end
 end
 
 local saved_ui_scale = G_reader_settings and G_reader_settings:readSetting("ui_font_scale")
-scaleUIRoles(type(saved_ui_scale) == "number" and saved_ui_scale > 0 and saved_ui_scale or 1)
+Font.ui_scale = type(saved_ui_scale) == "number" and saved_ui_scale > 0 and saved_ui_scale or 1
 
 --- Sets and saves the interface font size: `scale` multiplies the ui_* roles' sizes (1 is the default).
 -- Widgets built before keep their faces until they are rebuilt.
 function Font:setUIScale(scale)
     G_reader_settings:saveSetting("ui_font_scale", scale)
-    scaleUIRoles(scale)
+    self.ui_scale = scale
 end
 
 function Font:getUIScale()
@@ -331,14 +328,21 @@ function Font:getFace(font, size, faceindex)
     if not font then font = self.fontmap.cfont end
 
     if not size then size = self.sizemap[font] end
-    -- original size before scaling by screen DPI
-    local orig_size = size
-    size = Screen:scaleBySize(size)
 
     local realname = self.fontmap[font]
     if not realname then
         realname = font
     end
+
+    if ui_roles[font] then
+        -- the interface font size (see setUIScale)
+        size = size * self.ui_scale
+        font = realname
+    end
+
+    -- original size before scaling by screen DPI
+    local orig_size = size
+    size = Screen:scaleBySize(size)
 
     -- Avoid emboldening already bold fonts
     local is_real_bold = self:isRealBoldFont(realname)
