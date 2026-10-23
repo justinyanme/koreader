@@ -1,4 +1,4 @@
-describe("Files tab (FileManager replacement)", function()
+describe("Files page (FileManager replacement)", function()
     local DocSettings, Event, FileChooser, FileManager, Geom, Replacements, UIManager
     local ffiUtil, lfs, util, _
     local saved_settings
@@ -63,7 +63,7 @@ describe("Files tab (FileManager replacement)", function()
     local function openFiles(path)
         FileManager:showFiles(home)
         local fm = FileManager.instance
-        fm:switchTab("files")
+        fm:openFiles()
         if path then fm.file_chooser:changeToPath(home .. "/" .. path) end
         UIManager:forceRePaint()
         return fm, fm.file_chooser
@@ -246,7 +246,7 @@ describe("Files tab (FileManager replacement)", function()
         fm:onClose()
     end)
 
-    it("goes up a folder with Back, and prompts to exit only at home, also from 书架", function()
+    it("goes up a folder with Back, leaves 文件 at home, and prompts to exit only from 书架", function()
         local fm, fc = openFiles("sub/deeper")
         fc:handleEvent(Event:new("Back"))
         assert.are.equal(home .. "/sub", fc.path)
@@ -255,11 +255,12 @@ describe("Files tab (FileManager replacement)", function()
         local stack = #UIManager._window_stack
         fc:handleEvent(Event:new("Back"))
         assert.are.equal(home, fc.path)
-        assert.are.equal(stack + 1, #UIManager._window_stack) -- "Exit KOReader?"
-        UIManager:close(topWidget())
+        assert.are.equal("shelf", fm.current_tab)
+        assert.are.equal(stack, #UIManager._window_stack)
         -- on 书架, Back keeps its exit prompt even when the hidden browser is in a subfolder
+        fm:openFiles()
         fc:changeToPath(home .. "/sub")
-        fm:switchTab("shelf")
+        fm:closeFiles()
         fm:onBack()
         assert.are.equal(home .. "/sub", fc.path)
         assert.are.equal(stack + 1, #UIManager._window_stack)

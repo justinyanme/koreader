@@ -4,15 +4,16 @@ tab icons 书源 / 书架 / 我 at the left and the page capsule at the right, w
 turns the shelf's pages (it is gray on the other tabs, which page themselves).
 
 Requiring this module registers it in apps/replacements. It keeps the
-original FileManager layout as the 文件 tab, so modules and plugins that rely
-on file_chooser keep working, and the original menu stays reachable. Anything
-that moves file_chooser to a folder (Show folder, search results, shortcuts,
-plugins) brings the 文件 tab forward, and input meant for the file browser
-(swipe, Back, Home, page keys) only reaches it while it is showing.
+original FileManager layout as 文件, so modules and plugins that rely on
+file_chooser keep working, and the original menu stays reachable. 文件 has no
+tab: 导入 and 我 open it (openFiles), and so does anything that moves
+file_chooser to a folder (Show folder, search results, shortcuts, plugins).
+While it shows, the band's back arrow (and Back at the home folder) returns to
+where it was opened from; input meant for the file browser (swipe, Back, Home,
+page keys) only reaches it then.
 
 Each tab's `open(fm)` returns the widget for the content area, or nil when the
 tab opens something on top instead (书源, a full-screen page over the shelf).
-文件 keeps its tab, after 我, until 导入 and 我 lead to it.
 ]]
 
 local BD = require("ui/bidi")
@@ -35,8 +36,8 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local lfs = require("libs/libkoreader-lfs")
 
 local ShelfFileManager = FileManager:extend{
-    current_tab = "shelf",
-    file_chooser_class = require("apps/shelf/fileschooser"), -- the 文件 tab
+    current_tab = "shelf", -- a tab's id, or "files" while 文件 shows
+    file_chooser_class = require("apps/shelf/fileschooser"), -- 文件
 }
 
 ShelfFileManager.tabs = {
@@ -53,7 +54,6 @@ ShelfFileManager.tabs = {
         fm.me_view:reset()
         return fm.me_view
     end },
-    { id = "files", icon = "folder", open = function(fm) return fm.files_ui end },
 }
 
 function ShelfFileManager:init()
@@ -105,23 +105,32 @@ function ShelfFileManager:setupLayout()
     end
 end
 
--- What the bottom band shows: the current tab, and the shelf's page (one page, gray, on other tabs).
+-- What the bottom band shows: the current tab (or 文件), and the shelf's page (one page, gray, elsewhere).
 function ShelfFileManager:bottomBarState()
     local view = self.current_tab == "shelf" and self.shelf_view
     local page, pages = view and view.page or 1, view and view.pages or 1
     return table.concat({ self.current_tab, page, pages }, "/"), page, pages
 end
 
---- The bottom band: the tab icons, and the capsule turning the shelf's pages. Its paper ground covers the
--- cut-off row of covers above it.
+--- The bottom band: the tab icons (the back arrow on 文件), and the capsule turning the shelf's pages. Its paper
+-- ground covers the cut-off row of covers above it.
 function ShelfFileManager:buildBottomBar()
     local state, page, pages = self:bottomBarState()
     self.bottom_bar_state = state
-    local tabs = {}
-    for _, tab in ipairs(self.tabs) do
-        if not tab.available or tab.available(self) then
-            table.insert(tabs, tab)
+    local tab_bar
+    if self.current_tab ~= "files" then
+        local tabs = {}
+        for _, tab in ipairs(self.tabs) do
+            if not tab.available or tab.available(self) then
+                table.insert(tabs, tab)
+            end
         end
+        tab_bar = ShelfWidgets.TabBar:new{
+            tabs = tabs,
+            current = self.current_tab,
+            height = EinkControls.BottomBar.height - Size.border.default,
+            on_change = function(id) self:switchTab(id) end,
+        }
     end
     return FrameContainer:new{
         padding = 0,
@@ -132,12 +141,8 @@ function ShelfFileManager:buildBottomBar()
             page = page,
             pages = pages,
             on_change = function(p) self.shelf_view:setPage(p) end, -- only enabled on 书架
-            left = ShelfWidgets.TabBar:new{
-                tabs = tabs,
-                current = self.current_tab,
-                height = EinkControls.BottomBar.height - Size.border.default,
-                on_change = function(id) self:switchTab(id) end,
-            },
+            left = tab_bar,
+            on_back = function() self:closeFiles() end,
         },
     }
 end
@@ -150,27 +155,50 @@ function ShelfFileManager:updateBottomBar()
     return true
 end
 
+-- Puts `widget` in the content area as `id` ("files" or a tab's), repainting the content and the band.
+function ShelfFileManager:showContent(id, widget)
+    self.current_tab = id
+    self.content[1] = widget
+    self:updateBottomBar()
+    UIManager:setDirty(self, "ui", self.content_dimen)
+    UIManager:setDirty(self, "ui", self.tabbar_dimen)
+end
+
 function ShelfFileManager:switchTab(id)
     if id == self.current_tab then return end
     for _, tab in ipairs(self.tabs) do
         if tab.id == id then
             local widget = tab.open(self)
-            if not widget then return end
-            self.current_tab = id
-            self.content[1] = widget
-            self:updateBottomBar()
-            UIManager:setDirty(self, "ui", self.content_dimen)
-            UIManager:setDirty(self, "ui", self.tabbar_dimen)
+            if widget then
+                self:showContent(id, widget)
+            end
             return
         end
     end
+end
+
+--- Shows 文件, from 导入, 我 or a folder change. Leaving it returns to the tab it was opened from (书架 when the
+-- home opened on it), then calls `on_back` (导入 shows itself again).
+function ShelfFileManager:openFiles(on_back)
+    if self.current_tab == "files" then return end
+    self.files_from, self.files_on_back = self.current_tab, on_back
+    self:showContent("files", self.files_ui)
+end
+
+--- The back arrow on 文件, and Back at its home folder.
+function ShelfFileManager:closeFiles()
+    if self.current_tab ~= "files" then return end
+    local from, on_back = self.files_from, self.files_on_back
+    self.files_from, self.files_on_back = nil, nil
+    self:switchTab(from or "shelf")
+    if on_back then on_back() end
 end
 
 -- file_chooser moved to a folder: show it (skipping the initial PathChanged sent by init)
 function ShelfFileManager:onPathChanged(path)
     FileManager.onPathChanged(self, path)
     if self.initialized then
-        self:switchTab("files")
+        self:openFiles()
     end
 end
 

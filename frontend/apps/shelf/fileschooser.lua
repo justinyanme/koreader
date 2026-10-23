@@ -1,5 +1,5 @@
 --[[--
-The 文件 tab: FileManager's own FileChooser, drawn as the redesign's files page.
+文件, opened from 导入 and 我: FileManager's own FileChooser, drawn as the redesign's files page.
 
 Only the rendering changes: a "Files" title with the plus-menu button, path
 crumbs from the home folder, folder rows with their book counts, file rows
@@ -10,7 +10,7 @@ working. Long-pressing a book opens the shelf's book sheet, plus "More" for
 the original file dialog.
 
 Every change of folder or page repaints the chooser (the content area above
-the tab bar) with one "ui" refresh (DESIGN.md, Refresh mapping).
+the band) with one "ui" refresh (DESIGN.md, Refresh mapping).
 ]]
 
 local BookList = require("ui/widget/booklist")
@@ -122,14 +122,17 @@ local function homeFolder()
 end
 
 -- With the default setting Back goes up while there is a folder above (the crumbs replace "../"),
--- and only exits (or prompts) at home or "/".
+-- and at home leaves 文件, as the band's back arrow does; at "/" it leaves 文件 with any setting.
 function FilesChooser:onBack()
-    if G_reader_settings:readSetting("back_in_filemanager", "default") == "default"
-            and self.path ~= "/" and self.path ~= homeFolder() then
+    local default = G_reader_settings:readSetting("back_in_filemanager", "default") == "default"
+    if self.path == "/" or (default and self.path == homeFolder()) then
+        self.ui:closeFiles()
+    elseif default then
         self:onFolderUp()
-        return true
+    else
+        return FileChooser.onBack(self)
     end
-    return FileChooser.onBack(self)
+    return true
 end
 
 function FilesChooser:_recalculateDimen()
