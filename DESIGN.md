@@ -145,7 +145,7 @@ components:
     backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
     typography: "{typography.title}"
-    height: "59px"
+    height: "58px"
   list-row:
     backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
@@ -232,7 +232,7 @@ Generated typographic covers draw from three extra fills: **Cover Stock** (cover
 
 **The Job-Only Gray Rule.** A gray must do a named job (rule, track, resting tile, temporary mark, disabled). Never introduce a gray for mood or depth, and never gray secondary text that the reference sets in ink.
 
-**The Wash Rule.** The only scrim is the wash behind a confirm layer, the 更多 list or the thought editor. Everything behind it is redrawn lighter, so ink lands near `COLOR_GRAY_D`, and it takes no touches. Panels never wash the page: the typesetting preview must stay readable.
+**The Wash Rule.** The only scrim is the wash behind a confirm layer, the 更多 list or the thought editor. Everything behind it is redrawn lighter, so ink lands near `COLOR_GRAY_D` (`Palette.wash`), and it takes no touches. In night mode the page is washed towards its black ground. Panels never wash the page: the typesetting preview must stay readable.
 
 ## Typography
 
@@ -252,9 +252,9 @@ Generated typographic covers draw from three extra fills: **Cover Stock** (cover
 - **Headline** (700, 18dp): titles of full-screen pages (笔记, the book title on the contents page), the book title in the notes overview card, chapter group headings in the notes page, and panel titles (字体设置).
 - **Figure** (700, 24dp, tabular): the three figures of the progress panel, each followed by a 13dp unit (%, 分钟, 条).
 - **Excerpt** (400, 18dp, 1.45): quoted book text on note cards, clamped to 3 lines with an ellipsis; lookup cards use the same role.
-- **Title** (700, 16dp): the 导入 and 选择 actions, selection-mode titles, settings and 我 row titles (17dp on 我), centered page titles (设置), and confirm-layer actions.
+- **Title** (700, 16dp): the 导入 and 选择 actions, selection-mode titles, settings and 我 row titles (17dp on 我), and centered page titles (设置). Confirm-layer actions are 15dp in the same weight.
 - **Body** (400, 16dp, 1.45): contents rows (their page numbers at 14dp, tabular), search-history rows and other list rows.
-- **Label** (13dp): book titles under covers (700, one line), popover labels, font-tile names, meta lines, row subtitles, captions under progress figures, the toast, and the confirm-layer question (700, 14dp).
+- **Label** (13dp): book titles under covers (700, one line), font-tile names, meta lines, row subtitles, captions under progress figures, the toast, the confirm-layer question (700, 14dp) and popover labels (700, 12dp).
 - **Caption** (400, 12dp, tabular figures): the page header and footer, and labels inside tracks (700).
 
 The interface font-size setting (小 / 默认 / 大 / 较大 / 特大 = 0.9 / 1.0 / 1.1 / 1.2 / 1.35) scales every role above except Reading and Reading chapter. It never changes the page or the DPI. Layouts must keep their touch targets when it is at 特大.
@@ -358,10 +358,10 @@ The 排版面板 and the 进度面板 are paper bands between the page and the b
 Kept only where it already serves: 书源's long-press sheet, 分类浏览, and the edit and menu sheets of 书源. It is a paper plane with a 1dp ink border and 16dp top corners, bleeding 1dp past the screen edges, with 22dp side padding. Its 54dp header holds a 16dp bold title and a close icon button. Rows are 52dp minimum. A sheet that only navigates (分类浏览) may lay out its rows in two columns with a 22dp gap; the current item is bold with a check mark instead of a chevron. New panels and confirmations do not use this sheet (see Panels and Confirm layer).
 
 ### Confirm layer
-A full-width paper layer rising from the bottom with square corners and a 2dp ink top rule, over the wash. It has a centered question row (about 53dp, 14dp bold, such as 确认删除该笔记吗？ or 是否将《…》移出书架？), then one row per action (about 59dp, 16dp bold, centered; two-character labels letter-spaced: 删 除, 移 出), then 取 消 last. Rows are split by 1dp rule-gray dividers. Cancel changes nothing, and no touch passes through the wash to the page. The 更多 list uses the same form without the question row: 亮度与色温, 书籍详情, 导出笔记, 点击区域, 阅读统计, 全部设置（原版）. The reference has no 更多 list; this is the closest form it does show.
+A full-width paper layer rising from the bottom with square corners and a 2dp ink top rule, over the wash. It has a centered question row (about 53dp, 14dp bold, such as 确认删除该笔记吗？ or 是否将《…》移出书架？), then one row per action (about 58dp, 15dp bold, centered; two-character labels letter-spaced: 删 除, 移 出), then 取 消 last. Rows are split by 1dp rule-gray dividers (`Palette.confirm_rule`, `COLOR_GRAY_B`; `Palette.rule` is still `COLOR_GRAY_D` until the other screens move to this rule gray). Cancel changes nothing, and no touch passes through the wash to the page. The 更多 list uses the same form without the question row: 亮度与色温, 书籍详情, 导出笔记, 点击区域, 阅读统计, 全部设置（原版）. The reference has no 更多 list; this is the closest form it does show.
 
 ### Selection popover (formerly the selection bubble)
-A paper popover with a 1dp ink outline, 13dp radius and an arrow about 8dp deep (the outline runs around it) pointing at the selection. Its cells are about 62dp wide: a 21dp line icon over a 13dp label. The order is 划线, then 查询 (for CJK text) or 翻译 (for Latin text), 写想法, 复制. On an existing highlight the first cell becomes 删除划线 in the same place. It sits above the selection when there is room, also at the page foot, otherwise below with the arrow flipped, and it stays inside the gutter. It is pure black and white, so it shows and closes with `fast` on its own rect. There is no second row of styles (see Highlights).
+A paper popover with a 1dp ink outline, 13dp radius and an arrow about 8dp deep (the outline runs around it) pointing at the middle of the selection's first line, or of its last line when the popover is below. Its cells are about 62dp wide: a 21dp line icon (drawn in a 28dp box) over a 12dp bold label. The order is 划线, then 查询 (for CJK text) or 翻译 (for Latin text), 写想法, 复制. On an existing highlight the first cell becomes 删除划线 in the same place. It sits above the selection when there is room, also at the page foot, otherwise below with the arrow flipped, and it stays 16dp from the screen edges, a little outside the gutter, as in the reference. It is pure black and white, so it shows and closes with `fast` on its own rect. There is no second row of styles (see Highlights).
 
 **Selection:** a temporary selection is a 1dp ink underline under the selected text, with an ink drop handle (about 25dp) hanging under each end. It is not an ink fill and not the engine's gray. The handles can be dragged across lines and pages.
 

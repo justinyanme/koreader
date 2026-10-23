@@ -163,6 +163,8 @@ describe("ReaderHighlightBubble module", function()
             assert.is_true(c.dimen.w >= Screen:scaleBySize(44) and c.dimen.h >= Screen:scaleBySize(44), label)
             local icon = iconOf(c)
             assert.are.equal(icon_name, icon.icon)
+            -- drawn from its own SVG: a missing one keeps the name but paints icon-not-found.svg
+            assert.are.equal("/" .. icon_name .. ".svg", icon.file:sub(-#icon_name - 5), label)
             local icon_bottom = icon.dimen.y + icon.dimen.h
             assert.is_true(icon.dimen.y < c.dimen.y + c.dimen.h / 3, label)
             assert.is_true(inked(c.dimen.x, icon_bottom + 1, c.dimen.x + c.dimen.w - 1, c.dimen.y + c.dimen.h - 1), label)
@@ -483,6 +485,18 @@ describe("ReaderHighlightBubble module", function()
             local b = bubbleFor({ Geom:new{ x = 40, y = h - 40, w = 100, h = 30 } })
             assert.is_true(b.above)
             assert.is_true(b.bubble_rect.y + b.bubble_rect.h <= h - 40)
+            assertOnScreen(b)
+        end)
+
+        it("should keep a widget cell as it is in a row of icon cells", function()
+            local swatch = require("ui/widget/textwidget"):new{ text = "文", face = require("ui/font"):getFace("ui_excerpt") }
+            local b = SelectionBubble:new{
+                rows = { { { icon = "eink/copy", text = "Copy", callback = function() end },
+                    { widget = swatch, callback = function() end } } },
+                anchor_rects = { Geom:new{ x = 200, y = 400, w = 100, h = 30 } },
+            }
+            assert.are.equal(swatch, cell(b, "文")[1][1])
+            assert.is_truthy(iconOf(cell(b, "Copy")))
             assertOnScreen(b)
         end)
 

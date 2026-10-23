@@ -1,10 +1,11 @@
 --[[--
-Selection popover of the e-ink redesign, as in WeChat Read: a paper card with a
-1dp ink outline and 11dp corners, and an outlined 16 × 8dp arrow pointing at the
-selection. Cells with an icon show it over a short label, 62dp wide at least;
-other cells are a label or a widget in a 44dp row. Rows are split by rule-gray
-lines. It sits above the selection when there is room, below it otherwise, and
-16dp from the screen edges.
+Selection popover of the e-ink redesign (see DESIGN.md, Selection popover), as
+in WeChat Read: a paper card with a 1dp ink outline and 13dp corners, and an
+outlined 16 × 8dp arrow pointing at the selection. In a row with icons, cells
+show an icon over a short label and are 62dp wide at least, and a widget cell
+keeps its widget; other rows are labels or widgets in 44dp cells. Rows are split
+by rule-gray lines. It sits above the selection when there is room, below it
+otherwise, and 16dp from the screen edges.
 
 The rest of the screen is a transparent scrim: a tap there closes the popover.
 The owner refreshes; getRefreshRegion() is the popover and its arrow.
@@ -110,7 +111,7 @@ function SelectionBubble:init()
         end
         table.insert(vgroup, hgroup)
     end
-    self.radius = Screen:scaleBySize(11)
+    self.radius = Screen:scaleBySize(13)
     self.frame = FrameContainer:new{
         bordersize = self.border,
         color = Palette.ink,
@@ -136,7 +137,7 @@ function SelectionBubble:rowContents(row, max_cell_w)
         local cell_w = Screen:scaleBySize(62)
         for c, cell in ipairs(row) do
             -- the label's line box already leaves room below it
-            contents[c] = VerticalGroup:new{
+            contents[c] = cell.widget or VerticalGroup:new{
                 VerticalSpan:new{ width = Screen:scaleBySize(10) },
                 cell.icon and IconWidget:new{ icon = cell.icon, width = icon_size, height = icon_size, alpha = true }
                     or VerticalSpan:new{ width = icon_size },

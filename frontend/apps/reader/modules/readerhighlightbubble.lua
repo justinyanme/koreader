@@ -1,6 +1,6 @@
 --[[--
 Selection and highlight popovers of the e-ink redesign (see DESIGN.md, Selection
-bubble and Highlights).
+popover and Highlights).
 
 Replaces ReaderHighlight (apps/replacements reader_highlight slot):
 - a long-press selects a word, dragging extends it, and releasing shows the

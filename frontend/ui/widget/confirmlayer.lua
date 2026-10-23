@@ -1,8 +1,8 @@
 --[[--
-Confirmation layer of the e-ink redesign, as WeChat Read asks before deleting or
-removing: the page behind turns pale, and a paper band at the bottom, under a 2dp
-ink rule, holds a centered bold question, then each action and Cancel as whole
-rows split by gray lines.
+Confirm layer of the e-ink redesign (see DESIGN.md, Confirm layer), as WeChat
+Read asks before deleting or removing: the page behind turns pale (the wash), and
+a paper band at the bottom, under a 2dp ink rule, holds a centered bold question,
+then each action and Cancel as whole rows split by gray lines.
 
 Every touch stops here: a tap on the pale page cancels, as does the Back key.
 Showing and closing are "ui" over the whole screen, which the paling changes.
@@ -128,8 +128,8 @@ function ConfirmLayer:getRefreshRegion()
 end
 
 function ConfirmLayer:paintTo(bb, x, y)
-    -- ink on the page ends up as the rule gray, as in WeChat Read
-    bb:lightenRect(x, y, self.dimen.w, self.band_rect.y, Palette.rule.a / 0xFF)
+    -- the wash: ink on the page ends up as Palette.wash, paper stays paper (in night mode, the other way round)
+    bb:lightenRect(x, y, self.dimen.w, self.band_rect.y, Palette.wash.a / 0xFF)
     bb:paintRect(x, y + self.band_rect.y, self.band_rect.w, self.band_rect.h, Palette.paper)
     self[1]:paintTo(bb, x, y + self.band_rect.y)
 end
