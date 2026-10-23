@@ -381,7 +381,7 @@ function MeView:emptyItem(title, hint)
 end
 
 --- Opens the note's book at the note (a full refresh, as for opening any book), keeping the
--- position it opened on for "Return to last position", as the contents drawer does.
+-- position it opened on for going back to it (ReaderLink, the Back key), as the contents page does.
 function MeView:openNote(book, note)
     filemanagerutil.openFile(self.ui, book.file, nil, nil, function(ui)
         ui.link:addCurrentLocationToStack()

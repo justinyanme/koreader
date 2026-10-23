@@ -17,8 +17,8 @@ opens the notes page (apps/reader/modules/readernotespage) on the bookmarks, thr
 Opening and closing repaint the page; turning a page or collapsing a group repaints the content and
 the bar, and the title band too when ↓去底部 and ↑去顶部 swap (all "ui"). A jump closes the page
 with the reader's "partial", which the jump's own repaint joins (the reader may not repaint when the
-entry is on the page shown); the position left is pushed onto the location stack, for "Return to last
-position".
+entry is on the page shown); the position left is pushed onto the location stack, for going back to it
+(ReaderLink, the Back key).
 ]]
 
 local CenterContainer = require("ui/widget/container/centercontainer")
