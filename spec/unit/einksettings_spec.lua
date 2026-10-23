@@ -158,7 +158,7 @@ describe("Reorganized settings", function()
     end
 
     local expected_groups = {
-        { "reading", "Reading", { "Page turns and tap zones", "Full refresh rate", "Status bar", "After finishing a book" } },
+        { "reading", "Reading", { "Page turns and tap zones", "Full refresh rate", "Status bar", "After finishing a book", "Highlight style" } },
         { "screen", "Screen", { "Refresh and ghosting", "Sleep screen", "Night mode" } },
         { "network", "Network & sync", { "Wi-Fi", "Progress sync", "Wireless transfer and library" } },
         { "device", "Device", { "Physical buttons", "Gestures", "Power and sleep" } },
@@ -188,7 +188,8 @@ describe("Reorganized settings", function()
             for i, g in ipairs(expected_groups) do
                 local rows = {}
                 for __, name in ipairs(g[3]) do
-                    local ctx = ({ ["Full refresh rate"] = "Settings", ["Status bar"] = "Settings", ["Sleep screen"] = "Settings", ["Progress sync"] = "Settings" })[name]
+                    local ctx = ({ ["Full refresh rate"] = "Settings", ["Status bar"] = "Settings", ["Sleep screen"] = "Settings", ["Progress sync"] = "Settings",
+                        ["Highlight style"] = "Settings" })[name]
                     table.insert(rows, ctx and C_(ctx, name) or _(name))
                 end
                 translated[i] = { g[1], C_("Settings group", g[2]), rows }
@@ -275,6 +276,50 @@ describe("Reorganized settings", function()
             UIManager:setRefreshRate(6, 6)
         end)
 
+        it("chooses the default style of new highlights: a line until one is saved", function()
+            local saved = G_reader_settings:readSetting("highlight_drawing_style")
+            local ok, err = pcall(function()
+                G_reader_settings:delSetting("highlight_drawing_style")
+                local page = openSettings(fm)
+                local home_row = row(page, C_("Settings", "Highlight style"))
+                assert.is_true(home_row.enabled) -- no book needed
+                assert.are.equal(C_("Highlight style", "Underline"), home_row.value)
+                page:select(home_row.item)
+                UIManager:forceRePaint()
+                assert.are.equal(C_("Settings", "Highlight style"), page.title)
+                local names = {}
+                for __, spec in ipairs(page.shown) do
+                    assert.are.equal("check", spec.kind)
+                    table.insert(names, spec.name)
+                end
+                assert.are.same({ C_("Highlight style", "Underline"), C_("Highlight style", "Marker"), _("Wavy underline") }, names)
+                assert.is_true(row(page, C_("Highlight style", "Underline")).checked)
+                assert.is_nil(G_reader_settings:readSetting("highlight_drawing_style")) -- shown, not saved
+                local refreshes = refreshesOf(function() tap(row(page, C_("Highlight style", "Marker")).rect) end)
+                assert.are.equal("lighten", G_reader_settings:readSetting("highlight_drawing_style"))
+                assert.is_true(row(page, C_("Highlight style", "Marker")).checked)
+                assert.is_false(row(page, C_("Highlight style", "Underline")).checked)
+                for __, r in ipairs(refreshes) do
+                    assert.are.equal("ui", r.mode)
+                    assert.is_true(r.region.h < page.list_rect.h)
+                end
+                page:onBack()
+                assert.are.equal(C_("Highlight style", "Marker"), row(page, C_("Settings", "Highlight style")).value)
+                page:closeMenu(true)
+
+                -- a default saved in another style from the original menu shows, checked
+                G_reader_settings:saveSetting("highlight_drawing_style", "strikeout")
+                page = openSettings(fm, "highlight_style")
+                local strikeout = row(page, _("Strikethrough"))
+                assert.is_truthy(strikeout)
+                assert.is_true(strikeout.checked)
+                page:onBack()
+                assert.are.equal(_("Strikethrough"), row(page, C_("Settings", "Highlight style")).value)
+            end)
+            G_reader_settings:saveSetting("highlight_drawing_style", saved)
+            assert(ok, err)
+        end)
+
         it("dims rows that need a book", function()
             local page = openSettings(fm)
             for __, name in ipairs{ _("Page turns and tap zones"), C_("Settings", "Status bar"), C_("Settings", "Progress sync") } do
@@ -355,6 +400,20 @@ describe("Reorganized settings", function()
             assert.is_false(isSettings(topWidget()))
             assert.are.equal(require("apps/reader/modules/readertoolbarpanels").TapZones, getmetatable(topWidget()).__index)
             topWidget():onTapClose()
+        end)
+
+        it("gives the open book's next highlight the style chosen", function()
+            local saved = G_reader_settings:readSetting("highlight_drawing_style")
+            local ok, err = pcall(function()
+                G_reader_settings:delSetting("highlight_drawing_style")
+                local page = openSettings(ui, "highlight_style")
+                tap(row(page, _("Wavy underline")).rect)
+                page:closeMenu(true)
+                -- what saveHighlight() gives new highlights
+                assert.are.equal("wave", ui.view.highlight.saved_drawer)
+            end)
+            G_reader_settings:saveSetting("highlight_drawing_style", saved)
+            assert(ok, err)
         end)
 
         it("keeps every original item reachable, and names only items of the original menus", function()

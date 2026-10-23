@@ -27,6 +27,8 @@ return {
           file = Device:hasEinkScreen() and "frontend/ui/elements/refresh_menu_table.lua" or nil },
         { id = "footer", text = C_("Settings", "Status bar"), items = { "status_bar" } },
         { id = "end_action", text = _("After finishing a book"), items = { "document_end_action" } },
+        { id = "highlight_style", text = C_("Settings", "Highlight style"), choice = true,
+          file = "frontend/ui/elements/highlight_style_menu_table.lua" },
     } },
     { id = "screen", text = C_("Settings group", "Screen"), rows = {
         { id = "refresh", text = _("Refresh and ghosting"), items = { "screen_eink_opt" } },

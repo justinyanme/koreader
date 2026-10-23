@@ -366,7 +366,7 @@ A paper popover with a 1dp ink outline, 13dp radius and an arrow about 8dp deep 
 **Selection:** a temporary selection is a 1dp ink underline under the selected text, with an ink drop handle (about 25dp) hanging under each end. It is not an ink fill and not the engine's gray. The handles can be dragged across lines and pages.
 
 ### Highlights
-Three styles, all monochrome. **Line** is the default for new highlights: an ink underline about 1.5dp thick just under the glyphs. **Marker** (marker-gray fill) and **wave** (1.3dp wavy ink underline) stay for existing highlights. The default style is chosen in 设置 → 阅读 → 划线样式; restyling one existing highlight moves to a secondary entry (ADR-0006). A thought adds a small ink thought mark after the text's last character. A thought written straight on a selection, with no highlight, draws only that mark.
+Three styles, all monochrome. **Line** is the default for new highlights: an ink underline about 1.5dp thick just under the glyphs. **Marker** (marker-gray fill) and **wave** (1.3dp wavy ink underline) stay for existing highlights. The default style is chosen in 设置 → 阅读 → 划线样式; restyling one existing highlight moves to a secondary entry, a long-press on 删除划线 that opens a confirm layer of the three styles (ADR-0006). A thought adds a small ink thought mark after the text's last character. A thought written straight on a selection, with no highlight, draws only that mark.
 
 **Search hit:** hit-gray fill behind the matched word while the search bar is up. **Jump focus:** after a jump from the notes page, a brief marker-gray fill behind the target passage. Neither is saved, and both are cleared without touching real highlights.
 
@@ -382,7 +382,7 @@ Generated when a book has no cover. Titles use the display serif and authors use
 - **Downloaded mark (书源 only):** a remote book already on the device carries a 13dp check before the first line of its title; the caption under the title reads 读到 x% once the book is started, otherwise the author. A finished download only repaints its tile (`ui`); it never opens the book, so several downloads can run side by side (ADR-0005). Tapping a marked tile opens the book. Books on the shelf never carry this check: everything on the shelf is local.
 
 ### Toast
-An ink rounded rectangle (8dp radius, about 47dp tall) with 13dp paper text, centered over the lower part of the page, such as the copy confirmation. It shows and leaves with `fast` and must be gone before the next popover appears.
+An ink rounded rectangle (8dp radius, about 47dp tall, 248dp wide for a short text) with 13dp paper text, centered with its bottom about 90dp above the screen's, such as 复制成功 after a copy. It goes away by itself after about 2 s. It shows and leaves with `fast` and must be gone before the next popover appears.
 
 ### Loading, empty and error states
 They sit in the region they replace (a grid, a list), never in a dialog. In order: a 16dp bold ink line, a 13dp ink reason, an optional 12dp tabular line with the technical detail (HTTP 401 · host), then at most one outline pill for the next step (重试, 编辑书源). Loading is the reason line alone (正在连接家里的 NAS…). On card pages the empty state is a card: the notes page keeps its overview card and adds a card that reads 你可以在这里记录本书的想法、划线和书签, with the pager disabled.

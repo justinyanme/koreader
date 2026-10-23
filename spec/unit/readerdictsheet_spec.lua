@@ -203,7 +203,7 @@ describe("ReaderDictSheet module", function()
             UIManager:forceRePaint()
             local text = ui.highlight.selected_text.text
             local refreshes = refreshesOf(function()
-                tapWidget(button(ui.highlight.highlight_dialog, "Look up"))
+                tapWidget(button(ui.highlight.highlight_dialog, "Translate")) -- for Latin text
             end)
             return refreshes, text
         end
