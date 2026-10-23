@@ -535,6 +535,7 @@ Adjust paragraph width and text-indent to be an integer multiple of the font siz
             title = _("Paragraph first-line indentation"),
             {
                 id = "paragraph_no_indent",
+                conflicts_with = { "paragraph_indent", "paragraph_indent_2em" },
                 title = _("No indentation on first paragraph line"),
                 description = _("Do not indent the first line of paragraphs."),
                 css = [[p { text-indent: 0 !important; }]],
@@ -542,6 +543,7 @@ Adjust paragraph width and text-indent to be an integer multiple of the font siz
             },
             {
                 id = "paragraph_indent",
+                conflicts_with = { "paragraph_no_indent", "paragraph_indent_2em" },
                 title = _("Indentation on first paragraph line"),
                 description = _("Indentation on the first line of a paragraph is the default, but it may be overridden by publisher styles. This will force KOReader's defaults on common elements."),
                 css = [[
@@ -550,17 +552,27 @@ body, h1, h2, h3, h4, h5, h6, div, li, td, th { text-indent: 0 !important; }
                 ]],
             },
             {
+                id = "paragraph_indent_2em",
+                conflicts_with = { "paragraph_no_indent", "paragraph_indent" },
+                title = _("Indentation of 2em on first paragraph line"),
+                description = _("Indent the first line of paragraphs by 2em, the width of two Chinese or Japanese characters. Like the indentation above, this will force it on common elements, over publisher styles."),
+                css = [[
+p { text-indent: 2em !important; }
+body, h1, h2, h3, h4, h5, h6, div, li, td, th { text-indent: 0 !important; }
+                ]],
+            },
+            {
                 id = "paragraph_first_no_indent",
                 title = _("No indentation on first paragraph"),
                 description = _("Do not indent the first line of the first paragraph of its container. This might be needed to correctly display drop caps, while still having indentation on following paragraphs."),
-                priority = 2, -- so it can override 'paragraph_indent'
+                priority = 2, -- so it can override 'paragraph_indent' and 'paragraph_indent_2em'
                 css = [[p:first-child { text-indent: 0 !important; }]],
             },
             {
                 id = "paragraph_following_no_indent",
                 title = _("No indentation on following paragraphs"),
                 description = _("Do not indent the first line of following paragraphs, but leave the first paragraph of its container untouched."),
-                priority = 2, -- so it can override 'paragraph_indent'
+                priority = 2, -- so it can override 'paragraph_indent' and 'paragraph_indent_2em'
                 css = [[p + p { text-indent: 0 !important; }]],
             },
         },
