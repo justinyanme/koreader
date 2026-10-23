@@ -205,7 +205,7 @@ describe("ReaderMorePanel module", function()
     setup(function()
         ROWS = {
             _("Brightness and warmth"), _("Book details"), _("Export notes"), _("Tap zones"),
-            _("All settings (original)"), _("Cancel"),
+            _("Settings"), _("All settings (original)"), _("Cancel"),
         }
     end)
 
@@ -428,6 +428,50 @@ describe("ReaderMorePanel module", function()
             assert.are.equal(page, ui:getCurrentPage())
         end)
 
+        it("should open the settings from 设置 with the rows a book needs, which close back to the page", function()
+            local EinkSettings = require("apps/settings/einksettings")
+            local refreshes = refreshesOf(function() choose(ui, _("Settings")) end)
+            assertNoFlash(refreshes)
+            local page = topWidget()
+            assert.are.equal(EinkSettings, getmetatable(page).__index)
+            assert.is_nil(ui.menu.bars)
+            assert.are.equal(_("Settings"), page.title)
+            -- the shown row named `name`, turning the list's pages until found
+            local function settingsRow(name)
+                for p = 1, #page.pages do
+                    if p ~= page.page then
+                        page:goToPage(p)
+                        UIManager:forceRePaint()
+                    end
+                    for __, spec in ipairs(page.shown) do
+                        if spec.name == name then return spec end
+                    end
+                end
+            end
+            -- rows that act on the open book are there, unlike from 我 → 设置 on the shelf
+            for __, name in ipairs{ _("Page turns and tap zones"), _.pgettext("Settings", "Status bar") } do
+                local spec = settingsRow(name)
+                assert.is_true(spec.enabled, name)
+                assert.are_not.equal(_("Open a book first"), spec.value)
+            end
+            -- 翻页与点击区域 opens its own entries
+            tapWidget({ dimen = settingsRow(_("Page turns and tap zones")).rect })
+            UIManager:forceRePaint()
+            assert.are.equal(_("Page turns and tap zones"), page.title)
+            assert.is_true(#page.shown > 1)
+            for __, spec in ipairs(page.shown) do
+                assert.are_not.equal(_("Open a book first"), spec.value)
+                assert.are_not.equal(_("Open a book first"), spec.name)
+            end
+            -- back up, then out to the page
+            tapWidget(page.bar.back)
+            UIManager:forceRePaint()
+            assert.are.equal(_("Settings"), page.title)
+            refreshes = refreshesOf(function() tapWidget(page.bar.back) end)
+            assertNoFlash(refreshes)
+            assert.are.equal(ui, topWidget())
+        end)
+
         it("should open the original menu from 全部设置（原版）, which closes back to the page", function()
             choose(ui, _("All settings (original)"))
             assert.is_nil(ui.menu.bars)
@@ -542,8 +586,8 @@ describe("ReaderMorePanel module", function()
             local ok, err = pcall(function()
                 local list = openMore(ui)
                 local texts = rowTexts(list)
-                assert.are.equal(_("Reading statistics"), texts[#texts - 2])
-                assert.are.equal(_("All settings (original)"), texts[#texts - 1])
+                assert.are.equal(_("Reading statistics"), texts[#texts - 3])
+                assert.are.equal(_("Settings"), texts[#texts - 2])
                 tapWidget(rowNamed(list, _("Reading statistics")))
                 UIManager:forceRePaint()
                 local progress = topWidget()
@@ -556,7 +600,7 @@ describe("ReaderMorePanel module", function()
             assert(ok, err)
         end)
 
-        it("should close the list when the screen rotates", function()
+        it("should close the list when the screen rotates, and fit it between the bars in landscape", function()
             openMore(ui)
             local ok, err = pcall(function()
                 ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_CLOCKWISE))
@@ -565,7 +609,17 @@ describe("ReaderMorePanel module", function()
                 assert.is_nil(ui.menu.panel)
                 assert.is_nil(ui.menu.bars)
                 assert.are.equal(ui, topWidget())
+                -- landscape is 600dp tall on any screen: every row, 阅读统计 included, sits under the top bar
+                ui.statistics = { onShowReaderProgress = function() end }
+                local list = openMore(ui)
+                ui.statistics = nil
+                local bars = ui.menu.bars
+                assert.are.equal(#ROWS + 1, #rows(list))
+                assert.is_true(rows(list)[1].dimen.y >= bars.top_rect.h)
+                ui.menu:hideToolbar()
+                UIManager:forceRePaint()
             end)
+            ui.statistics = nil
             ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_UPRIGHT))
             runTasks()
             UIManager:forceRePaint()

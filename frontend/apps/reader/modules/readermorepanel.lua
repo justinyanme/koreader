@@ -10,6 +10,8 @@ bar. Both bars stay; the page between them is washed and takes no touches.
   faded while the book has no notes, left out without the exporter plugin
 - 点击区域: the tap zones, drawn over the page until a tap
 - 阅读统计: the statistics plugin's reading progress, left out without the plugin
+- 设置: the reorganized settings (apps/settings/einksettings), where the rows that act
+  on the open book work, unlike from 我 → 设置 on the shelf
 - 全部设置（原版）: the original menu
 - 取消: closes the panel; the bars stay
 
@@ -158,6 +160,9 @@ function ReaderMorePanel:init()
             ui.statistics:onShowReaderProgress()
         end) })
     end
+    table.insert(rows, { text = _("Settings"), callback = go(function()
+        ui:handleEvent(Event:new("ShowEinkSettings"))
+    end) })
     table.insert(rows, { text = _("All settings (original)"), callback = go(function()
         ui:handleEvent(Event:new("ShowOriginalMenu"))
     end) })
@@ -177,7 +182,7 @@ end
 
 function ReaderMorePanel:getWashRect()
     local rect = self:getRefreshRegion()
-    rect.h = rect.h - self.band_h
+    rect.h = math.max(0, rect.h - self.band_h) -- none if a landscape screen leaves no room (its top bar then covers it)
     return rect
 end
 

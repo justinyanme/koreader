@@ -182,12 +182,12 @@ describe("Interface font size", function()
         return tappable(fm.layout_group[2], function(w) return w.icon == "eink/" .. icon or w.icon == "eink/" .. icon .. ".bold" end)
     end
 
-    -- The way a reader gets there: 我 → 设置 on the shelf; over a book, "ShowEinkSettings" (the toolbar's 更多
-    -- leads to the original menu instead).
+    -- The way a reader gets there: 我 → 设置 on the shelf, 更多 → 设置 in the reader.
     local function openSettings(ui)
         if ui.document then
-            ui:handleEvent(Event:new("ShowEinkSettings"))
-            UIManager:forceRePaint()
+            tap(Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }) -- the toolbars
+            tap(findWidget(ui.menu.bars.top, function(w) return w.icon == "eink/more" and w.callback ~= nil end).dimen)
+            tap(findWidget(ui.menu.panel, function(w) return w.text == _("Settings") and w.callback ~= nil end).dimen)
         else
             tap(tab(ui, "user").dimen)
             tap(tappable(ui.me_view, function(w) return w.text == _("Settings") end).dimen)
