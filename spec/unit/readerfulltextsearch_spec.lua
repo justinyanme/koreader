@@ -595,6 +595,28 @@ describe("ReaderFulltextSearch module", function()
             assert.are.equal(ui, topWidget())
         end)
 
+        it("should keep its layout at the largest interface font size", function()
+            local Font = require("ui/font")
+            Font:setUIScale(1.35)
+            local ok, err = pcall(function()
+                local page = openSearch(ui)
+                search(page, "verona")
+                -- the rows fill the list without running into the bar, each excerpt within its row
+                local last = page.shown_rows[#page.shown_rows]
+                assert.is_true(last.dimen.y + last.dimen.h <= page.bar.dimen.y)
+                for _, row in ipairs(hitRows(page)) do
+                    assert.is_true(row.snippet.dimen.y + row.snippet.dimen.h <= row.dimen.y + row.dimen.h)
+                end
+                -- the query within the field, the keyword within the bar
+                assert.is_true(page.input:getSize().h <= Screen:scaleBySize(40))
+                tapWidget(hitRows(page)[1])
+                hideToolbar(ui)
+                assert.is_true(ui.search.bar.label:getSize().h < ui.search.bar:getRect().h)
+            end)
+            Font:setUIScale(1)
+            assert(ok, err)
+        end)
+
         it("should leave the original search dialog to the original entries, such as the toolbar's search", function()
             tapRect(Geom:new{ x = 0, y = math.floor(Screen:getHeight() / 2), w = Screen:getWidth(), h = 1 })
             local search_icon = find(ui.menu.bars, function(w) return w.icon == "eink/search" and w.dimen end)
