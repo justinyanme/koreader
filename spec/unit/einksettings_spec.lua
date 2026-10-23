@@ -491,7 +491,7 @@ describe("Reorganized settings", function()
                 assert.is_false(row(page, C_("Highlight style", "Underline")).checked)
                 for __, r in ipairs(refreshes) do
                     assert.are.equal("ui", r.mode)
-                    assert.is_true(r.region.h < page.list_rect.h)
+                    assert.is_true(r.region.h < page.body_rect.h) -- the rows whose check mark moved
                 end
                 page:onBack()
                 assert.are.equal(C_("Highlight style", "Marker"), row(page, C_("Settings", "Highlight style")).value)
@@ -577,20 +577,6 @@ describe("Reorganized settings", function()
             assert.is_false(isSettings(topWidget()))
             assert.are.equal(require("apps/reader/modules/readertoolbarpanels").TapZones, getmetatable(topWidget()).__index)
             topWidget():onTapClose()
-        end)
-
-        it("gives the open book's next highlight the style chosen", function()
-            local saved = G_reader_settings:readSetting("highlight_drawing_style")
-            local ok, err = pcall(function()
-                G_reader_settings:delSetting("highlight_drawing_style")
-                local page = openSettings(ui, "highlight_style")
-                tap(row(page, _("Wavy underline")).rect)
-                page:closeMenu(true)
-                -- what saveHighlight() gives new highlights
-                assert.are.equal("wave", ui.view.highlight.saved_drawer)
-            end)
-            G_reader_settings:saveSetting("highlight_drawing_style", saved)
-            assert(ok, err)
         end)
 
         it("keeps every original item reachable, and names only items of the original menus", function()

@@ -9,6 +9,7 @@ A default saved in another style from the original menu (strikethrough, invert)
 is listed too, checked, so that it shows as the row's value.
 ]]
 
+local Event = require("ui/event")
 local ReaderHighlight = require("apps/reader/modules/readerhighlight")
 local ReaderHighlightBubble = require("apps/reader/modules/readerhighlightbubble")
 local ReaderUI = require("apps/reader/readerui")
@@ -40,10 +41,8 @@ for _, style in ipairs(styles) do
         end,
         callback = function()
             G_reader_settings:saveSetting("highlight_drawing_style", drawer)
-            local ui = ReaderUI.instance
-            if ui then -- the open book's next highlight
-                ui.view.highlight.saved_drawer = drawer
-                ui.highlight:setSelectionColor()
+            if ReaderUI.instance then -- for the open book's next highlight
+                ReaderUI.instance:handleEvent(Event:new("DefaultHighlightStyleChanged"))
             end
         end,
     })

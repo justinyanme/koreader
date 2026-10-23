@@ -3,19 +3,20 @@ Toast of the e-ink redesign (see DESIGN.md, Toast), as WeChat Read confirms a
 copy: an ink rounded rectangle with paper text, centered over the lower part of
 the page, that goes away by itself after a moment.
 
-Like a Notification, it is a toast for UIManager: any touch or key closes it and
-still reaches the page, so it is gone before the popover a long-press brings up.
-It refreshes itself on show and close, with `refresh_type` on its own rect:
-"fast" by default (it is black and white), "ui" where the page under it is gray.
+Like a Notification, whose toast handling this follows, it is a toast for
+UIManager: any touch or key closes it and still reaches the page, so it is gone
+before the popover a long-press brings up. It refreshes its own rect itself:
+showing with "fast" (it is solid ink), closing with `close_refresh_type`, "fast"
+by default, "ui" where the page under it is gray.
 
 @usage
     UIManager:show(Toast:new{ text = _("Copied") })
 ]]
 
+local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
-local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local Palette = require("ui/palette")
@@ -26,7 +27,7 @@ local Screen = Device.screen
 local Toast = InputContainer:extend{
     text = nil,
     timeout = 2, -- seconds
-    refresh_type = "fast",
+    close_refresh_type = "fast",
     toast = true, -- stacked on top, never stops an event
 }
 
@@ -59,7 +60,7 @@ function Toast:paintTo(bb, x, y)
 end
 
 function Toast:onShow()
-    UIManager:setDirty(self, self.refresh_type, self.dimen)
+    UIManager:setDirty(self, "fast", self.dimen)
     if self.timeout then
         self._timeout_func = function()
             self._timeout_func = nil
@@ -75,7 +76,7 @@ function Toast:onCloseWidget()
         UIManager:unschedule(self._timeout_func)
         self._timeout_func = nil
     end
-    UIManager:setDirty(nil, self.refresh_type, self.dimen)
+    UIManager:setDirty(nil, self.close_refresh_type, self.dimen)
     self.frame:free()
 end
 

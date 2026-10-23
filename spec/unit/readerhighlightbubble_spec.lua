@@ -342,6 +342,26 @@ describe("ReaderHighlightBubble module", function()
             G_reader_settings:delSetting("highlight_drawing_style")
         end)
 
+        it("should give the next highlight the default style chosen in the settings", function()
+            G_reader_settings:delSetting("highlight_drawing_style")
+            local page = require("apps/settings/einksettings").show(ui, ui.menu, "highlight_style")
+            UIManager:forceRePaint()
+            local wave
+            for _, spec in ipairs(page.shown) do
+                if spec.name == "Wavy underline" then wave = spec end
+            end
+            UIManager:sendEvent(Event:new("Gesture", { ges = "tap", pos = Geom:new{
+                x = wave.rect.x + math.floor(wave.rect.w / 2), y = wave.rect.y + math.floor(wave.rect.h / 2), w = 0, h = 0 } }))
+            assert.are.equal("wave", G_reader_settings:readSetting("highlight_drawing_style"))
+            page:closeMenu()
+            UIManager:forceRePaint()
+            select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
+            tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
+            assert.are.equal("wave", ui.annotation.annotations[1].drawer)
+            ui.highlight:closeBubble()
+            G_reader_settings:delSetting("highlight_drawing_style")
+        end)
+
         it("should keep drawing old marker and wave highlights", function()
             select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
             tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
@@ -391,15 +411,33 @@ describe("ReaderHighlightBubble module", function()
             select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
             tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
             UIManager:forceRePaint()
-            hold(cell(ui.highlight.highlight_dialog, "Delete highlight"))
-            UIManager:forceRePaint()
+            local bubble_region = ui.highlight.highlight_dialog:getRefreshRegion()
+            local refreshes = refreshesOf(function() hold(cell(ui.highlight.highlight_dialog, "Delete highlight")) end)
             assert.is_nil(ui.highlight.highlight_dialog)
             local layer = shown(ConfirmLayer)
             assert.are.equal(layer, topWidget())
-            for _, name in ipairs{ "Underline", "Marker", "Wavy underline" } do
-                assert.is_truthy(cell(layer, name), name)
+            assert.are.equal(1, #ui.annotation.annotations) -- the long-press did not delete it
+            -- the popover leaves with "fast"; the confirm layer pales the page: "ui" over the screen, never "full"
+            assert.is_truthy(hasRefresh(refreshes, "ui", layer:getRefreshRegion()))
+            for _, r in ipairs(refreshes) do
+                if r.mode == "fast" then
+                    assert.are.same(bubble_region, r.region)
+                else
+                    assert.are.equal("ui", r.mode)
+                end
             end
-            tapWidget(cell(layer, "Wavy underline"))
+            -- the highlight's own style is the ink row
+            local function rowOf(name)
+                local row = cell(layer, name)
+                assert.is_truthy(row, name)
+                return row
+            end
+            assert.is_true(rowOf("Underline").selected)
+            assert.is_falsy(rowOf("Marker").selected)
+            assert.is_falsy(rowOf("Wavy underline").selected)
+            local u = rowOf("Underline").dimen
+            assert.is_true(gray(u.x + 2, u.y + math.floor(u.h / 2)) < 0x80)
+            tapWidget(rowOf("Wavy underline"))
             UIManager:forceRePaint()
             assert.is_nil(shown(ConfirmLayer))
             assert.are.equal("wave", ui.annotation.annotations[1].drawer)
@@ -407,11 +445,13 @@ describe("ReaderHighlightBubble module", function()
             assert.are.equal("underscore", ui.view.highlight.saved_drawer)
 
             -- Cancel changes nothing
-            ui.highlight:showHighlightBubble(1)
+            tap(highlightPoint(ui).x, highlightPoint(ui).y)
             UIManager:forceRePaint()
             hold(cell(ui.highlight.highlight_dialog, "Delete highlight"))
             UIManager:forceRePaint()
-            tapWidget(cell(shown(ConfirmLayer), "Cancel"))
+            layer = shown(ConfirmLayer)
+            assert.is_true(rowOf("Wavy underline").selected)
+            tapWidget(cell(layer, "Cancel"))
             assert.is_nil(shown(ConfirmLayer))
             assert.are.equal(1, #ui.annotation.annotations)
             assert.are.equal("wave", ui.annotation.annotations[1].drawer)
@@ -443,7 +483,9 @@ describe("ReaderHighlightBubble module", function()
             tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
             ui.highlight:closeBubble()
             UIManager:forceRePaint()
-            local refreshes = select(ui, highlightPoint(ui))
+            local pos = highlightPoint(ui)
+            local word = ui.document:getWordFromPosition(ui.view:screenToPageTransform(pos)).word
+            local refreshes = select(ui, pos)
             local bubble = ui.highlight.highlight_dialog
             assert.are.equal(bubble, topWidget())
             assertNoFullScreen(refreshes)
@@ -452,6 +494,18 @@ describe("ReaderHighlightBubble module", function()
             assertActions(bubble, HIGHLIGHT_ACTIONS)
             assert.is_nil(ui.highlight.selected_text) -- the word's selection is gone
             assert.are.equal(1, #ui.annotation.annotations) -- and no second highlight
+            -- the look-up is still for the word pressed, not the whole highlight
+            assert.are_not.equal(word, ui.annotation.annotations[1].text)
+            stub(ui.dictionary, "onLookupWord")
+            tapWidget(cell(bubble, "Translate"))
+            assert.stub(ui.dictionary.onLookupWord).was_called()
+            assert.are.equal(word, ui.dictionary.onLookupWord.calls[1].vals[2])
+            ui.dictionary.onLookupWord:revert()
+            ui.highlight:onClose()
+            UIManager:forceRePaint()
+            select(ui, highlightPoint(ui))
+            bubble = ui.highlight.highlight_dialog
+            UIManager:forceRePaint()
             tapWidget(cell(bubble, "Delete highlight"))
             UIManager:forceRePaint()
             assert.are.equal(0, #ui.annotation.annotations)
@@ -464,6 +518,9 @@ describe("ReaderHighlightBubble module", function()
         it("should copy the selection, close the popover and confirm with a toast", function()
             local copied
             stub(Device.input, "setClipboardText", function(text) copied = text end)
+            local mock_time = require("mock_time")
+            mock_time:install()
+            UIManager:_checkTasks() -- the clock is now the mock's
             local ok, err = pcall(function()
                 select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
                 local text = require("util").cleanupSelectedText(ui.highlight.selected_text.text)
@@ -484,9 +541,12 @@ describe("ReaderHighlightBubble module", function()
                 assert.is_true(gray(r.x + math.floor(r.w / 2), r.y + 2) < 0x80)
                 assert.are.equal(Screen:getWidth() - r.x - r.w, r.x) -- centered
 
-                -- gone by itself after a moment
-                assert.is_truthy(toast._timeout_func)
-                refreshes = refreshesOf(function() toast._timeout_func() end)
+                -- gone by itself after 2 s
+                mock_time:increase(1)
+                UIManager:_checkTasks()
+                assert.are.equal(toast, shown(Toast))
+                mock_time:increase(1)
+                refreshes = refreshesOf(function() UIManager:_checkTasks() end)
                 assert.is_nil(shown(Toast))
                 assert.are.same({ { mode = "fast", region = r } }, refreshes)
 
@@ -512,6 +572,7 @@ describe("ReaderHighlightBubble module", function()
                 assert.is_truthy(shown(Toast))
                 UIManager:close(shown(Toast))
             end)
+            mock_time:uninstall()
             Device.input.setClipboardText:revert()
             assert(ok, err)
         end)
@@ -553,18 +614,27 @@ describe("ReaderHighlightBubble module", function()
             select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
             tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
             UIManager:forceRePaint()
+            local bubble_region = ui.highlight.highlight_dialog:getRefreshRegion()
+            local lines = ui.highlight:linesRegion(ui.highlight:highlightRects(1))
             local refreshes = refreshesOf(function() tapWidget(cell(ui.highlight.highlight_dialog, "Delete highlight")) end)
             assert.are.equal(0, #ui.annotation.annotations)
             assert.is_nil(ui.highlight.highlight_dialog)
             assert.are.equal(ui, topWidget())
-            assertNoFullScreen(refreshes)
             -- the popover leaves with "fast" (nothing gray under it), the highlight's lines with "ui"
-            local modes = {}
-            for _, r in ipairs(refreshes) do modes[r.mode] = true end
-            assert.is_true(modes.ui)
-            for mode in pairs(modes) do
-                assert.is_truthy(mode == "ui" or mode == "fast", mode)
+            -- (UIManager may merge the two into one "ui" region), and the status bar counts one note less
+            local footer_h = ui.view.footer:getHeight()
+            local footer = Geom:new{ x = 0, y = Screen:getHeight() - footer_h, w = Screen:getWidth(), h = footer_h }
+            local both, lines_repainted = bubble_region:combine(lines), false
+            for _, r in ipairs(refreshes) do
+                if r.mode == "fast" then
+                    assert.are.same(bubble_region, r.region)
+                else
+                    assert.are.equal("ui", r.mode)
+                    assert.is_true(both:contains(r.region) or footer:contains(r.region))
+                    lines_repainted = lines_repainted or r.region:contains(lines)
+                end
             end
+            assert.is_true(lines_repainted)
         end)
 
         it("should drop a highlight made for a note that is cancelled", function()
@@ -611,6 +681,45 @@ describe("ReaderHighlightBubble module", function()
         end)
     end)
 
+    describe("with the notes list", function()
+        local ReaderToolbar
+        setup(function()
+            ReaderToolbar = require("apps/reader/modules/readertoolbar")
+            Replacements.reader_menu = ReaderToolbar
+        end)
+        teardown(function() Replacements.reader_menu = nil end)
+
+        it("should drop a highlight deleted from its popover from the notes list too", function()
+            local ui = openReader(sample_epub, true)
+            local ok, err = pcall(function()
+                ui.rolling:onGotoPage(10)
+                UIManager:forceRePaint()
+                local function notesTab()
+                    ui:handleEvent(Event:new("ShowToc"))
+                    UIManager:forceRePaint()
+                    local drawer = ui.menu.drawer
+                    local label = find(drawer.panel, function(w)
+                        return w.selected ~= nil and w.callback and w.text and w.text:find("Notes", 1, true) end).text
+                    drawer:onClose()
+                    UIManager:forceRePaint()
+                    return label
+                end
+                select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
+                tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
+                ui.highlight:closeBubble()
+                UIManager:forceRePaint()
+                assert.are.equal("Notes 1", notesTab())
+                tap(highlightPoint(ui).x, highlightPoint(ui).y)
+                UIManager:forceRePaint()
+                tapWidget(cell(ui.highlight.highlight_dialog, "Delete highlight"))
+                UIManager:forceRePaint()
+                assert.are.equal("Notes", notesTab())
+            end)
+            closeReader(ui)
+            assert(ok, err)
+        end)
+    end)
+
     describe("with CJK text", function()
         it("should name the look-up 查询 (Look up) and give it the magnifier, on a selection and on a highlight", function()
             local file = require("datastorage"):getDataDir() .. "/readerhighlightbubble_cjk.txt"
@@ -643,6 +752,28 @@ describe("ReaderHighlightBubble module", function()
                 actions[1] = { "Delete highlight", "eink/highlight-off" }
                 assertActions(ui.highlight.highlight_dialog, actions)
                 ui.highlight:closeBubble()
+            end)
+            closeReader(ui)
+            DocSettings:open(file):purge()
+            os.remove(file)
+            assert(ok, err)
+        end)
+
+        it("should still name it Translate for Latin text with CJK punctuation", function()
+            local file = require("datastorage"):getDataDir() .. "/readerhighlightbubble_punct.txt"
+            local f = assert(io.open(file, "w"))
+            f:write(string.rep("PARC，Xerox。", 200))
+            f:close()
+            local ui = openReader(file, true)
+            local ok, err = pcall(function()
+                UIManager:forceRePaint()
+                select(ui, Geom:new{ x = 100, y = 200 }, Geom:new{ x = 400, y = 200 })
+                local text = ui.highlight.selected_text.text
+                assert.is_truthy(text:find("，", 1, true) or text:find("。", 1, true), text)
+                assert.is_true(require("util").hasCJKChar(text)) -- the punctuation counts as CJK there
+                assert.is_truthy(cell(ui.highlight.highlight_dialog, "Translate"))
+                assert.is_nil((cell(ui.highlight.highlight_dialog, "Look up")))
+                ui.highlight:onClose()
             end)
             closeReader(ui)
             DocSettings:open(file):purge()
@@ -704,18 +835,6 @@ describe("ReaderHighlightBubble module", function()
             assertOnScreen(b)
         end)
 
-        it("should keep a widget cell as it is in a row of icon cells", function()
-            local swatch = require("ui/widget/textwidget"):new{ text = "文", face = require("ui/font"):getFace("ui_excerpt") }
-            local b = SelectionBubble:new{
-                rows = { { { icon = "eink/copy", text = "Copy", callback = function() end },
-                    { widget = swatch, callback = function() end } } },
-                anchor_rects = { Geom:new{ x = 200, y = 400, w = 100, h = 30 } },
-            }
-            assert.are.equal(swatch, cell(b, "文")[1][1])
-            assert.is_truthy(iconOf(cell(b, "Copy")))
-            assertOnScreen(b)
-        end)
-
         it("should overlay a page-tall selection without an arrow, and survive no selection", function()
             local b = bubbleFor({ Geom:new{ x = 0, y = 10, w = Screen:getWidth(), h = Screen:getHeight() - 20 } })
             assert.are.equal(0, b.arrow_h)
@@ -768,6 +887,36 @@ describe("ReaderHighlightBubble module", function()
             assert.is_nil(ui.highlight.highlight_dialog)
             assert.are.equal(1, #ui.annotation.annotations)
             closeReader(ui)
+        end)
+
+        it("should show a highlight's popover on a long-press in it, and copy with a toast that leaves with ui", function()
+            local ui = openReader(sample_pdf, true)
+            stub(Device.input, "setClipboardText")
+            local ok, err = pcall(function()
+                ui:handleEvent(Event:new("SetScrollMode", false))
+                ui.paging:onGotoPage(10)
+                UIManager:forceRePaint()
+                select(ui, Geom:new{ x = 430, y = 210 }, Geom:new{ x = 60, y = 236 })
+                tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
+                ui.highlight:closeBubble()
+                UIManager:forceRePaint()
+                select(ui, highlightPoint(ui))
+                local bubble = ui.highlight.highlight_dialog
+                assert.are.equal(bubble, topWidget())
+                UIManager:forceRePaint()
+                assertActions(bubble, HIGHLIGHT_ACTIONS)
+                assert.are.equal(1, #ui.annotation.annotations)
+                local refreshes = refreshesOf(function() tapWidget(cell(bubble, "Copy")) end)
+                assert.stub(Device.input.setClipboardText).was_called_with(ui.annotation.annotations[1].text)
+                local toast = shown(Toast)
+                assert.is_truthy(hasRefresh(refreshes, "fast", toast.dimen)) -- solid ink
+                -- but the rendered page under it is gray
+                refreshes = refreshesOf(function() UIManager:close(toast) end)
+                assert.are.same({ { mode = "ui", region = toast.dimen } }, refreshes)
+            end)
+            Device.input.setClipboardText:revert()
+            closeReader(ui)
+            assert(ok, err)
         end)
 
         it("should write the highlight into the PDF, and the wave as an underline", function()

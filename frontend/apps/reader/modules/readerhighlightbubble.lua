@@ -5,9 +5,11 @@ popover and Highlights).
 Replaces ReaderHighlight (apps/replacements reader_highlight slot):
 - a long-press selects a word, dragging extends it, and releasing shows the
   white selection popover: highlight, look up (查询, for CJK text) or translate
-  (翻译, for other text), write note, copy, each an icon over its label;
+  (翻译, for other text, such as English), write note, copy, each an icon over
+  its label;
 - a tap on a highlight, or a long-press on a word of it, shows the same four
-  actions with "Delete highlight" in the first place;
+  actions with "Delete highlight" in the first place; after a long-press, the
+  look-up is for the word pressed;
 - copying closes the popover and confirms with a toast;
 - a note is written in a bottom sheet; highlights with a note get a small mark
   after their last character.
@@ -16,9 +18,11 @@ New highlights are lines unless a default style was saved, in 设置 → 阅读 
 划线样式 or the original menu; markers and waves keep showing
 (doc/adr/0006-straight-line-default-highlight.md). One highlight is restyled from
 a long-press on "Delete highlight", a secondary entry the reference does not show.
+The settings row sends "DefaultHighlightStyleChanged" to the open book.
 
 Refreshes: both popovers and the toast are black and white, so they show and
-close with "fast" on their own rect, or "ui" where the page under them is gray.
+close with "fast" on their own rect, or "ui" where the page under them is gray
+(the toast is solid, so it always shows with "fast").
 Saving, restyling or deleting a highlight refreshes its own lines with "ui";
 nothing here refreshes the whole screen.
 ]]
@@ -47,6 +51,7 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Widget = require("ui/widget/widget")
 local ffi = require("ffi")
 require("ffi/posix_h") -- free()
+local ffiUtil = require("ffi/util")
 local util = require("util")
 local Screen = Device.screen
 local _ = require("gettext")
@@ -147,6 +152,11 @@ end
 function ReaderHighlightBubble:onReadSettings(config)
     ReaderHighlight.onReadSettings(self, config)
     -- not the style saved with this book: upstream saves the current one on every close
+    self:onDefaultHighlightStyleChanged()
+end
+
+--- New highlights take the default style (after it was changed in the settings).
+function ReaderHighlightBubble:onDefaultHighlightStyleChanged()
     self.view.highlight.saved_drawer = ReaderHighlightBubble.getDefaultDrawer()
     self:setSelectionColor()
 end
@@ -241,9 +251,10 @@ function ReaderHighlightBubble:clear(clear_id, fast)
     return true
 end
 
+-- The popover's corners and the strip beside its arrow show the page: "fast" only where it is black and white.
 function ReaderHighlightBubble:showBubble(bubble)
     self:closeBubble()
-    bubble.close_refresh_type = bubble.refresh_type == "ui" and "ui" or self:refreshTypeOver(bubble:getRefreshRegion())
+    bubble.refresh_type = self:refreshTypeOver(bubble:getRefreshRegion())
     self.highlight_dialog = bubble
     UIManager:show(bubble, bubble.refresh_type, bubble:getRefreshRegion())
 end
@@ -256,7 +267,7 @@ function ReaderHighlightBubble:closeBubble()
         return UIManager:close(bubble)
     end
     local region = bubble:getRefreshRegion()
-    UIManager:close(bubble, bubble.close_refresh_type, region)
+    UIManager:close(bubble, bubble.refresh_type, region)
 end
 
 --- Closes the selection bubble and clears the selection, both "fast" where possible.
@@ -286,8 +297,13 @@ function ReaderHighlightBubble:onHoldRelease()
     local highlights = self.is_word_selection and self:highlightsAt(self.hold_pos) or {}
     self.is_word_selection = false
     if #highlights > 0 then
+        local word = self.selected_text
         self:clear(nil, true)
-        self:showChooseHighlightDialog(highlights)
+        if #highlights == 1 then
+            self:showHighlightBubble(highlights[1], nil, word)
+        else
+            self:showChooseHighlightDialog(highlights) -- overlapping highlights: upstream's list
+        end
         return true
     end
     -- a single word gets the bubble too, not the dictionary straight away
@@ -309,10 +325,25 @@ function ReaderHighlightBubble:highlightsAt(pos)
     return indexes
 end
 
---- The look-up cell for some text: 查询 for CJK text, 翻译 for other text, as WeChat Read names them.
--- Both open the dictionary sheet.
+--- Whether text has a CJK character that can be part of a word: not CJK or fullwidth punctuation, as in
+-- ReaderDictSheet, nor fullwidth Latin.
+local function hasCJKWord(text)
+    for _, c in ipairs(util.splitToChars(text)) do
+        if util.isCJKChar(c) then
+            local code = ffiUtil.utf8charcode(c)
+            if not ((code >= 0x3000 and code <= 0x303F) or (code >= 0xFE30 and code <= 0xFE4F)
+                    or (code >= 0xFF00 and code <= 0xFFEF)) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+--- The look-up cell for some text: 查询 for CJK text, 翻译 for other text (such as English), as WeChat Read
+-- names them. Both open the dictionary sheet.
 local function lookupCell(text, callback)
-    if util.hasCJKChar(text) then
+    if hasCJKWord(text) then
         return { icon = "eink/search", text = C_("Highlight bubble", "Look up"), callback = callback }
     end
     return { icon = "eink/translate", text = _("Translate"), callback = callback }
@@ -322,7 +353,7 @@ end
 function ReaderHighlightBubble:copyText(text)
     Device.input.setClipboardText(text)
     local toast = Toast:new{ text = C_("Highlight bubble", "Copied") }
-    toast.refresh_type = self:refreshTypeOver(toast.dimen)
+    toast.close_refresh_type = self:refreshTypeOver(toast.dimen)
     UIManager:show(toast)
 end
 
@@ -368,7 +399,6 @@ function ReaderHighlightBubble:onShowHighlightMenu(index)
         anchor_rects = rects,
         tap_close_callback = function() self:dismiss() end,
     }
-    bubble.refresh_type = "fast" -- black and white
     self:showBubble(bubble)
 end
 
@@ -388,7 +418,8 @@ end
 --- Highlight popover: the selection popover's actions, with "Delete highlight" in the first place.
 -- A long-press on it restyles the highlight.
 -- rects: screen rects of the highlight when it has not been painted yet
-function ReaderHighlightBubble:showHighlightBubble(index, rects)
+-- word: the selection of a word long-pressed in it, which the look-up is for instead of the whole highlight
+function ReaderHighlightBubble:showHighlightBubble(index, rects, word)
     local item = self.ui.annotation.annotations[index]
     rects = rects or self:highlightRects(index)
     if #rects == 0 then
@@ -405,10 +436,10 @@ function ReaderHighlightBubble:showHighlightBubble(index, rects)
                 self:closeBubble()
                 self:showStyleLayer(index, rects)
               end },
-            lookupCell(item.text, function()
+            lookupCell((word or item).text, function()
                 self:closeBubble()
-                self.selected_text = util.tableDeepCopy(item)
-                self:lookupDict(index)
+                self.selected_text = util.tableDeepCopy(word or item)
+                self:lookupDict(not word and index or nil)
             end),
             { icon = "eink/thought",
               text = item.note and C_("Highlight bubble", "Edit note") or C_("Highlight bubble", "Write note"),
@@ -424,15 +455,16 @@ function ReaderHighlightBubble:showHighlightBubble(index, rects)
         anchor_rects = rects,
         tap_close_callback = function() self:closeBubble() end,
     }
-    bubble.refresh_type = "fast" -- black and white
     self:showBubble(bubble)
 end
 
---- Confirm layer with the styles for one highlight; the default style for new highlights stays.
+--- Confirm layer with the styles for one highlight, its own marked; the default style for new highlights stays.
 function ReaderHighlightBubble:showStyleLayer(index, rects)
+    local drawer = self.ui.annotation.annotations[index].drawer
     local actions = {}
     for i, style in ipairs(ReaderHighlightBubble.STYLES) do
-        actions[i] = { text = style[1], callback = function() self:setHighlightStyle(index, style[2], rects) end }
+        actions[i] = { text = style[1], selected = style[2] == drawer,
+                       callback = function() self:setHighlightStyle(index, style[2], rects) end }
     end
     local layer = ConfirmLayer:new{ text = C_("Highlight bubble", "Style of this highlight"), actions = actions }
     UIManager:show(layer, "ui", layer:getRefreshRegion())
