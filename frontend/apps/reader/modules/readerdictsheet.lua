@@ -16,7 +16,7 @@ cards, from the top:
 - the online translation (Translator), named as needing the network: for a selection of several words that is
   not CJK and that no dictionary has, or after 在线翻译. It has its own loading, offline (打开 Wi-Fi) and failure
   (重试) states;
-- 维基百科, loaded on a tap, then its intro, which a tap opens as the full article in the upstream popup, as above;
+- 维基百科, loaded on a tap, then its intro, which a tap opens as a paginated full-text article;
 - 加入生词本 (vocabulary builder), removing a word after the confirm layer, and 在本书中搜索.
 Lookups are exact over a list of candidates: a Chinese selection that is not a word is matched by the longest
 word it contains (up to 20 characters), and an English word also tries simple lemmas (plural, past tense, -ing).
@@ -25,7 +25,7 @@ The fuzzy search setting is not used here. Chinese text is never sent to the tra
 The back arrow (or the Back key) returns to the page of the selection, which stays a moment, as upstream.
 
 Refreshes: the page opens and closes whole, and turning a page or a card changing state repaints the content and
-the bar (all "ui"). A local lookup slower than upstream's delay shows the page with 查询中… (a tap cancels it, as
+the bar (all "ui"), as does the full Wikipedia article. A local lookup slower than upstream's delay shows the page with 查询中… (a tap cancels it, as
 upstream); a faster one opens the page with its results. Nothing here asks for "full" (the upstream popup flashes
 as it closes, as it always has).
 ]]
@@ -49,7 +49,6 @@ local OverlapGroup = require("ui/widget/overlapgroup")
 local Palette = require("ui/palette")
 local ReaderDictionary = require("apps/reader/modules/readerdictionary")
 local RightContainer = require("ui/widget/container/rightcontainer")
-local Size = require("ui/size")
 local Tappable = require("apps/shelf/shelfwidgets").Tappable
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
@@ -374,6 +373,51 @@ end
 local function headingFace() return Font:getFace("ui_headline", 18) end
 local function bodyFace() return Font:getFace("ui_body", 16) end
 
+local WikiTextBox = TextBoxWidget:extend{}
+
+function WikiTextBox:free(full)
+    TextBoxWidget.free(self, full)
+    if full ~= false then
+        -- TextBoxWidget's queued image wrapper outlives free(); invalidate it and any delayed repaint.
+        self.image_update_action = function() end
+        self.virtual_line_num = 0
+    end
+end
+
+-- The full article uses Wikipedia's plain-text extract and the same page navigation as the lookup.
+local WikiArticlePage = FullscreenPage:extend{}
+
+function WikiArticlePage:init()
+    FullscreenPage.init(self)
+    self:build()
+end
+
+function WikiArticlePage:buildContent(rect)
+    local width = rect.w - 2 * dp(46)
+    local box = WikiTextBox:new{
+        text = self.text, face = bodyFace(), fgcolor = Palette.ink,
+        width = width, height = rect.h - 2 * GUTTER, line_height = LEADING,
+        virtual_line_num = (self.page - 1) * (self.lines_per_page or 1) + 1,
+        images = self.images, lang = self.lang, auto_para_direction = true, dialog = self,
+    }
+    self.lines_per_page = box.lines_per_page
+    local lines = self.lines_per_page
+    local pages = math.max(1, math.ceil(#box.vertical_string_list / lines))
+    self.page = math.min(self.page, pages)
+    return VerticalGroup:new{
+        VerticalSpan:new{ width = GUTTER },
+        HorizontalGroup:new{ HorizontalSpan:new{ width = dp(46) }, box },
+    }, pages
+end
+
+function WikiArticlePage:onCloseWidget()
+    for _, picture in ipairs(self.images or {}) do
+        if picture.bb then picture.bb:free() end
+        if picture.hi_bb then picture.hi_bb:free() end
+        picture.bb, picture.hi_bb = nil, nil
+    end
+end
+
 LookupPage = FullscreenPage:extend{
     dictionary = nil, -- ReaderDictSheet
     highlight = nil, -- ReaderHighlight that made the selection, if any
@@ -422,7 +466,7 @@ function LookupPage:readResults()
         if g.phonetic and g.phonetic ~= self.phonetic then -- another one than beside the headword
             table.insert(g.units, { text = g.phonetic })
         end
-        for __, sense in ipairs(g.senses) do table.insert(g.units, sense) end
+        for ___, sense in ipairs(g.senses) do table.insert(g.units, sense) end
         if g.cut then
             table.insert(g.units, { text = _("Tap the card for the rest of the entry.") })
         end
@@ -469,7 +513,8 @@ end
 function LookupPage:showsVocabulary()
     -- not from within the vocabulary builder, as upstream
     local vocab = self.ui.vocabbuilder
-    return self.results and not self.not_found and vocab and not vocab.widget
+    return self.results and vocab and not vocab.widget
+        and (not self.not_found or (not isPhrase(self.word) and #util.splitToChars(self.word) <= MAX_MATCH_CHARS))
 end
 
 --- The cards, in order. A card has a `kind`; one with `units` (senses, paragraphs) can continue on the next page.
@@ -702,22 +747,24 @@ function LookupPage:wikiCard()
     local title = wiki and wiki.results and wiki.results[1].dict or _("Wikipedia")
     table.insert(group, self:heading(title, nil, not wiki or wiki.results))
     local callback
-    if not wiki then
-        callback = function() self:loadWiki() end
-    elseif wiki.results then
+    if wiki and wiki.results then
         table.insert(group, VerticalSpan:new{ width = HEADING_GAP })
         table.insert(group, textBox(wiki.results[1].definition, bodyFace(), self.inner_w, INTRO_LINES))
-        callback = function() self:onFullEntry() end
+    end
+    if not wiki or (wiki.results and not (wiki.loading or wiki.offline or wiki.failed or wiki.missing)) then
+        callback = function() self:loadWiki(wiki and wiki.results ~= nil) end
     else
         table.insert(group, VerticalSpan:new{ width = HEADING_GAP })
         if wiki.loading then
-            table.insert(group, TextWidget:new{ text = _("Searching Wikipedia…"), face = bodyFace(), fgcolor = Palette.ink, max_width = self.inner_w })
+            table.insert(group, textBox(wiki.full and _("Retrieving Wikipedia article…") or _("Searching Wikipedia…"),
+                bodyFace(), self.inner_w))
         elseif wiki.offline then
             table.insert(group, self:offlineState(_("Wikipedia is an online lookup. Turn on Wi-Fi and try again."),
-                function() self:loadWiki() end))
+                function() self:loadWiki(wiki.full) end))
         else
-            table.insert(group, self:stateBlock(
-                wiki.failed and _("Failed searching Wikipedia.") or T(_("No Wikipedia article for \"%1\""), self.headword)))
+            local message = wiki.failed and (wiki.full and _("Failed to retrieve Wikipedia article.") or _("Failed searching Wikipedia."))
+                or (wiki.full and _("Wikipedia article not found.") or T(_("No Wikipedia article for \"%1\""), self.headword))
+            table.insert(group, self:stateBlock(message, nil, { _("Retry"), function() self:loadWiki(wiki.full) end }))
         end
     end
     return self:cardFrame(group, callback)
@@ -896,32 +943,34 @@ function LookupPage:requestTranslation()
     end)
 end
 
-function LookupPage:loadWiki()
+function LookupPage:loadWiki(full)
     if self.wiki and self.wiki.loading then return end -- one request at a time
+    local previous = self.wiki
+    local results = full and previous.results or nil
     if not NetworkMgr:isOnline() then
-        self.wiki = { offline = true }
+        self.wiki = { offline = true, full = full, results = results }
         return self:update("wiki")
     end
-    local previous = self.wiki
-    self.wiki = { loading = true }
+    self.wiki = { loading = true, full = full, results = results }
     self:update("wiki")
     UIManager:forceRePaint()
     Trapper:wrap(function()
         local wikipedia = self.ui.wikipedia
         wikipedia:initLanguages(self.headword)
-        local lang = wikipedia.wiki_last_language or wikipedia.wiki_languages[1]
+        local lang = full and results[1].lang or wikipedia.wiki_last_language or wikipedia.wiki_languages[1]
         -- invisible: a tap cancels the request (and goes no further), the card shows the progress
         local trap = TrapWidget:new{ resend_event = false }
         UIManager:show(trap)
         Wikipedia:setTrapWidget(trap)
-        local ok, pages = pcall(Wikipedia.searchAndGetIntros, Wikipedia, self.headword, lang)
+        local ok, pages = pcall(full and Wikipedia.getFullPage or Wikipedia.searchAndGetIntros, Wikipedia,
+            full and results[1].word or self.headword, lang)
         Wikipedia:resetTrapWidget()
         UIManager:close(trap)
-        local results = {}
+        local found = {}
         if ok and pages then
             for __, page in pairs(pages) do
-                if page.extract then
-                    table.insert(results, {
+                if page.extract and page.extract ~= "" then
+                    table.insert(found, {
                         dict = T(_("Wikipedia %1"), lang:upper()),
                         word = page.title,
                         definition = page.extract,
@@ -932,15 +981,24 @@ function LookupPage:loadWiki()
                     })
                 end
             end
-            table.sort(results, function(a, b) return a.index < b.index end)
+            table.sort(found, function(a, b) return a.index < b.index end)
         end
         if self.closed then return end
         if not ok and tostring(pages):find(Wikipedia.dismissed_error_code, 1, true) then
             self.wiki = previous -- cancelled by a tap: back to where we were
-        elseif #results > 0 then
-            self.wiki = { results = results }
+        elseif #found > 0 then
+            if full then
+                self.wiki = { results = results }
+                self:update("wiki")
+                local article = WikiArticlePage:new{
+                    title = found[1].word, text = found[1].definition, images = found[1].images, lang = lang,
+                }
+                UIManager:show(article, "ui", article.dimen)
+                return
+            end
+            self.wiki = { results = found }
         else
-            self.wiki = { failed = not ok }
+            self.wiki = { failed = not ok, missing = ok, full = full, results = results }
         end
         self:update("wiki")
     end)
@@ -975,35 +1033,21 @@ end
 function LookupPage:onSearchBook()
     if self.highlight then self.highlight:clear() end
     self:onClose(true)
-    self.ui.search:searchCallback(nil, self.headword)
+    if not self.ui:handleEvent(Event:new("ShowSearchPage", self.word)) then
+        self.ui.search:searchCallback(nil, self.word)
+    end
 end
 
---- Opens a full entry in the upstream popup: a dictionary's results, or Wikipedia's without group. The popup opens
--- over the page without the selection, so that its own search and highlight buttons are off (the page has them).
--- Closing it comes back to the cards, updated: its plugin buttons may have added the word to the vocabulary builder.
+--- Rich dictionary entries keep the original popup and its plugin buttons.
 function LookupPage:onFullEntry(group)
-    self.dictionary._lookup_start_time = nil -- no input block: this is not a slow lookup
-    local module = group and self.dictionary or self.ui.wikipedia
-    local results = group and group.results or self.wiki.results
-    local function closed()
-        -- the popup frees the images it loaded (Wikipedia thumbnails), but leaves them in the results: forget
-        -- them, for the next popup to load them again
-        for __, r in ipairs(results) do
-            for __, im in ipairs(r.images or {}) do
-                im.bb, im.hi_bb = nil, nil
-            end
-        end
+    self.dictionary._lookup_start_time = nil
+    local highlight = self.dictionary.highlight
+    self.dictionary.highlight = nil
+    ReaderDictionary.showDict(self.dictionary, self.word, group.results, self.boxes, self.link, function()
         if not self.closed then self:update() end
-    end
-    local highlight = module.highlight
-    module.highlight = nil
-    if group then
-        ReaderDictionary.showDict(self.dictionary, self.word, results, self.boxes, self.link, closed)
-    else
-        module:showDict(self.headword, results, self.boxes, nil, closed)
-    end
-    module.highlight = highlight
-    self.dictionary.dict_window = self -- upstream's showDict took it for the popup
+    end)
+    self.dictionary.highlight = highlight
+    self.dictionary.dict_window = self
 end
 
 --- Back to the book: the selection stays a moment, to see where the lookup was (as upstream), then the close

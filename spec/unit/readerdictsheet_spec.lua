@@ -56,11 +56,13 @@ describe("ReaderDictSheet module", function()
         Screen = require("device").screen
         ReaderHighlightBubble.register()
         ReaderDictSheet.register()
+        Replacements.reader_search = require("apps/reader/modules/readerfulltextsearch")
     end)
 
     teardown(function()
         Replacements.reader_highlight = nil
         Replacements.reader_dictionary = nil
+        Replacements.reader_search = nil
         DocSettings:open(sample_epub):purge()
         DocSettings:open(sample_pdf):purge()
     end)
@@ -634,7 +636,7 @@ describe("ReaderDictSheet module", function()
             local page = lookupPage()
             assert.is_true(hasText(page, ('No "%s" in local dictionaries'):format(page.word)))
             assert.is_true(hasText(page, "Try Wikipedia, or add more StarDict dictionaries in settings."))
-            assert.is_nil(button(page, "Add to vocabulary builder"))
+            assert.is_truthy(button(page, "Add to vocabulary builder"))
             assert.is_truthy(button(page, "Wikipedia"))
             assert.stub(load).was_not_called()
             tapWidget(button(page, "Translate online"))
@@ -811,6 +813,31 @@ describe("ReaderDictSheet module", function()
             UIManager:close(topWidget())
         end)
 
+        it("should save an unknown word with its book and selected context for later review", function()
+            stubSdcv(ui.dictionary)
+            selectAndLookUp()
+            local page = lookupPage()
+            local word = page.word
+            ui.vocabbuilder:removeWord(word)
+            local add = seek(page, "Add to vocabulary builder")
+            assert.is_truthy(add)
+            tapWidget(add)
+            UIManager:close(topWidget()) -- toast
+            back(page)
+            ui:handleEvent(Event:new("ShowVocabBuilder"))
+            UIManager:forceRePaint()
+            local vocab = topWidget()
+            local item
+            for _, entry in ipairs(vocab.item_table) do
+                if entry.word == word then item = entry break end
+            end
+            assert.is_truthy(item)
+            assert.are.equal(ui.doc_props.display_title, item.book_title)
+            assert.is_truthy(item.prev_context or item.next_context)
+            UIManager:close(vocab)
+            ui.vocabbuilder:removeWord(word)
+        end)
+
         it("should hide the vocabulary card without the plugin or from within the vocabulary builder", function()
             stubSdcv(ui.dictionary)
             local vocab = ui.vocabbuilder
@@ -860,77 +887,196 @@ describe("ReaderDictSheet module", function()
             assert.is_true(hasText(page, "旅居者；暂住者"))
         end)
 
-        it("should show the Wikipedia intro when online, and the full article from its card", function()
-          local mock_time = require("mock_time")
-          mock_time:install()
-          UIManager:_checkTasks() -- the clock is now the mock's
-          local ok, err = pcall(function()
+        it("should open the complete Wikipedia article, page through it and return to the same lookup and book", function()
             local Wikipedia = require("ui/wikipedia")
-            local Blitbuffer = require("ffi/blitbuffer")
-            stubSdcv(ui.dictionary)
+            stubSdcv(ui.dictionary, true)
             stub(NetworkMgr, "isOnline").returns(true)
-            -- a thumbnail, as with wikipedia_show_image, loaded by the popup that shows it
-            local loads = 0
-            local image = { width = 40, height = 40, title = "Sojourner" }
-            image.load_bb_func = function(_, highres)
-                loads = loads + 1
-                image[highres and "hi_bb" or "bb"] = Blitbuffer.new(40, 40, Blitbuffer.TYPE_BB8)
-            end
-            image.load_bb_func()
-            stub(Wikipedia, "searchAndGetIntros").returns({ [7] = { title = "Sojourner", extract = "A sojourner is a traveller.", index = 0, images = { image } } })
-            ui:handleEvent(Event:new("LookupWord", "sojourner"))
-            UIManager:forceRePaint()
+            stub(Wikipedia, "searchAndGetIntros").returns({ [7] = {
+                title = "Juliet", extract = "The summary only.", index = 0,
+            } })
+            local full = "The full article.\n" .. string.rep("A paragraph beyond the summary.\n", 80) .. "Article ends here."
+            local Blitbuffer = require("ffi/blitbuffer")
+            local picture = { width = 40, height = 40, title = "Juliet illustration" }
+            stub(Wikipedia, "getFullPage").invokes(function(_, title, lang)
+                assert.are.equal("Juliet", title)
+                assert.are.equal("en", lang)
+                picture.bb = Blitbuffer.new(40, 40, Blitbuffer.TYPE_BB8)
+                return { [7] = { title = title, extract = full, images = { picture } } }
+            end)
+            selectAndLookUp()
             local page = lookupPage()
-            local refreshes = refreshesOf(function() tapWidget(button(page, "Wikipedia")) end)
-            NetworkMgr.isOnline:revert()
-            Wikipedia.searchAndGetIntros:revert()
-            assert.is_true(hasText(page, "A sojourner is a traveller."))
-            assertNoFull(refreshes)
-            for _, r in ipairs(refreshes) do
-                assert.are.same(page.body_rect, r.region)
-            end
-            for round = 1, 2 do
-                tapWidget(button(page, "Wikipedia EN"))
-                local popup = topWidget()
-                assert.is_true(popup.is_wiki)
-                assert.are.equal("Sojourner", popup.results[1].word)
-                if round == 2 then
-                    -- the popup loads its image again, instead of drawing the one the first popup freed
-                    assert.is_nil(image.bb)
-                    mock_time:increase(1)
-                    UIManager:_checkTasks()
-                    assert.is_true(loads >= 2)
-                    assert.is_truthy(image.bb)
+            local anchor = ui.document:getXPointer()
+            tapWidget(seek(page, "Wikipedia"))
+            assert.is_true(hasText(page, "The summary only."))
+            local card_page = page.page
+            ui.wikipedia.wiki_last_language = "fr" -- full article keeps the summary's language
+            local refreshes = refreshesOf(function()
+                for __ = 1, 2 do
+                    tapWidget(button(page, "Wikipedia EN"))
+                    local article = topWidget()
+                    assert.is_true(hasText(article, "Juliet"))
+                    assert.is_true(hasText(article, full))
+                    assert.is_truthy(find(article, function(w)
+                        return w.line_num_to_image and w.line_num_to_image[1] == picture
+                    end))
+                    assert.is_true(article.page_count > 1)
+                    while article.bar.capsule.next_enabled do nextPage(article) end
+                    assert.are.equal(article.page_count, article.page)
+                    back(article)
+                    assert.are.equal(page, topWidget())
+                    assert.is_nil(picture.bb)
+                    assert.is_nil(picture.hi_bb)
                 end
-                -- closing the article frees its image and comes back to the cards
-                popup:onClose()
-                UIManager:forceRePaint()
-                assert.is_nil(image.bb)
-                assert.is_nil(image.hi_bb)
-                assert.are.equal(page, lookupPage())
-                assert.are.equal(page, ui.dictionary.dict_window)
-                assert.is_true(hasText(page, "A sojourner is a traveller."))
-            end
-          end)
-          mock_time:uninstall()
-          assert(ok, err)
+            end)
+            ui.wikipedia.wiki_last_language = nil
+            Wikipedia.getFullPage:revert()
+            Wikipedia.searchAndGetIntros:revert()
+            NetworkMgr.isOnline:revert()
+            assertNoFull(refreshes)
+            assert.are.equal(page, topWidget())
+            assert.are.equal(card_page, page.page)
+            assert.is_nil(picture.bb)
+            assert.is_nil(picture.hi_bb)
+            assert.is_true(hasText(page, "The summary only."))
+            assert.is_truthy(ui.highlight.selected_text)
+            back(page)
+            assert.are.equal(ui, topWidget())
+            assert.are.equal(anchor, ui.document:getXPointer())
         end)
 
-        it("should search the book for the headword", function()
-            stubSdcv(ui.dictionary)
-            stub(ui.search, "searchCallback")
-            ui:handleEvent(Event:new("LookupWord", "sojourner"))
-            UIManager:forceRePaint()
-            assert.is_nil(seek(lookupPage(), "Search in this book")) -- not started from the book
-            back(lookupPage())
-            local closed = spy.new(function() end)
-            ui:handleEvent(Event:new("LookupWord", "sojourner", false, nil, ui.highlight, nil, closed))
-            UIManager:forceRePaint()
-            tapWidget(seek(lookupPage(), "Search in this book"))
-            assert.stub(ui.search.searchCallback).was_called_with(match.is_ref(ui.search), nil, "sojourner")
+        it("should discard pending article images on paging and closing, and load them on a later visit", function()
+            local Wikipedia = require("ui/wikipedia")
+            local Blitbuffer = require("ffi/blitbuffer")
+            local mock_time = require("mock_time")
+            mock_time:install()
+            UIManager:_checkTasks()
+            local picture = { width = 40, height = 40, title = "Juliet illustration" }
+            local loads = 0
+            picture.load_bb_func = function()
+                loads = loads + 1
+                picture.bb = Blitbuffer.new(40, 40, Blitbuffer.TYPE_BB8)
+            end
+            stubSdcv(ui.dictionary, true)
+            stub(NetworkMgr, "isOnline").returns(true)
+            stub(Wikipedia, "searchAndGetIntros").returns({ [1] = { title = "Juliet", extract = "Summary." } })
+            stub(Wikipedia, "getFullPage").returns({ [1] = {
+                title = "Juliet", extract = string.rep("Article paragraph.\n", 80), images = { picture },
+            } })
+            local ok, err = pcall(function()
+                selectAndLookUp()
+                local page = lookupPage()
+                tapWidget(seek(page, "Wikipedia"))
+                tapWidget(button(page, "Wikipedia EN"))
+                nextPage(topWidget()) -- before the first image's timer runs
+                mock_time:increase(1)
+                UIManager:_checkTasks()
+                assert.are.equal(0, loads)
+                back(topWidget())
+                tapWidget(button(page, "Wikipedia EN"))
+                back(topWidget()) -- close before the timer runs
+                mock_time:increase(1)
+                UIManager:_checkTasks()
+                assert.are.equal(0, loads)
+                assert.is_nil(picture.bb)
+                tapWidget(button(page, "Wikipedia EN"))
+                mock_time:increase(1)
+                UIManager:_checkTasks()
+                assert.are.equal(1, loads)
+                assert.is_truthy(picture.bb)
+                back(topWidget())
+                assert.is_nil(picture.bb)
+                assert.are.equal(page, topWidget())
+            end)
+            Wikipedia.getFullPage:revert()
+            Wikipedia.searchAndGetIntros:revert()
+            NetworkMgr.isOnline:revert()
+            mock_time:uninstall()
+            assert(ok, err)
+        end)
+
+        for _, full in ipairs{ false, true } do
+            it("should keep lookup context through Wikipedia offline, failure, no match, cancellation and retry (full=" .. tostring(full) .. ")", function()
+                local Wikipedia = require("ui/wikipedia")
+                stubSdcv(ui.dictionary, true)
+                local online = false
+                stub(NetworkMgr, "isOnline").invokes(function() return online end)
+                local state = "success"
+                local function response()
+                    if state == "failed" then error("network unavailable") end
+                    if state == "missing" then return {} end
+                    if state == "cancelled" then error(Wikipedia.dismissed_error_code) end
+                    return { [7] = { title = "Juliet", extract = "Juliet article text.", index = 0 } }
+                end
+                stub(Wikipedia, "searchAndGetIntros").invokes(response)
+                stub(Wikipedia, "getFullPage").invokes(response)
+                stub(NetworkMgr, "runWhenOnline").invokes(function(_, callback) online = true callback() end)
+                selectAndLookUp()
+                local page = lookupPage()
+                if full then
+                    online = true
+                    tapWidget(seek(page, "Wikipedia"))
+                    online = false
+                end
+                local anchor = ui.document:getXPointer()
+                local refreshes = refreshesOf(function()
+                    tapWidget(seek(page, full and "Wikipedia EN" or "Wikipedia"))
+                    assert.is_truthy(seek(page, "Turn on Wi-Fi"))
+                    state = "failed"
+                    tapWidget(button(page, "Turn on Wi-Fi"))
+                    assert.is_true(hasText(page, full and "Failed to retrieve Wikipedia article." or "Failed searching Wikipedia."))
+                    state = "missing"
+                    tapWidget(button(page, "Retry"))
+                    assert.is_true(hasTextLike(page, full and "Wikipedia article not found" or "No Wikipedia article"))
+                    state = "cancelled"
+                    tapWidget(button(page, "Retry"))
+                    assert.is_false(hasText(page, "Searching Wikipedia…"))
+                    assert.is_false(hasText(page, "Retrieving Wikipedia article…"))
+                    state = "success"
+                    tapWidget(button(page, "Retry"))
+                    if full then
+                        assert.is_true(hasText(topWidget(), "Juliet article text."))
+                        back(topWidget())
+                    end
+                end)
+                NetworkMgr.runWhenOnline:revert()
+                NetworkMgr.isOnline:revert()
+                Wikipedia.searchAndGetIntros:revert()
+                Wikipedia.getFullPage:revert()
+                assertNoFull(refreshes)
+                assert.are.equal(page, topWidget())
+                assert.is_true(hasText(page, "Juliet article text."))
+                assert.is_truthy(ui.highlight.selected_text)
+                assert.are.equal(anchor, ui.document:getXPointer())
+            end)
+        end
+
+        it("should search the selected text in the new search page and navigate a hit with the search bar", function()
+            ui.dictionary.enabled_dict_names = { "Demo" }
+            stub(ui.dictionary, "rawSdcv").returns(false, { { { dict = "Demo", word = "another lemma", definition = "n. sense" } } })
+            stub(Trapper, "dismissableRunInSubprocess").invokes(function(_, task) return true, task() end)
+            selectAndLookUp()
+            local page = lookupPage()
+            local selected = page.word
+            local refreshes = refreshesOf(function() tapWidget(seek(page, "Search in this book")) end)
+            Trapper.dismissableRunInSubprocess:revert()
+            assertNoFull(refreshes)
+            local search = topWidget()
+            assert.are.equal(selected, search.input:getText())
+            assert.is_true(#search.results > 0)
             assert.is_nil(ui.dictionary.dict_window)
-            assert.spy(closed).was_called(1)
-            ui.search.searchCallback:revert()
+            assert.is_nil(ui.highlight.selected_text)
+            local hit = find(search, function(w) return w.hit_index and w.callback and w.dimen end)
+            assert.is_truthy(hit)
+            tapWidget(hit)
+            assert.are.equal(ui, topWidget())
+            assert.are.equal(selected, ui.search:barQuery())
+            local bar = ui.search.bar:getRect()
+            tap(bar.x + 20, bar.y + 10)
+            UIManager:forceRePaint()
+            assert.are.equal(selected, topWidget().input:getText())
+            back(topWidget())
+            tapWidget({ dimen = ui.search.bar:getCloseRect() })
+            assert.is_nil(ui.search:barQuery())
         end)
 
         it("should open a dictionary's full entry in the upstream popup from its card, and come back to the cards", function()
@@ -1057,6 +1203,56 @@ describe("ReaderDictSheet module", function()
     end)
 
     describe("with a PDF", function()
+        it("should return from Wikipedia to the PDF selection and search its text in the new page", function()
+            local Wikipedia = require("ui/wikipedia")
+            DocSettings:open(sample_pdf):purge()
+            local ui = ReaderUI:new{
+                dimen = Screen:getSize(),
+                document = DocumentRegistry:openDocument(sample_pdf),
+            }
+            UIManager:show(ui)
+            local ok, err = pcall(function()
+                ui:handleEvent(Event:new("SetScrollMode", false))
+                ui.paging:onGotoPage(10)
+                UIManager:forceRePaint()
+                stubSdcv(ui.dictionary, true)
+                stub(NetworkMgr, "isOnline").returns(true)
+                stub(Wikipedia, "searchAndGetIntros").returns({ [1] = { title = "London", extract = "A city." } })
+                stub(Wikipedia, "getFullPage").returns({ [1] = { title = "London", extract = "London full article." } })
+                stub(Trapper, "dismissableRunInSubprocess").invokes(function(_, task) return true, task() end)
+                ui.highlight:onHold(nil, { pos = Geom:new{ x = 430, y = 210 } })
+                ui.highlight:onHoldRelease()
+                UIManager:forceRePaint()
+                tapWidget(button(ui.highlight.highlight_dialog, "Translate"))
+                local page = lookupPage()
+                local selected = page.word
+                tapWidget(seek(page, "Wikipedia"))
+                tapWidget(button(page, "Wikipedia EN"))
+                assert.is_true(hasText(topWidget(), "London full article."))
+                -- A physical Back returns to the lookup, without clearing the PDF selection.
+                topWidget():onBack()
+                UIManager:forceRePaint()
+                assert.are.equal(page, topWidget())
+                assert.is_truthy(ui.highlight.selected_text)
+                assert.are.equal(10, ui.paging.current_page)
+                tapWidget(seek(page, "Search in this book"))
+                assert.are.equal(selected, topWidget().input:getText())
+                assert.is_true(#topWidget().results > 0)
+                back(topWidget())
+                assert.are.equal(ui, topWidget())
+                assert.are.equal(10, ui.paging.current_page)
+            end)
+            for _, method in ipairs{ "searchAndGetIntros", "getFullPage" } do
+                if Wikipedia[method].revert then Wikipedia[method]:revert() end
+            end
+            if NetworkMgr.isOnline.revert then NetworkMgr.isOnline:revert() end
+            if Trapper.dismissableRunInSubprocess.revert then Trapper.dismissableRunInSubprocess:revert() end
+            if ui.dictionary.rawSdcv.revert then ui.dictionary.rawSdcv:revert() end
+            ui:onClose()
+            UIManager:quit()
+            assert(ok, err)
+        end)
+
         it("should translate a phrase selected on the page, and go back to that page", function()
             DocSettings:open(sample_pdf):purge()
             local ui = ReaderUI:new{
