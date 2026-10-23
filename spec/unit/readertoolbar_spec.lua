@@ -136,6 +136,16 @@ describe("ReaderToolbar module", function()
         end
     end
 
+    -- Read the adjacent number and unit within one of the three visible statistics columns.
+    local function statisticValues(panel, index)
+        local column = panel.content[1][2 * index - 1]
+        local row = find(column, function(w)
+            return w[1] and w[2] and w[1].text and w[2].text
+        end)
+        assert.is_truthy(row)
+        return { row[1].text, row[2].text }
+    end
+
     -- The tappable widget showing `icon` (or its filled variant), such as an entry of a bar.
     local function findIcon(widget, icon)
         return find(widget, function(w)
@@ -449,8 +459,8 @@ describe("ReaderToolbar module", function()
                 return find(panel, function(w) return w.text == str end) ~= nil
             end
             local panel = openFromToolbar("eink/progress")
-            assert.is_true(has(panel, tostring(math.floor(ui:getCurrentPage() / ui.document:getPageCount() * 100))))
-            assert.is_true(has(panel, "—")) -- unavailable, not a made-up duration
+            assert.are.same({ tostring(math.floor(ui:getCurrentPage() / ui.document:getPageCount() * 100)), "%" }, statisticValues(panel, 1))
+            assert.are.same({ "—", "" }, statisticValues(panel, 2)) -- unavailable, not a made-up duration
             ui.menu:hideToolbar()
             for _, stats in ipairs{
                 { book_read_pages = 0, mem_read_pages = 0, avg_time = 300 }, -- plugin's unread-book seed
@@ -473,30 +483,98 @@ describe("ReaderToolbar module", function()
             panel = openFromToolbar("eink/progress")
             local hours = math.ceil(60.6 * (ui.document:getPageCount() - ui:getCurrentPage()) / 3600)
             assert.is_true(has(panel, T(_.ngettext("About 1 hour left", "About %1 hours left", hours), hours)))
-            assert.is_true(has(panel, "25"))
-            assert.is_true(has(panel, _.pgettext("Time", "min")))
+            assert.are.same({ "25", _.pgettext("Time", "min") }, statisticValues(panel, 2))
             assert.is_true(has(panel, _("Reading time")))
             ui.menu:hideToolbar()
             ui.statistics.book_read_time = 7200
             ui.statistics.mem_read_time = 0
             panel = openFromToolbar("eink/progress")
-            assert.is_true(has(panel, "2.0"))
-            assert.is_true(has(panel, _.pgettext("Time", "h")))
+            assert.are.same({ "2.0", _.pgettext("Time", "h") }, statisticValues(panel, 2))
             ui.menu:hideToolbar()
             local lang = _.current_lang
             _.changeLang("zh_CN")
             panel = openFromToolbar("eink/progress")
-            local translated_hours = has(panel, "小时") and has(panel, "阅读时长")
+            local translated_hours = statisticValues(panel, 2)
+            local translated_caption = has(panel.content[1][3], "阅读时长")
+            local translated_estimate = has(panel.content[1][1], "约 " .. hours .. " 小时后读完")
+            local translated_notes = statisticValues(panel, 3)
             ui.menu:hideToolbar()
             ui.statistics.book_read_time = 25 * 60
             panel = openFromToolbar("eink/progress")
-            local translated_minutes = has(panel, "分钟")
+            local translated_minutes = statisticValues(panel, 2)
             _.changeLang(lang)
-            assert.is_true(translated_hours)
-            assert.is_true(translated_minutes)
+            assert.are.same({ "2.0", "小时" }, translated_hours)
+            assert.are.same({ "25", "分钟" }, translated_minutes)
+            assert.are.same({ tostring(ui.annotation:getNumberOfAnnotations()), " 条" }, translated_notes)
+            assert.is_true(translated_estimate)
+            assert.is_true(translated_caption)
             ui.statistics = nil
             ui.menu:hideToolbar()
             UIManager:forceRePaint()
+        end)
+
+        it("should hide the Chinese estimate on the last page even with measured statistics", function()
+            local page, lang = ui:getCurrentPage(), _.current_lang
+            ui.statistics = {
+                isEnabled = function() return true end,
+                book_read_time = 120, book_read_pages = 2, avg_time = 60,
+            }
+            _.changeLang("zh_CN")
+            local ok, err = pcall(function()
+                ui:handleEvent(Event:new("GotoPage", ui.document:getPageCount()))
+                local panel = openFromToolbar("eink/progress")
+                assert.are.same({ "100", "%" }, statisticValues(panel, 1))
+                assert.are.same({ "2", "分钟" }, statisticValues(panel, 2))
+                assert.is_nil(find(panel, function(w)
+                    return type(w.text) == "string" and w.text:find("约", 1, true)
+                end))
+            end)
+            _.changeLang(lang)
+            ui.statistics = nil
+            ui.menu:hideToolbar()
+            ui:handleEvent(Event:new("GotoPage", page))
+            UIManager:forceRePaint()
+            assert(ok, err)
+        end)
+
+        it("should calculate the percentage and remaining time within the current hidden flow", function()
+            local flow_page = 2
+            local mocks = {
+                stub(ui.document, "hasHiddenFlows", function() return true end),
+                stub(ui.document, "getPageFlow", function() return 1 end),
+                stub(ui.document, "getPageNumberInFlow", function() return flow_page end),
+                stub(ui.document, "getTotalPagesInFlow", function(_, flow)
+                    assert.are.equal(1, flow)
+                    return 4
+                end),
+            }
+            ui.statistics = {
+                isEnabled = function() return true end,
+                book_read_time = 3600, book_read_pages = 1, avg_time = 3600,
+            }
+            local ok, err = pcall(function()
+                local panel = openFromToolbar("eink/progress")
+                assert.are.same({ "50", "%" }, statisticValues(panel, 1))
+                assert.is_truthy(find(panel.content[1][1], function(w) return w.text == "About 2 hours left" end))
+                ui.menu:hideToolbar()
+                flow_page = 3
+                ui.statistics.avg_time = 0.5 -- a positive remainder still needs at least one hour
+                panel = openFromToolbar("eink/progress")
+                assert.are.same({ "75", "%" }, statisticValues(panel, 1))
+                assert.is_truthy(find(panel.content[1][1], function(w) return w.text == "About 1 hour left" end))
+                ui.menu:hideToolbar()
+                flow_page = 4
+                panel = openFromToolbar("eink/progress")
+                assert.are.same({ "100", "%" }, statisticValues(panel, 1))
+                assert.is_nil(find(panel, function(w)
+                    return type(w.text) == "string" and w.text:find("About", 1, true)
+                end))
+            end)
+            for _, mock in ipairs(mocks) do mock:revert() end
+            ui.statistics = nil
+            ui.menu:hideToolbar()
+            UIManager:forceRePaint()
+            assert(ok, err)
         end)
 
         it("should navigate chapters from the capsule ends, disable boundaries, and retain a tapped position", function()
@@ -642,7 +720,7 @@ describe("ReaderToolbar module", function()
             tapWidget(bookmarkButton(bars))
             UIManager:forceRePaint()
             assert.are.equal("eink/bookmark-on", bookmarkButton(bars).icon)
-            assert.is_truthy(find(panel, function(w) return w.text == "1" end))
+            assert.are.same({ "1", " " .. _.ngettext("item", "items", 1) }, statisticValues(panel, 3))
 
             local track = find(panel, function(w) return w.on_jump ~= nil end)
             tap(track.dimen.x + track.width - track.end_width / 2, track.dimen.y + track.dimen.h / 2)
@@ -661,7 +739,7 @@ describe("ReaderToolbar module", function()
             tapWidget(bookmarkButton(bars)) -- remove the test bookmark
             UIManager:forceRePaint()
             assert.is_false(ui.bookmark:isPageBookmarked())
-            assert.is_truthy(find(panel, function(w) return w.text == "0" end))
+            assert.are.same({ "0", " " .. _.ngettext("item", "items", 0) }, statisticValues(panel, 3))
             ui.menu:hideToolbar()
             UIManager:forceRePaint()
         end)
@@ -1122,7 +1200,7 @@ describe("ReaderToolbar module", function()
             tap(track.dimen.x + track.width - track.inset, track.dimen.y + track.dimen.h / 2)
             UIManager:forceRePaint()
             assert.are.equal(ui.document:getPageCount(), ui:getCurrentPage())
-            assert.is_truthy(find(panel, function(w) return w.text == "100" end))
+            assert.are.same({ "100", "%" }, statisticValues(panel, 1))
             closeReader(ui)
         end)
 
@@ -1164,7 +1242,7 @@ describe("ReaderToolbar module", function()
                     tapWidget(findIcon(ui.menu.bars.bottom, "eink/progress"))
                     UIManager:forceRePaint()
                     local panel = ui.menu.panel
-                    assert.is_truthy(find(panel, function(w) return w.text == "2" end))
+                    assert.are.same({ "2", _.pgettext("Time", "min") }, statisticValues(panel, 2))
                     assert.is_truthy(find(panel, function(w)
                         return type(w.text) == "string" and w.text:find("About", 1, true)
                     end))

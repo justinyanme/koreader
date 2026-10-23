@@ -165,17 +165,25 @@ function ReaderProgressPanel:buildContent()
         local title = toc:getTocTitleByPage(p)
         return title ~= "" and title or ui.doc_props.display_title
     end
-    local percent = math.floor(page / page_count * 100)
+    local current_page, total_pages = page, page_count
+    if ui.document:hasHiddenFlows() then
+        local flow = ui.document:getPageFlow(page)
+        current_page = ui.document:getPageNumberInFlow(page)
+        total_pages = ui.document:getTotalPagesInFlow(flow)
+    end
+    local percent = math.floor(current_page / total_pages * 100)
+    local remaining_pages = total_pages - current_page
     local stats = ui.statistics
     local duration, unit, estimate = "—", "", nil
     if stats and stats:isEnabled() then
+        -- Use per-page-capped saved time plus timed session visits, as the estimate and notes page do, not the raw lifetime sum.
         local minutes = math.floor(((stats.book_read_time or 0) + (stats.mem_read_time or 0)) / 60)
         duration = minutes < 60 and tostring(minutes) or string.format("%.1f", minutes / 60)
         unit = minutes < 60 and C_("Time", "min") or C_("Time", "h")
         local read_pages = (stats.book_read_pages or 0) + (stats.mem_read_pages or 0)
         -- The plugin seeds avg_time even for an unread book: only use measured page times.
-        if read_pages > 0 and stats.avg_time and stats.avg_time > 0 and stats.avg_time < math.huge then
-            local hours = math.ceil(stats.avg_time * (page_count - page) / 3600)
+        if remaining_pages > 0 and read_pages > 0 and stats.avg_time and stats.avg_time > 0 and stats.avg_time < math.huge then
+            local hours = math.max(1, math.ceil(stats.avg_time * remaining_pages / 3600))
             estimate = T(N_("About 1 hour left", "About %1 hours left", hours), hours)
         end
     end
@@ -197,7 +205,7 @@ function ReaderProgressPanel:buildContent()
             divider(),
             statistic(duration, unit, _("Reading time"), column_w),
             divider(),
-            statistic(tostring(count), N_(" item", " items", count), C_("Notes page", "Notes"),
+            statistic(tostring(count), " " .. N_("item", "items", count), C_("Notes page", "Notes"),
                 w - 2 * column_w - 2 * rule, function() ui:handleEvent(Event:new("ShowNotes")) end),
         },
         VerticalSpan:new{ width = Screen:scaleBySize(20) },
