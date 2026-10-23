@@ -12,13 +12,15 @@ several can run at once; tapping a marked cover opens the book. Holding a cover
 opens its sheet (other formats, re-download).
 
 Refreshes: opening and closing the page, pushing and popping pages, turning
-pages and sheets are "ui" on their own rect; download progress is "fast" on the
-tile's band and caption; covers arriving are one "ui" repaint of the grid.
+pages and sheets are "ui" on their own rect, the confirmation layer "ui" on the
+whole screen it pales; download progress is "fast" on the tile's band and
+caption; covers arriving are one "ui" repaint of the grid.
 ]]
 
 local BookSource = require("apps/opds/booksource")
 local BottomSheet = require("ui/widget/bottomsheet")
 local CenterContainer = require("ui/widget/container/centercontainer")
+local ConfirmLayer = require("ui/widget/confirmlayer")
 local Device = require("device")
 local EinkControls = require("ui/widget/einkcontrols")
 local Font = require("ui/font")
@@ -1322,21 +1324,18 @@ function BookSourceView:showSourceActions(source)
     })
 end
 
+--- The confirmation layer over the paled page: delete, or cancel.
 function BookSourceView:confirmDelete(source)
-    local w = BottomSheet.getContentWidth()
-    local half = math.floor((w - dp(8)) / 2)
-    self:openSheet(_("Delete source"), VerticalGroup:new{
-        align = "left",
-        TextBoxWidget:new{ text = T(_("Delete “%1”? Books you downloaded stay on the device."), source.title or ""),
-            face = Font:getFace("ui_body"), width = w },
-        VerticalSpan:new{ width = dp(14) },
-        HorizontalGroup:new{
-            EinkControls.PillButton:new{ text = _("Cancel"), width = half, callback = function() self:closeSheet() end },
-            HorizontalSpan:new{ width = dp(8) },
-            EinkControls.PillButton:new{ text = _("Delete"), solid = true, width = half,
-                callback = self:action(function() self:deleteSource(source) end) },
-        },
-    })
+    self:closeSheet()
+    local layer
+    layer = ConfirmLayer:new{
+        text = T(_("Delete “%1”? Books you downloaded stay on the device."), source.title or ""),
+        actions = { { text = _("Delete"), callback = function() self:deleteSource(source) end } },
+        on_close = function()
+            if self.sheet == layer then self.sheet = nil end
+        end,
+    }
+    self:showSheet(layer)
 end
 
 function BookSourceView:deleteSource(source)
