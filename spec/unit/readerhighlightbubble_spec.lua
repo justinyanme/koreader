@@ -223,7 +223,8 @@ describe("ReaderHighlightBubble module", function()
 
     -- a point inside the first visible box of a highlight
     local function highlightPoint(ui)
-        local r = ui.highlight:boxToScreen(ui.view.highlight.visible_boxes[1])
+        local box = ui.view.highlight.visible_boxes[1]
+        local r = ui.view:pageToScreenTransform(box.page, box.rect)
         return Geom:new{ x = r.x + math.floor(r.w / 2), y = r.y + math.floor(r.h / 2) }
     end
 
@@ -232,6 +233,22 @@ describe("ReaderHighlightBubble module", function()
             local w = UIManager._window_stack[i].widget
             if w.input and w.getRefreshRegion then return w end
         end
+    end
+
+    -- Paint saved decorations without body text so underline pixels cannot hide among glyphs.
+    local function savedInk(ui)
+        local Blitbuffer = require("ffi/blitbuffer")
+        local bb = Blitbuffer.new(Screen:getWidth(), Screen:getHeight(), Blitbuffer.TYPE_BB8)
+        bb:fill(Blitbuffer.COLOR_WHITE)
+        ui.view:drawSavedHighlight(bb, 0, 0)
+        local count = 0
+        for y = 0, bb:getHeight() - 1 do
+            for x = 0, bb:getWidth() - 1 do
+                if bb:getPixel(x, y):getColor8().a < 0xFF then count = count + 1 end
+            end
+        end
+        bb:free()
+        return count
     end
 
     describe("with an EPUB", function()
@@ -555,7 +572,7 @@ describe("ReaderHighlightBubble module", function()
             sheet.input:setText("A thought")
             refreshes = refreshesOf(function() tapWidget(find(sheet, function(w) return w.text == "Save" and w.callback end)) end)
             assert.is_nil(noteSheet())
-            assertNoFullScreen(refreshes)
+            assert.is_true(hasRefresh(refreshes, "ui", Screen:getSize()))
             assert.are.equal("A thought", ui.annotation.annotations[1].note)
 
             closeReader(ui)
@@ -591,15 +608,410 @@ describe("ReaderHighlightBubble module", function()
             assert.is_true(lines_repainted)
         end)
 
+        it("should delete a highlight with a thought in one tap from its popover", function()
+            select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
+            tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
+            UIManager:forceRePaint()
+            tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+            UIManager:forceRePaint()
+            noteSheet().input:setText("Attached thought")
+            tapWidget(cell(noteSheet(), "Save"))
+            UIManager:forceRePaint()
+            local p = highlightPoint(ui)
+            tap(p.x, p.y)
+            UIManager:forceRePaint()
+            assert.is_truthy(cell(ui.highlight.highlight_dialog, "Delete note"))
+            tapWidget(cell(ui.highlight.highlight_dialog, "Delete highlight"))
+            assert.are.equal(0, #ui.annotation.annotations)
+            assert.is_nil(ui.highlight.highlight_dialog)
+            assert.is_nil(shown(require("ui/widget/confirmlayer")))
+        end)
+
+        it("should save a direct thought without a highlight and delete the whole thought when cleared", function()
+            select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
+            tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+            UIManager:forceRePaint()
+            local sheet = noteSheet()
+            sheet.input:setText("A direct thought")
+            tapWidget(find(sheet, function(w) return w.text == "Save" and w.callback end))
+            UIManager:forceRePaint()
+            assert.are.equal("note", ui.annotation.annotations[1].origin)
+            assert.are.equal("A direct thought", ui.annotation.annotations[1].note)
+            assert.are.equal(0, savedInk(ui))
+            local mark = ui.view.view_modules.note_marks.targets[1]
+            assert.is_true(inked(mark.x, mark.y, mark.x + mark.w - 1, mark.y + mark.h - 1))
+            for _, r in ipairs(ui.highlight:highlightRects(1)) do
+                for y = r.y, r.y + r.h - 1 do
+                    local full_line = true
+                    for x = r.x, r.x + r.w - 1 do
+                        if gray(x, y) >= 0x80 then full_line = false break end
+                    end
+                    assert.is_false(full_line, "a direct thought must not underline its text")
+                end
+            end
+            closeReader(ui)
+            ui = openReader(sample_epub)
+            assert.are.equal("note", ui.annotation.annotations[1].origin)
+            assert.are.equal(0, savedInk(ui))
+            assert.is_truthy(ui.view.view_modules.note_marks.targets[1])
+            local p = highlightPoint(ui)
+            assert.is_nil(ui.highlight:onTap(nil, { pos = p }))
+            assert.is_nil(ui.highlight.highlight_dialog, "only the thought marker should open its actions")
+            mark = ui.view.view_modules.note_marks.targets[1]
+            tap(mark.x + mark.w / 2, mark.y + mark.h / 2)
+            UIManager:forceRePaint()
+            assert.are.equal(ui.highlight.thought_page, topWidget())
+            tapWidget(cell(topWidget(), "Thought"))
+            UIManager:forceRePaint()
+            tapWidget(cell(topWidget(), "Edit note"))
+            UIManager:forceRePaint()
+            sheet = noteSheet()
+            assert.are.equal("A direct thought", sheet.input:getText())
+            sheet.input:setText("")
+            tapWidget(find(sheet, function(w) return w.text == "Save" and w.callback end))
+            assert.are.equal(0, #ui.annotation.annotations)
+        end)
+
+        it("should select the lowest index when equal thought markers overlap, including sparse indexes", function()
+            select(ui, Geom:new{ x = 400, y = 110 })
+            tapWidget(cell(topWidget(), "Highlight"))
+            ui.highlight:closeBubble()
+            ui:handleEvent(Event:new("GotoPage", 11))
+            UIManager:forceRePaint()
+            for _, note in ipairs{ "First overlapping thought", "Second overlapping thought" } do
+                select(ui, Geom:new{ x = 400, y = 170 })
+                tapWidget(cell(topWidget(), "Write note"))
+                UIManager:forceRePaint()
+                noteSheet().input:setText(note)
+                tapWidget(cell(noteSheet(), "Save"))
+                UIManager:forceRePaint()
+                if shown(Toast) then UIManager:close(shown(Toast)) end
+            end
+            local marks = ui.view.view_modules.note_marks.targets
+            assert.is_nil(marks[1])
+            assert.is_not_nil(marks[2])
+            assert.are.same(marks[2], marks[3])
+            tapWidget({ dimen = marks[2] })
+            UIManager:forceRePaint()
+            local cards = ui.highlight.thought_page
+            assert.is_not_nil(cards)
+            assert.are.equal(ui.annotation.annotations[2], cards.item)
+        end)
+
+        it("should show creation time with a lock and an inline delete action in thought detail", function()
+            select(ui, Geom:new{ x = 400, y = 110 })
+            tapWidget(cell(topWidget(), "Write note"))
+            UIManager:forceRePaint()
+            noteSheet().input:setText("Dated thought")
+            tapWidget(cell(noteSheet(), "Save"))
+            UIManager:forceRePaint()
+            if shown(Toast) then UIManager:close(shown(Toast)) end
+            local original_time = os.time
+            local now = original_time{ year = 2026, month = 10, day = 24, hour = 12, min = 34, sec = 30 }
+            local clock = stub(os, "time", function(t) return t and original_time(t) or now end)
+            local ok, err = pcall(function()
+                for _, case in ipairs{
+                    { "2026-10-24 12:34:00", "Written Just now  " },
+                    { "2026-10-24 12:30:00", "Written Today 12:30  " },
+                    { "2026-10-23 23:59:00", "Written 2026-10-23  " },
+                } do
+                    ui.annotation.annotations[1].datetime = case[1]
+                    ui.annotation.annotations[1].datetime_updated = "2026-10-24 12:34:30"
+                    tapWidget({ dimen = ui.view.view_modules.note_marks.targets[1] })
+                    UIManager:forceRePaint()
+                    local cards = ui.highlight.thought_page
+                    assert.is_not_nil(cards)
+                    tapWidget(cell(cards, "Thought"))
+                    UIManager:forceRePaint()
+                    local written = find(cards, function(w) return w.text == case[2] end)
+                    assert.is_not_nil(written)
+                    local delete = find(cards, function(w) return w.text == "Delete" end)
+                    assert.is_not_nil(delete)
+                    local row = find(cards, function(w)
+                        return w[1] == written and w[2] and find(w[2], function(c) return c == delete end) ~= nil
+                    end)
+                    assert.is_not_nil(row)
+                    assert.is_true(row:getSize().h <= Screen:scaleBySize(44))
+                    assert.is_truthy(find(cards, function(w) return w.icon == "eink/lock" end), "privacy lock")
+                    local body = find(cards, function(w) return w.text == "Dated thought" end)
+                    assert.are.equal(require("ui/font"):getFace("ui_body", 16), body.face)
+                    tapWidget(cards.bar.back)
+                    UIManager:forceRePaint()
+                end
+            end)
+            clock:revert()
+            assert(ok, err)
+        end)
+
+        it("should dismiss thought cards on the washed page without turning the reader", function()
+            select(ui, Geom:new{ x = 400, y = 110 })
+            tapWidget(cell(topWidget(), "Write note"))
+            UIManager:forceRePaint()
+            noteSheet().input:setText("Scrim thought")
+            tapWidget(cell(noteSheet(), "Save"))
+            UIManager:forceRePaint()
+            if shown(Toast) then UIManager:close(shown(Toast)) end
+            local original = ui.document:getXPointer()
+            local function openCards()
+                tapWidget({ dimen = ui.view.view_modules.note_marks.targets[1] })
+                UIManager:forceRePaint()
+                assert.is_not_nil(ui.highlight.thought_page)
+                return ui.highlight.thought_page
+            end
+            openCards()
+            local refreshes = refreshesOf(function() tap(5, math.floor(Screen:getHeight() / 2)) end)
+            assert.is_nil(ui.highlight.thought_page)
+            assert.are.equal(ui, topWidget())
+            assert.are.equal(original, ui.document:getXPointer())
+            assert.is_true(hasRefresh(refreshes, "ui", Screen:getSize()))
+            local cards = openCards()
+            tap(Screen:getWidth() - 5, Screen:getHeight() - 5) -- disabled pager, not the scrim
+            assert.are.equal(cards, ui.highlight.thought_page)
+            tapWidget(cell(cards, "Thought"))
+            UIManager:forceRePaint()
+            tap(5, math.floor(Screen:getHeight() / 2))
+            assert.are.equal(cards, ui.highlight.thought_page)
+        end)
+
         it("should drop a highlight made for a note that is cancelled", function()
             select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
             tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
             UIManager:forceRePaint()
             local sheet = noteSheet()
-            assert.are.equal(1, #ui.annotation.annotations)
-            tapWidget(find(sheet, function(w) return w.text == "Cancel" and w.callback end))
+            assert.are.equal(0, #ui.annotation.annotations)
+            tapWidget(cell(sheet, "Back"))
             assert.is_nil(noteSheet())
             assert.are.equal(0, #ui.annotation.annotations)
+        end)
+
+        it("should keep a direct thought separate from an overlapping highlight", function()
+            select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
+            local range = require("util").tableDeepCopy(ui.highlight.selected_text)
+            tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
+            ui.highlight:closeBubble()
+            UIManager:forceRePaint()
+            local underline_pixels = savedInk(ui)
+            local index = ui.annotation:addNote(range, "Overlapping thought")
+            UIManager:setDirty(ui, "ui")
+            UIManager:forceRePaint()
+            assert.are.equal(underline_pixels, savedInk(ui))
+            local p = highlightPoint(ui)
+            tap(p.x, p.y)
+            UIManager:forceRePaint()
+            assert.is_truthy(cell(ui.highlight.highlight_dialog, "Delete highlight"))
+            assert.is_nil(cell(ui.highlight.highlight_dialog, "Delete note"))
+            ui.highlight:closeBubble()
+            local mark = ui.view.view_modules.note_marks.targets[index]
+            tap(mark.x + mark.w / 2, mark.y + mark.h / 2)
+            UIManager:forceRePaint()
+            tapWidget(cell(topWidget(), "Thought"))
+            UIManager:forceRePaint()
+            tapWidget(cell(topWidget(), "Delete"))
+            UIManager:forceRePaint()
+            tapWidget(cell(topWidget(), "Delete"))
+            UIManager:forceRePaint()
+            assert.are.equal(1, #ui.annotation.annotations)
+            assert.is_nil(ui.annotation.annotations[1].note)
+            assert.are.equal(underline_pixels, savedInk(ui))
+        end)
+
+        it("should preserve a legacy thought without origin as a highlight after reopening", function()
+            select(ui, Geom:new{ x = 400, y = 110 })
+            tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+            UIManager:forceRePaint()
+            noteSheet().input:setText("Legacy thought")
+            tapWidget(cell(noteSheet(), "Save"))
+            closeReader(ui)
+            local settings = DocSettings:open(sample_epub)
+            local annotations = settings:readSetting("annotations")
+            annotations[1].origin = nil -- old sidecars cannot distinguish how a thought was created
+            settings:saveSetting("annotations", annotations)
+            settings:flush()
+            ui = openReader(sample_epub)
+            assert.is_nil(ui.annotation.annotations[1].origin)
+            assert.is_true(savedInk(ui) > 0)
+            local mark = ui.view.view_modules.note_marks.targets[1]
+            tap(mark.x + mark.w / 2, mark.y + mark.h / 2)
+            UIManager:forceRePaint()
+            tapWidget(cell(topWidget(), "Thought"))
+            UIManager:forceRePaint()
+            tapWidget(cell(topWidget(), "Delete"))
+            UIManager:forceRePaint()
+            tapWidget(cell(topWidget(), "Delete"))
+            UIManager:forceRePaint()
+            assert.are.equal(1, #ui.annotation.annotations)
+            assert.is_nil(ui.annotation.annotations[1].note)
+            assert.is_true(savedInk(ui) > 0)
+        end)
+
+        it("should wash the page and paint only a thought marker in night mode", function()
+            local night = G_reader_settings:readSetting("night_mode")
+            ui:handleEvent(Event:new("ToggleNightMode"))
+            local ok, err = pcall(function()
+                UIManager:forceRePaint()
+                assert.are.equal(1, Screen.bb:getInverse())
+                select(ui, Geom:new{ x = 400, y = 110 })
+                tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+                UIManager:forceRePaint()
+                local sheet = noteSheet()
+                assert.is_false(inked(0, 0, Screen:getWidth() - 1, sheet.sheet_y - 1))
+                sheet.input:setText("Night thought")
+                UIManager:forceRePaint()
+                assert.is_false(inked(0, 0, Screen:getWidth() - 1, sheet.sheet_y - 1))
+                tapWidget(cell(sheet, "Save"))
+                UIManager:forceRePaint()
+                assert.are.equal(0, savedInk(ui))
+                local marks = ui.view.view_modules.note_marks
+                local Blitbuffer = require("ffi/blitbuffer")
+                local bb = Blitbuffer.new(Screen:getWidth(), Screen:getHeight(), Blitbuffer.TYPE_BB8)
+                bb:setInverse(1)
+                bb:fill(Blitbuffer.COLOR_WHITE)
+                marks:paintTo(bb, 0, 0)
+                local r, visible = marks.targets[1], false
+                for y = r.y, r.y + r.h - 1 do
+                    for x = r.x, r.x + r.w - 1 do
+                        if bb:getPixelP(x, y)[0]:getColor8().a >= 0x80 then visible = true end
+                    end
+                end
+                bb:free()
+                assert.is_true(visible, "the thought marker should be light on the physical dark page")
+                assert.is_true(inked(0, 0, Screen:getWidth() - 1, math.floor(Screen:getHeight() / 2)))
+            end)
+            if Screen.bb:getInverse() == 1 then ui:handleEvent(Event:new("ToggleNightMode")) end
+            G_reader_settings:saveSetting("night_mode", night)
+            assert(ok, err)
+        end)
+
+        it("should close the thought editor and wash when the book closes externally", function()
+            select(ui, Geom:new{ x = 400, y = 110 })
+            tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+            UIManager:forceRePaint()
+            local sheet = noteSheet()
+            sheet.input:setText("unsaved draft")
+            ui:onClose()
+            assert.is_nil(noteSheet())
+            for _, window in ipairs(UIManager._window_stack) do
+                assert.are_not.equal(sheet.wash, window.widget)
+                assert.are_not.equal(sheet.input.keyboard, window.widget)
+            end
+            assert.are.equal(0, #DocSettings:open(sample_epub):readSetting("annotations"))
+            UIManager:quit()
+            ui = openReader(sample_epub)
+            assert.is_nil(noteSheet())
+        end)
+
+        it("should leave an unchanged empty thought alone when saving a plain highlight", function()
+            select(ui, Geom:new{ x = 400, y = 110 })
+            tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
+            UIManager:forceRePaint()
+            local item = ui.annotation.annotations[1]
+            local before = require("util").tableDeepCopy(item)
+            tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+            UIManager:forceRePaint()
+            spy.on(ui.annotation, "onAnnotationsModified")
+            local ok, err = pcall(function()
+                local refreshes = refreshesOf(function() tapWidget(cell(noteSheet(), "Save")) end)
+                assert.spy(ui.annotation.onAnnotationsModified).was_not_called()
+                -- Closing the wash still needs a page redraw even though the note did not change.
+                assert.is_true(hasRefresh(refreshes, "ui", Screen:getSize()))
+            end)
+            ui.annotation.onAnnotationsModified:revert()
+            assert(ok, err)
+            assert.are.same(before, item)
+        end)
+
+        it("should wash the inert page behind the compact editor and restore it on Back", function()
+            select(ui, Geom:new{ x = 400, y = 110 })
+            local pos = ui.document:getXPointer()
+            local refreshes = refreshesOf(function() tapWidget(cell(ui.highlight.highlight_dialog, "Write note")) end)
+            local sheet = noteSheet()
+            assert.is_true(hasRefresh(refreshes, "ui", Screen:getSize()))
+            assert.is_true(sheet.frame:getSize().h <= Screen:scaleBySize(110))
+            assert.are.equal(Screen:getHeight() - sheet.input:getKeyboardDimen().h,
+                sheet.sheet_y + sheet.frame:getSize().h)
+            assert.is_false(inked(0, 0, Screen:getWidth() - 1, sheet.sheet_y - 1))
+            tap(20, 20)
+            UIManager:sendEvent(Event:new("Gesture", { ges = "swipe", direction = "west",
+                pos = Geom:new{ x = 20, y = 20 } }))
+            assert.are.equal(pos, ui.document:getXPointer())
+            assert.are.equal(sheet, noteSheet())
+            sheet.input:setText("unsaved draft\nsecond line")
+            UIManager:forceRePaint()
+            assert.is_false(inked(0, 0, Screen:getWidth() - 1, sheet.sheet_y - 1))
+            refreshes = refreshesOf(function() tapWidget(cell(sheet, "Back")) end)
+            assert.is_nil(noteSheet())
+            assert.are.equal(0, #ui.annotation.annotations)
+            assert.are.equal(pos, ui.document:getXPointer())
+            assert.is_true(inked(0, 0, Screen:getWidth() - 1, math.floor(Screen:getHeight() / 2)))
+            assert.is_true(hasRefresh(refreshes, "ui", Screen:getSize()))
+        end)
+
+        it("should retain a large-font multiline draft when the keyboard closes, and discard it on the next Back", function()
+            local Font = require("ui/font")
+            local Key = require("device/key")
+            local old_scale = Font:getUIScale()
+            local keyboard_enabled = G_reader_settings:readSetting("virtual_keyboard_enabled")
+            G_reader_settings:saveSetting("virtual_keyboard_enabled", true)
+            Font:setUIScale(1.35)
+            local ok, err = pcall(function()
+                select(ui, Geom:new{ x = 400, y = 110 })
+                tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+                UIManager:forceRePaint()
+                local sheet = noteSheet()
+                sheet.input:setText(string.rep("A long thought\\n", 20))
+                UIManager:forceRePaint()
+                local pos = ui.document:getXPointer()
+                UIManager:sendEvent(Event:new("KeyPress", Key:new("LPgFwd", {})))
+                assert.are.equal(pos, ui.document:getXPointer())
+                UIManager:sendEvent(Event:new("KeyPress", Key:new("Back", {})))
+                UIManager:forceRePaint()
+                assert.are.equal(sheet, noteSheet())
+                assert.is_false(sheet.input:isKeyboardVisible())
+                assert.are.equal(Screen:getHeight(), sheet.sheet_y + sheet.frame:getSize().h)
+                assert.are.equal(string.rep("A long thought\\n", 20), sheet.input:getText())
+                tapWidget(sheet.input)
+                UIManager:forceRePaint()
+                assert.is_true(sheet.input:isKeyboardVisible())
+                assert.is_true(sheet.input.dimen.x + sheet.input.dimen.w <= Screen:getWidth())
+                assert.is_true(cell(sheet, "Save").dimen.x + cell(sheet, "Save").dimen.w <= Screen:getWidth())
+                UIManager:sendEvent(Event:new("KeyPress", Key:new("Back", {})))
+                UIManager:sendEvent(Event:new("KeyPress", Key:new("Back", {})))
+                UIManager:forceRePaint()
+                assert.is_nil(noteSheet())
+                assert.are.equal(0, #ui.annotation.annotations)
+                assert.are.equal(pos, ui.document:getXPointer())
+            end)
+            Font:setUIScale(old_scale)
+            G_reader_settings:saveSetting("virtual_keyboard_enabled", keyboard_enabled)
+            assert(ok, err)
+        end)
+
+        it("should delete a direct thought cleared from the original bookmark editor", function()
+            select(ui, Geom:new{ x = 400, y = 110 })
+            tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+            UIManager:forceRePaint()
+            noteSheet().input:setText("Original entry compatibility")
+            tapWidget(cell(noteSheet(), "Save"))
+            UIManager:forceRePaint()
+            ui:handleEvent(Event:new("ShowBookmark"))
+            UIManager:forceRePaint()
+            local row = find(ui.bookmark.bookmark_menu, function(w) return w.entry and w.entry.note and w.dimen end)
+            UIManager:sendEvent(Event:new("Gesture", { ges = "hold", pos = Geom:new{
+                x = row.dimen.x + math.floor(row.dimen.w / 2),
+                y = row.dimen.y + math.floor(row.dimen.h / 2),
+            } }))
+            UIManager:forceRePaint()
+            tapWidget(cell(topWidget(), "Edit note"))
+            UIManager:forceRePaint()
+            local dialog = shown(require("ui/widget/inputdialog"))
+            assert.are.equal("Original entry compatibility", dialog:getInputText())
+            dialog:setInputText("")
+            tapWidget(cell(dialog, "Save"))
+            UIManager:forceRePaint()
+            assert.are.equal(0, #ui.annotation.annotations)
+            assert.is_nil(find(topWidget(), function(w) return w.entry and w.entry.note end))
+            UIManager:close(ui.bookmark.bookmark_menu)
+            ui.bookmark.bookmark_menu = nil
         end)
 
         it("should not bring back a looked-up highlight on a long-press on nothing (C1)", function()
@@ -633,6 +1045,241 @@ describe("ReaderHighlightBubble module", function()
             ui.highlight:onSetHighlightAction(1, true) -- "ask"
             assert(ok, err)
         end)
+    end)
+
+    describe("thought lifecycle through ReaderUI", function()
+        setup(function()
+            Replacements.reader_menu = require("apps/reader/modules/readertoolbar")
+        end)
+        teardown(function() Replacements.reader_menu = nil end)
+        for _, file in ipairs{ sample_epub, sample_pdf } do
+            it("should jump from a distant page to a thought quote and return in " .. file, function()
+                local ui = openReader(file, true)
+                if ui.paging then ui:handleEvent(Event:new("SetScrollMode", false)) end
+                ui:handleEvent(Event:new("GotoPage", 10))
+                UIManager:forceRePaint()
+                local p = ui.paging and Geom:new{ x = 430, y = 210 } or Geom:new{ x = 400, y = 110 }
+                select(ui, p)
+                tapWidget(cell(topWidget(), "Write note"))
+                UIManager:forceRePaint()
+                noteSheet().input:setText("Distant quote")
+                tapWidget(cell(noteSheet(), "Save"))
+                UIManager:forceRePaint()
+                if shown(Toast) then UIManager:close(shown(Toast)) end
+                local item = ui.annotation.annotations[1]
+                local source_page = ui:getCurrentPage()
+                ui:handleEvent(Event:new("GotoPage", math.min(source_page + 5, ui.document:getPageCount())))
+                UIManager:forceRePaint()
+                local original_page = ui:getCurrentPage()
+                local original = ui.rolling and ui.document:getXPointer() or original_page
+                assert.is_true(math.abs(original_page - source_page) >= 4)
+                local count = #ui.link.location_stack
+                -- The marker is off-screen: open its existing production card entry, then tap the quote.
+                ui.highlight:showThoughtCard(1)
+                UIManager:forceRePaint()
+                local cards = ui.highlight.thought_page
+                assert.is_not_nil(cards)
+                tapWidget(find(cards, function(w) return w.text == item.text end))
+                UIManager:forceRePaint()
+                assert.is_nil(ui.highlight.thought_page)
+                local expected_page = ui.rolling and ui.document:getPageFromXPointer(item.page) or item.page
+                assert.are.equal(expected_page, ui:getCurrentPage())
+                if ui.rolling then assert.are.equal(item.page, ui.rolling.xpointer) end
+                assert.are.equal(count + 1, #ui.link.location_stack)
+                ui:handleEvent(Event:new("GoBackLink"))
+                UIManager:forceRePaint()
+                assert.are.equal(original, ui.rolling and ui.document:getXPointer() or ui:getCurrentPage())
+                closeReader(ui)
+            end)
+            it("should open thought cards and detail, edit, return and delete by origin in " .. file, function()
+                local ui = openReader(file, true)
+                if file == sample_pdf then
+                    ui:handleEvent(Event:new("SetScrollMode", false))
+                    ui.paging:onGotoPage(10)
+                    UIManager:forceRePaint()
+                else
+                    ui.rolling:onGotoPage(10)
+                    UIManager:forceRePaint()
+                end
+                local p = file == sample_pdf and Geom:new{ x = 430, y = 210 } or Geom:new{ x = 400, y = 110 }
+                local function pressWord()
+                    UIManager:sendEvent(Event:new("Gesture", { ges = "hold", pos = p }))
+                    UIManager:forceRePaint()
+                    UIManager:sendEvent(Event:new("Gesture", { ges = "hold_release", pos = p }))
+                    UIManager:forceRePaint()
+                end
+                local function action(label)
+                    local target = cell(topWidget(), label)
+                    assert.is_truthy(target, debug.traceback(label .. " is available"))
+                    tapWidget(target)
+                    UIManager:forceRePaint()
+                end
+                local function submit(text)
+                    local sheet = noteSheet()
+                    sheet.input:setText(text)
+                    tapWidget(cell(sheet, "Save"))
+                    UIManager:forceRePaint()
+                    local toast = shown(Toast)
+                    if toast then UIManager:close(toast) end
+                    UIManager:forceRePaint()
+                end
+                local function reopen()
+                    if ui.highlight.thought_page then
+                        tapWidget(ui.highlight.thought_page.bar.back)
+                        UIManager:forceRePaint()
+                    end
+                    local mark = ui.view.view_modules.note_marks.targets[1]
+                    assert.is_not_nil(mark)
+                    tapWidget({ dimen = mark })
+                    UIManager:forceRePaint()
+                    local cards = ui.highlight.thought_page
+                    assert.is_not_nil(cards)
+                    assert.are.equal(cards, topWidget())
+                    assert.is_false(cards.detail)
+                    assert.is_truthy(find(cards, function(w) return w.text == ui.annotation.annotations[1].note end), "thought text visible in cards")
+                    local refreshes = refreshesOf(function() action("Thought") end)
+                    assert.is_true(hasRefresh(refreshes, "ui", Screen:getSize()))
+                    assert.is_true(cards.detail)
+                    assert.is_truthy(find(cards, function(w) return w.text == "Only visible to you" end), "local visibility label")
+                    assert.is_nil(cell(cards, "Like"))
+                    assert.is_nil(cell(cards, "Comment"))
+                end
+                pressWord()
+                action("Write note")
+                submit("   \n  ")
+                assert.are.equal(0, #ui.annotation.annotations)
+                pressWord()
+                action("Write note")
+                submit("Direct thought")
+                assert.are.equal("note", ui.annotation.annotations[1].origin)
+                assert.are.same({ 0, 1 }, { ui.annotation:getNumberOfHighlightsAndNotes() })
+                reopen()
+                action("Edit note")
+                noteSheet().input:setText("discarded edit")
+                tapWidget(cell(noteSheet(), "Back"))
+                UIManager:forceRePaint()
+                assert.are.equal("Direct thought", ui.annotation.annotations[1].note)
+                action("Edit note")
+                submit("Edited direct thought")
+                assert.are.equal("Edited direct thought", ui.annotation.annotations[1].note)
+                assert.is_truthy(find(topWidget(), function(w) return w.text == "Edited direct thought" end), "saved edit visible in detail")
+                reopen()
+                action("Delete")
+                tapWidget(cell(topWidget(), "Cancel"))
+                UIManager:forceRePaint()
+                assert.are.equal(1, #ui.annotation.annotations)
+                reopen()
+                action("Delete")
+                tapWidget(cell(topWidget(), "Delete"))
+                UIManager:forceRePaint()
+                assert.are.equal(0, #ui.annotation.annotations)
+                assert.are.same({ 0, 0 }, { ui.annotation:getNumberOfHighlightsAndNotes() })
+                tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
+                UIManager:forceRePaint()
+                local progress = find(ui.menu.bars.bottom, function(w) return w.icon == "eink/progress" end)
+                tapWidget(progress)
+                UIManager:forceRePaint()
+                local notes = find(ui.menu.panel, function(w)
+                    return w.ges_events and w ~= ui.menu.panel
+                        and find(w, function(c) return c.text == "Notes" end) ~= nil
+                end)
+                assert.is_not_nil(notes)
+                assert.is_truthy(find(notes, function(w) return w.text == "0" end), "progress note count after deletion")
+                tapWidget(notes)
+                UIManager:forceRePaint()
+                assert.are.equal(0, ui.menu.drawer.count)
+                tapWidget(ui.menu.drawer.bar.back)
+                UIManager:forceRePaint()
+                pressWord()
+                action("Highlight")
+                local item = ui.annotation.annotations[1]
+                assert.is_nil(item.origin) -- existing annotations with no origin are highlights
+                local drawer = item.drawer
+                action("Write note")
+                submit("Attached thought")
+                reopen()
+                action("Delete")
+                tapWidget(cell(topWidget(), "Delete"))
+                UIManager:forceRePaint()
+                assert.are.equal(1, #ui.annotation.annotations)
+                assert.is_nil(item.note)
+                assert.are.equal(drawer, item.drawer)
+                assert.are.same({ 1, 0 }, { ui.annotation:getNumberOfHighlightsAndNotes() })
+                tapWidget({ dimen = ui.highlight:highlightRects(1)[1] })
+                UIManager:forceRePaint()
+                action("Write note")
+                submit("Persisted thought")
+                closeReader(ui)
+                ui = openReader(file)
+                assert.are.equal("Persisted thought", ui.annotation.annotations[1].note)
+                assert.is_nil(ui.annotation.annotations[1].origin)
+                reopen()
+                local detail = topWidget()
+                local long = string.rep("A thought with many lines, kept in full.\n", 100) .. "The final line."
+                action("Edit note")
+                submit(long)
+                assert.are.equal(detail, topWidget())
+                assert.is_true(detail.page_count > 1)
+                local pages = detail.page_count
+                for page = 2, pages do
+                    local refreshes = refreshesOf(function() tapWidget({ dimen = detail.bar.capsule.next_rect }) end)
+                    assert.are.equal(page, detail.page)
+                    for _, r in ipairs(refreshes) do assert.are_not.equal("full", r.mode) end
+                end
+                local last_box = find(detail, function(w) return w.text == long end)
+                assert.is_true(last_box.virtual_line_num > 1)
+                assert.is_true(last_box.virtual_line_num + last_box.lines_per_page > #last_box.vertical_string_list)
+                tapWidget({ dimen = detail.bar.capsule.next_rect })
+                assert.are.equal(pages, detail.page)
+                local quote = find(detail, function(w) return w.text == item.text end)
+                assert.is_truthy(quote)
+                tapWidget(quote)
+                UIManager:forceRePaint()
+                assert.is_nil(ui.highlight.thought_page)
+                assert.are.equal(ui, topWidget())
+                assert.are.equal(long, ui.annotation.annotations[1].note)
+                local Font = require("ui/font")
+                local scale = Font:getUIScale()
+                Font:setUIScale(1.35)
+                local ok, err = pcall(function()
+                    local mark = ui.view.view_modules.note_marks.targets[1]
+                    local refreshes = refreshesOf(function() tapWidget({ dimen = mark }) end)
+                    local cards = ui.highlight.thought_page
+                    assert.is_not_nil(cards)
+                    assert.are.equal(cards, topWidget())
+                    assert.is_false(cards.detail)
+                    assert.is_true(cards.page_count > 1)
+                    assert.is_true(cards.content:getSize().h <= cards.content_rect.h)
+                    assert.is_true(hasRefresh(refreshes, "ui", Screen:getSize()))
+                    local pos = ui.rolling and ui.document:getXPointer() or ui.view.state.page
+                    local Key = require("device/key")
+                    UIManager:sendEvent(Event:new("KeyPress", Key:new("LPgFwd", {})))
+                    UIManager:forceRePaint()
+                    assert.are.equal(2, cards.page)
+                    assert.are.equal(pos, ui.rolling and ui.document:getXPointer() or ui.view.state.page)
+                    tapWidget(cell(cards, "Thought"))
+                    UIManager:forceRePaint()
+                    assert.is_true(cards.detail)
+                    assert.is_true(cards.content:getSize().h <= cards.content_rect.h)
+                    UIManager:sendEvent(Event:new("KeyPress", Key:new("Back", {})))
+                    UIManager:forceRePaint()
+                    assert.is_nil(ui.highlight.thought_page)
+                    assert.are.equal(pos, ui.rolling and ui.document:getXPointer() or ui.view.state.page)
+                end)
+                Font:setUIScale(scale)
+                assert(ok, err)
+                ui:handleEvent(Event:new("ShowNotes"))
+                UIManager:forceRePaint()
+                assert.are.equal(1, ui.menu.drawer.count)
+                assert.is_truthy(find(topWidget(), function(w) return w.item and w.item.note == long end), "notes list contains edited thought")
+                tapWidget(ui.menu.drawer.bar.back)
+                UIManager:forceRePaint()
+                closeReader(ui)
+                ui = openReader(file)
+                assert.are.equal(long, ui.annotation.annotations[1].note)
+                closeReader(ui)
+            end)
+        end
     end)
 
     -- The selection is an ink underline with a drop handle under each end; dragging a handle moves that end.
@@ -1233,6 +1880,40 @@ describe("ReaderHighlightBubble module", function()
                 assert(ok, err)
                 return lowest, off_screen
             end
+
+            it("should save or discard a thought across pages and return to the original page", function()
+                local page = ui.view.state.page
+                local w, h = Screen:getWidth(), Screen:getHeight()
+                for _, save in ipairs{ false, true } do
+                    gesture("hold", { x = 300, y = 30 })
+                    UIManager:forceRePaint()
+                    gesture("hold_pan", { x = 300, y = 400 })
+                    gesture("hold_pan", { x = 300, y = 450 })
+                    gesture("hold_pan", { x = w - 5, y = h - 5 })
+                    UIManager:forceRePaint()
+                    gesture("hold_release", { x = w - 5, y = h - 5 })
+                    UIManager:forceRePaint()
+                    assert.are.equal("scroll", ui.view.view_mode, tostring(save))
+                    local selected = ui.highlight.selected_text
+                    tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+                    UIManager:forceRePaint()
+                    local sheet = noteSheet()
+                    assert.are.equal(0, #ui.annotation.annotations)
+                    sheet.input:setText("Across pages")
+                    tapWidget(cell(sheet, save and "Save" or "Back"))
+                    UIManager:forceRePaint()
+                    assert.are.equal("page", ui.view.view_mode)
+                    assert.are.equal(page, ui.view.state.page)
+                    if save then
+                        assert.are.equal(1, #ui.annotation.annotations)
+                        assert.are.equal("note", ui.annotation.annotations[1].origin)
+                        assert.are.equal(selected.pos0, ui.annotation.annotations[1].pos0)
+                        assert.are.equal(selected.pos1, ui.annotation.annotations[1].pos1)
+                    else
+                        assertNoNotes(ui)
+                    end
+                end
+            end)
 
             it("should draw a long-press drag from the first line on across pages, its lines off the screen left out", function()
                 local page = ui.view.state.page
@@ -1906,6 +2587,44 @@ describe("ReaderHighlightBubble module", function()
     end)
 
     describe("without the replacement", function()
+        for _, file in ipairs{ sample_epub, sample_pdf } do
+            it("should keep direct thoughts visible without the replacement in " .. file, function()
+                local ui = openReader(file, true)
+                if ui.paging then
+                    ui:handleEvent(Event:new("SetScrollMode", false))
+                    ui.paging:onGotoPage(10)
+                else
+                    ui.rolling:onGotoPage(10)
+                end
+                UIManager:forceRePaint()
+                select(ui, ui.paging and Geom:new{ x = 430, y = 210 } or Geom:new{ x = 400, y = 110 })
+                tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+                UIManager:forceRePaint()
+                noteSheet().input:setText("Fallback thought")
+                tapWidget(cell(noteSheet(), "Save"))
+                UIManager:forceRePaint()
+                assert.are.equal(0, savedInk(ui))
+                -- Removing the optional marker module must also leave a visible fallback.
+                ui.view.view_modules.note_marks = nil
+                ui.view.highlight.page_boxes = {}
+                assert.is_true(savedInk(ui) > 0)
+                closeReader(ui)
+                Replacements.reader_highlight = nil
+                local ok, err = pcall(function()
+                    ui = openReader(file)
+                    assert.are.equal("note", ui.annotation.annotations[1].origin)
+                    assert.is_true(savedInk(ui) > 0)
+                    local p = highlightPoint(ui)
+                    tap(p.x, p.y)
+                    assert.are.equal("Fallback thought", topWidget().text)
+                    UIManager:close(topWidget())
+                    closeReader(ui)
+                end)
+                ReaderHighlightBubble.register()
+                assert(ok, err)
+            end)
+        end
+
         it("should offer the wave in the original Style dialog", function()
             Replacements.reader_highlight = nil
             local ok, err = pcall(function()

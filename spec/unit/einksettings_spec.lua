@@ -104,6 +104,45 @@ describe("Reorganized settings", function()
         return Screen.bb:getPixel(x, y):getColor8().a
     end
 
+    local function find(widget, pred)
+        if type(widget) ~= "table" then return end
+        if pred(widget) then return widget end
+        for __, child in ipairs(widget) do
+            local found = find(child, pred)
+            if found then return found end
+        end
+    end
+
+    -- the painted text widget saying `str`
+    local function findText(widget, str)
+        return find(widget, function(w) return w.text == str and w.face ~= nil end)
+    end
+
+    -- The bands of rows of `rect` with ink in the left half of the screen, as { y, h }.
+    local function inkLines(rect)
+        local lines, inked = {}, false
+        for y = rect.y, rect.y + rect.h - 1 do
+            local ink = false
+            for x = rect.x, math.floor(Screen:getWidth() / 2) do
+                if gray(x, y) < 128 then ink = true break end
+            end
+            if ink and not inked then
+                table.insert(lines, { y = y, h = 1 })
+            elseif ink then
+                lines[#lines].h = lines[#lines].h + 1
+            end
+            inked = ink
+        end
+        return lines
+    end
+
+    -- whether the toggle of a row spec shows on: its knob, at the right, unlike its middle
+    local function toggleShowsOn(spec)
+        local r = spec.toggle_rect
+        local y = r.y + math.floor(r.h / 2)
+        return gray(r.x + r.w - math.floor(r.h / 2), y) ~= gray(r.x + math.floor(r.w / 2), y)
+    end
+
     -- the page capsule in the bottom bar of the shown list page
     local function capsule(page)
         return page.bar.capsule
@@ -207,8 +246,18 @@ describe("Reorganized settings", function()
         return page, in_settings
     end
 
+    -- the reading preferences, WeChat Read's list (13-reading-preferences/02-settings.png): name, subtitle and kind
+    local function expectedPreferences()
+        return {
+            { _("Tap left side for next page"), _("When on, taps on the left side also turn to the next page"), "toggle" },
+            { _("Indent first lines of body text"), _("When on, the body text of books is indented on first lines"), "toggle" },
+            { _("Show time while reading"), _("When on, the current system time shows while reading"), "toggle" },
+            { _("Interface font size"), _("Default"), "chevron" },
+        }
+    end
+
     local expected_groups = {
-        { "reading", "Reading", { "Interface font size", "Page turns and tap zones", "Full refresh rate", "Status bar",
+        { "reading", "Reading", { "Page turns and tap zones", "Full refresh rate", "Status bar",
             "After finishing a book", "Highlight style" } },
         { "screen", "Screen", { "Refresh and ghosting", "Sleep screen", "Night mode" } },
         { "network", "Network & sync", { "Wi-Fi", "Progress sync", "Wireless transfer and library" } },
@@ -226,11 +275,13 @@ describe("Reorganized settings", function()
             fm:onClose()
         end)
 
-        it("shows exactly six groups with the issues' rows", function()
+        it("shows exactly six groups with the issues' rows, after the reading preferences", function()
             local page = openSettings(fm)
             local groups = {}
             for __, entry in ipairs(page.home) do
-                if entry.header then
+                if entry.group_id == "preferences" then
+                    assert.is_nil(next(groups)) -- first
+                elseif entry.header then
                     table.insert(groups, { entry.group_id, entry.text, {} })
                 else
                     table.insert(groups[#groups][3], entry.text)
@@ -275,7 +326,8 @@ describe("Reorganized settings", function()
             local page
             local refreshes = refreshesOf(function() page = openSettings(fm) end)
             assert.are.same({ { mode = "ui", region = page.dimen } }, refreshes)
-            refreshes = refreshesOf(function() tap(row(page, _("Refresh and ghosting")).rect) end)
+            local spec = row(page, _("Refresh and ghosting"))
+            refreshes = refreshesOf(function() tap(spec.rect) end)
             assert.are.equal(_("Refresh and ghosting"), page.title)
             assert.are.same({ { mode = "ui", region = page.dimen } }, refreshes)
             refreshes = refreshesOf(function() tap(page.bar.back.dimen) end)
@@ -524,6 +576,178 @@ describe("Reorganized settings", function()
             assert(ok, err)
         end)
 
+        it("opens from 我 on the reading preferences: two-line rows above the groups, without a header", function()
+            fm:switchTab("me")
+            UIManager:forceRePaint()
+            local settings_row = find(fm.me_view, function(w)
+                return w.callback and w.dimen and find(w, function(c) return c.text == _("Settings") end) ~= nil
+            end)
+            tap(settings_row.dimen)
+            local page = topWidget()
+            assert.is_true(isSettings(page))
+            assert.are.equal(1, page.page)
+            local shown = {}
+            for i = 1, 4 do
+                local spec = page.shown[i]
+                table.insert(shown, { spec.name, spec.subtitle, spec.kind })
+                -- the name in bold over the subtitle, both in ink, the toggle or chevron at the right
+                assert.are.equal(Screen:scaleBySize(92), spec.rect.h)
+                assert.is_true(spec.enabled)
+                local name, subtitle = findText(page, spec.name), findText(page, spec.subtitle)
+                assert.is_true(name.face.orig_size > subtitle.face.orig_size)
+                assert.is_truthy(name.face.realname:find("Bold"))
+                assert.are.equal(Palette.ink, subtitle.fgcolor)
+                -- two lines of ink in the row, left of its toggle or chevron
+                assert.are.equal(2, #inkLines(spec.rect))
+            end
+            assert.are.same(expectedPreferences(), shown)
+            assert.are.equal(page.content_rect.y, page.shown[1].rect.y) -- right under the title
+            -- the groups follow, from their headers
+            assert.are.same({ "header", C_("Settings group", "Reading") }, { page.shown[5].kind, page.shown[5].name })
+            -- the toggles read the settings they switch
+            assert.are.equal(G_reader_settings:isTrue("page_turns_left_tap_forward"), toggleShowsOn(page.shown[1]))
+            local footer = G_reader_settings:readSetting("footer") or require("apps/reader/modules/readerfooter").default_settings
+            assert.are.equal(footer.time == true, toggleShowsOn(page.shown[3]))
+        end)
+
+        it("switches 点击左侧翻到下一页 for every book, refreshing only its toggle, and dims it without a left side", function()
+            local saved = { G_reader_settings:readSetting("page_turns_left_tap_forward"),
+                G_reader_settings:readSetting("page_turns_tap_zones"), G_reader_settings:readSetting("page_turns_disable_tap") }
+            local ok, err = pcall(function()
+                G_reader_settings:delSetting("page_turns_left_tap_forward")
+                local page = openSettings(fm)
+                local spec = row(page, _("Tap left side for next page"))
+                assert.is_false(toggleShowsOn(spec))
+                local refreshes = refreshesOf(function() tap(spec.rect) end)
+                assert.is_true(G_reader_settings:isTrue("page_turns_left_tap_forward"))
+                spec = row(page, _("Tap left side for next page"))
+                assert.is_true(toggleShowsOn(spec))
+                assert.are.same({ { mode = "fast", region = spec.toggle_rect } }, refreshes)
+                tap(spec.rect)
+                assert.is_false(G_reader_settings:isTrue("page_turns_left_tap_forward"))
+                page:closeMenu(true)
+                -- no left side to change: page turn taps off, or zones stacked top and bottom
+                for __, setting in ipairs{ { "page_turns_disable_tap", true }, { "page_turns_tap_zones", "top_bottom" } } do
+                    G_reader_settings:delSetting("page_turns_disable_tap")
+                    G_reader_settings:delSetting("page_turns_tap_zones")
+                    G_reader_settings:saveSetting(setting[1], setting[2])
+                    page = openSettings(fm)
+                    spec = row(page, _("Tap left side for next page"))
+                    assert.is_false(spec.enabled)
+                    refreshes = refreshesOf(function() tap(spec.rect) end)
+                    assert.are.same({}, refreshes)
+                    assert.is_nil(G_reader_settings:readSetting("page_turns_left_tap_forward"))
+                    page:closeMenu(true)
+                end
+            end)
+            G_reader_settings:saveSetting("page_turns_left_tap_forward", saved[1])
+            G_reader_settings:saveSetting("page_turns_tap_zones", saved[2])
+            G_reader_settings:saveSetting("page_turns_disable_tap", saved[3])
+            assert(ok, err)
+        end)
+
+        it("switches the global first-line indent, keeping the other global style tweaks and the defaults", function()
+            local CssTweaks = require("ui/data/css_tweaks")
+            local defaults = require("util").tableDeepCopy(CssTweaks.DEFAULT_GLOBAL_STYLE_TWEAKS)
+            local saved = G_reader_settings:readSetting("style_tweaks")
+            local ok, err = pcall(function()
+                -- a new installation: the defaults, no first-line tweak
+                G_reader_settings:delSetting("style_tweaks")
+                local page = openSettings(fm)
+                local name = _("Indent first lines of body text")
+                assert.is_false(toggleShowsOn(row(page, name)))
+                tap(row(page, name).rect)
+                assert.is_true(toggleShowsOn(row(page, name)))
+                local expected = require("util").tableDeepCopy(defaults)
+                expected.paragraph_indent_2em = true
+                assert.are.same(expected, G_reader_settings:readSetting("style_tweaks"))
+                assert.are.same(defaults, CssTweaks.DEFAULT_GLOBAL_STYLE_TWEAKS)
+                tap(row(page, name).rect)
+                assert.is_false(toggleShowsOn(row(page, name)))
+                assert.are.same(defaults, G_reader_settings:readSetting("style_tweaks"))
+                page:closeMenu(true)
+                -- first lines set globally from the original style tweak menu: flush reads off, KOReader's own
+                -- indent reads on; turning it on makes the 2em indent the only global first-line tweak
+                G_reader_settings:saveSetting("style_tweaks", { paragraph_no_indent = true, paragraph_whitespace = true })
+                page = openSettings(fm)
+                assert.is_false(toggleShowsOn(row(page, name)))
+                tap(row(page, name).rect)
+                assert.are.same({ paragraph_indent_2em = true, paragraph_whitespace = true },
+                    G_reader_settings:readSetting("style_tweaks"))
+                page:closeMenu(true)
+                G_reader_settings:saveSetting("style_tweaks", { paragraph_indent = true })
+                page = openSettings(fm)
+                assert.is_true(toggleShowsOn(row(page, name)))
+                tap(row(page, name).rect)
+                assert.are.same({}, G_reader_settings:readSetting("style_tweaks"))
+                -- a long press says what happens to books with their own setting
+                UIManager:sendEvent(Event:new("Gesture", { ges = "hold", pos = row(page, name).rect:center() }))
+                UIManager:forceRePaint()
+                local info = topWidget()
+                assert.are.equal(_("A book whose first lines you set in its paragraph panel keeps that setting."), info.text)
+                UIManager:close(info)
+            end)
+            G_reader_settings:saveSetting("style_tweaks", saved)
+            assert(ok, err)
+        end)
+
+        it("switches the time of the reader's footer", function()
+            local saved = G_reader_settings:readSetting("footer")
+            local ok, err = pcall(function()
+                require("apps/reader/modules/readertoolbar").applyFooterDefaults()
+                local footer = G_reader_settings:readSetting("footer")
+                local before = require("util").tableDeepCopy(footer)
+                local page = openSettings(fm)
+                local name = _("Show time while reading")
+                assert.is_true(toggleShowsOn(row(page, name)))
+                tap(row(page, name).rect)
+                assert.is_false(toggleShowsOn(row(page, name)))
+                assert.is_false(G_reader_settings:readSetting("footer").time)
+                -- only the time
+                before.time = false
+                assert.are.same(before, G_reader_settings:readSetting("footer"))
+                tap(row(page, name).rect)
+                assert.is_true(G_reader_settings:readSetting("footer").time)
+                page:closeMenu(true)
+
+                -- no footer setting yet: only the time is saved, and the default footer still comes at the next start
+                G_reader_settings:delSetting("footer")
+                require("apps/reader/modules/readertoolbar").applyFooterDefaults()
+                local default_footer = require("util").tableDeepCopy(G_reader_settings:readSetting("footer"))
+                G_reader_settings:delSetting("footer")
+                page = openSettings(fm)
+                assert.is_true(toggleShowsOn(row(page, name)))
+                tap(row(page, name).rect)
+                assert.is_false(toggleShowsOn(row(page, name)))
+                assert.are.same({ time = false }, G_reader_settings:readSetting("footer"))
+                require("apps/reader/modules/readertoolbar").applyFooterDefaults()
+                default_footer.time = false
+                assert.are.same(default_footer, G_reader_settings:readSetting("footer"))
+            end)
+            G_reader_settings:saveSetting("footer", saved)
+            assert(ok, err)
+        end)
+
+        it("has the reading preferences' names and subtitles in Chinese", function()
+            local preferences = require("ui/elements/eink_settings_order")[1]
+            assert.are.equal("preferences", preferences.id)
+            local msgids, untranslated = {}, {}
+            for __, r in ipairs(preferences.rows) do
+                table.insert(msgids, r.text)
+                if r.subtitle then table.insert(msgids, r.subtitle) end
+            end
+            assert.are.equal(7, #msgids) -- four names, three subtitles
+            local ok, err = pcall(function()
+                _.changeLang("zh_CN")
+                for __, msgid in ipairs(msgids) do
+                    if _(msgid) == msgid then table.insert(untranslated, msgid) end
+                end
+            end)
+            _.changeLang("C")
+            assert(ok, err)
+            assert.are.same({}, untranslated)
+        end)
+
         it("dims rows that need a book, and says which ones this device lacks instead", function()
             local page = openSettings(fm)
             for __, name in ipairs{ _("Page turns and tap zones"), C_("Settings", "Status bar"), C_("Settings", "Progress sync") } do
@@ -622,6 +846,267 @@ describe("Reorganized settings", function()
                 end
             end
             assert.are.same({}, unknown)
+        end)
+    end)
+
+    describe("in the reader, the reading preferences", function()
+        -- Two paragraphs of a speech in the sample, the first one with a line break (as in readertypesetpanel_spec).
+        local SPEECH = "/body[1]/DocFragment[5]/body[1]/div[1]/div[1]/div[1]/blockquote[26]"
+        local FIRST, SECOND = SPEECH .. "/p[1]/text()[1].0", SPEECH .. "/p[2]/em[1]/text()[1].0"
+        local BROKEN_LINE = SPEECH .. "/p[1]/text()[2].1"
+        local KEYS = { "footer", "reader_footer_mode", "style_tweaks", "page_turns_left_tap_forward" }
+        local ui, saved
+
+        setup(function()
+            saved = {}
+            for __, key in ipairs(KEYS) do saved[key] = G_reader_settings:readSetting(key) end
+            G_reader_settings:delSetting("footer")
+            ReaderToolbar.applyFooterDefaults() -- the reader's footer, as the app starts
+            G_reader_settings:delSetting("style_tweaks")
+            DocSettings:open(sample_epub):purge()
+            ui = ReaderUI:new{ dimen = Screen:getSize(), document = DocumentRegistry:openDocument(sample_epub) }
+            UIManager:show(ui)
+            UIManager:forceRePaint()
+        end)
+        teardown(function()
+            while isSettings(topWidget()) do topWidget():closeMenu(true) end
+            ui:closeDocument()
+            UIManager:close(ui)
+            ui:onClose()
+            for __, key in ipairs(KEYS) do G_reader_settings:saveSetting(key, saved[key]) end
+            DocSettings:open(sample_epub):purge()
+        end)
+        -- the toast shown, if any
+        local function toast()
+            for i = #UIManager._window_stack, 1, -1 do
+                local w = UIManager._window_stack[i].widget
+                if w.toast then return w end
+            end
+        end
+
+        after_each(function()
+            while isSettings(topWidget()) do topWidget():closeMenu(true) end
+            while toast() do UIManager:close(toast()) end
+            UIManager:forceRePaint()
+        end)
+
+        -- Runs the tasks scheduled by the reader (the re-render after a style change).
+        local function runTasks()
+            for __ = 1, 3 do UIManager:_checkTasks() end
+        end
+
+        local function tapAt(x, y)
+            tap(Geom:new{ x = math.floor(x), y = math.floor(y), w = 0, h = 0 })
+        end
+
+        -- The first-line indent of the speech's second paragraph, from where the first one's line after its line
+        -- break starts.
+        local function indent()
+            runTasks()
+            UIManager:forceRePaint() -- crengine re-lays out the part of the book it draws (partial rerendering)
+            ui:handleEvent(Event:new("GotoXPointer", FIRST))
+            UIManager:forceRePaint()
+            local x1 = select(2, ui.document:getScreenPositionFromXPointer(BROKEN_LINE))
+            local x2 = select(2, ui.document:getScreenPositionFromXPointer(SECOND))
+            return x2 - x1
+        end
+
+        -- the sum of the painted gray levels in `rect`
+        local function grayTotal(rect)
+            local sum = 0
+            for y = rect.y, rect.y + rect.h - 1, 2 do
+                for x = rect.x, rect.x + rect.w - 1, 2 do sum = sum + gray(x, y) end
+            end
+            return sum
+        end
+
+        it("turns to the next page from a tap on the left once 点击左侧翻到下一页 is on, the right still going forward", function()
+            -- from the toolbar's 更多 → 设置, as a reader gets there
+            tap(findListRow(openMorePanel(ui), _("Settings")).dimen)
+            local page = topWidget()
+            assert.is_true(isSettings(page))
+            local name = _("Tap left side for next page")
+            assert.is_false(toggleShowsOn(row(page, name)))
+            tap(row(page, name).rect)
+            assert.is_true(toggleShowsOn(row(page, name)))
+            tap(page.bar.back.dimen)
+            assert.are.equal(ui, topWidget())
+            local w, h = Screen:getWidth(), Screen:getHeight()
+            local p = ui:getCurrentPage()
+            tapAt(w * 0.1, h / 2)
+            assert.are.equal(p + 1, ui:getCurrentPage())
+            tapAt(w * 0.9, h / 2)
+            assert.are.equal(p + 2, ui:getCurrentPage())
+            -- the middle still shows the toolbar
+            tapAt(w / 2, h / 2)
+            assert.is_truthy(ui.menu.bars)
+            ui.menu:hideToolbar()
+            UIManager:forceRePaint()
+            -- 更多 → 点击区域 shows the next page on both sides
+            tap(findListRow(openMorePanel(ui), _("Tap zones")).dimen)
+            local zones = topWidget()
+            local next_pages, previous_pages = 0, 0
+            for __, z in ipairs(zones.zones) do
+                if findText(z.widget, C_("Tap zones", "Next page")) then next_pages = next_pages + 1 end
+                if findText(z.widget, C_("Tap zones", "Previous page")) then previous_pages = previous_pages + 1 end
+            end
+            assert.are.same({ 2, 0 }, { next_pages, previous_pages })
+            zones:onTapClose()
+            UIManager:forceRePaint()
+            -- off again, the left goes back, as before
+            page = openSettings(ui)
+            tap(row(page, name).rect)
+            assert.is_false(G_reader_settings:isTrue("page_turns_left_tap_forward"))
+            tap(page.bar.back.dimen)
+            tapAt(w * 0.1, h / 2)
+            assert.are.equal(p + 1, ui:getCurrentPage())
+        end)
+
+        it("indents first lines of the open book at once; a book with its own first lines keeps them and says so", function()
+            local styletweak = ui.styletweak
+            local own = indent()
+            assert.is_true(own < ui.document:getFontSize()) -- the sample's own styles hardly indent
+            local page = openSettings(ui)
+            local name = _("Indent first lines of body text")
+            -- only the toggle: the book, hidden under the page, is laid out again when the page closes
+            local refreshes = refreshesOf(function()
+                tap(row(page, name).rect)
+                runTasks()
+            end)
+            assert.is_true(toggleShowsOn(row(page, name)))
+            assert.are.same({ { mode = "fast", region = row(page, name).toggle_rect } }, refreshes)
+            assert.is_nil(toast())
+            refreshes = refreshesOf(function()
+                tap(page.bar.back.dimen)
+                runTasks()
+            end)
+            local modes = {}
+            for __, r in ipairs(refreshes) do modes[r.mode] = true end
+            assert.are.same({ ui = true, partial = true }, modes) -- the page closing, the book laid out again
+            local two_chars = 2 * ui.document:getFontSize()
+            assert.is_true(math.abs(indent() - two_chars) <= 1)
+            -- one global default, the one the book saves when it closes
+            assert.is_true(G_reader_settings:readSetting("style_tweaks").paragraph_indent_2em)
+            assert.are.equal(G_reader_settings:readSetting("style_tweaks"), styletweak.global_tweaks)
+            assert.is_nil(styletweak.doc_tweaks.paragraph_indent_2em)
+
+            -- this book's own first lines, flush (as its paragraph panel's 首行顶格 sets them)
+            ui:handleEvent(Event:new("ToggleStyleTweak", "paragraph_no_indent", styletweak.tweaks_by_id.paragraph_no_indent, true))
+            assert.are.equal(0, indent())
+            -- off: nothing to say, the book looks as the default would leave it
+            page = openSettings(ui)
+            tap(row(page, name).rect)
+            assert.is_false(toggleShowsOn(row(page, name)))
+            assert.is_nil(toast())
+            -- on: the book keeps its own, and says so at once
+            tap(row(page, name).rect)
+            assert.is_true(toggleShowsOn(row(page, name)))
+            local shown = toast()
+            assert.is_truthy(shown)
+            assert.are.equal(_("This book keeps its own first-line setting."), shown.text)
+            UIManager:close(shown)
+            tap(page.bar.back.dimen)
+            assert.are.equal(0, indent())
+            assert.is_true(styletweak.doc_tweaks.paragraph_no_indent)
+            assert.is_true(G_reader_settings:readSetting("style_tweaks").paragraph_indent_2em)
+
+            -- off again: the default goes, the book's own first lines stay
+            page = openSettings(ui)
+            tap(row(page, name).rect)
+            assert.is_nil(toast())
+            tap(page.bar.back.dimen)
+            assert.are.equal(0, indent())
+            assert.is_nil(G_reader_settings:readSetting("style_tweaks").paragraph_indent_2em)
+            assert.is_true(styletweak.doc_tweaks.paragraph_no_indent)
+        end)
+
+        it("shows or hides the footer's time at once, without painting the footer over the settings", function()
+            local footer = ui.view.footer
+            local function showsTime()
+                return footer.footer_text.text:find(footer.textGeneratorMap.time(footer), 1, true) ~= nil
+            end
+            assert.is_true(ui.view.footer_visible)
+            assert.is_true(showsTime())
+            local page = openSettings(ui)
+            local name = _("Show time while reading")
+            assert.is_true(toggleShowsOn(row(page, name)))
+            local band = grayTotal(page.bar.dimen)
+            local refreshes = refreshesOf(function() tap(row(page, name).rect) end)
+            assert.are.same({ { mode = "fast", region = row(page, name).toggle_rect } }, refreshes)
+            assert.are.equal(band, grayTotal(page.bar.dimen))
+            assert.is_false(showsTime())
+            -- the footer's own setting, which its status bar menu shows
+            assert.is_false(footer.settings.time)
+            assert.is_false(G_reader_settings:readSetting("footer").time)
+            refreshes = refreshesOf(function() tap(page.bar.back.dimen) end)
+            assert.are.same({ { mode = "ui", region = page.dimen } }, refreshes)
+            assert.is_false(showsTime())
+            page = openSettings(ui)
+            tap(row(page, name).rect)
+            assert.is_true(showsTime())
+            tap(page.bar.back.dimen)
+            assert.is_true(G_reader_settings:readSetting("footer").time)
+        end)
+    end)
+
+    describe("in the reader, with a footer showing one item at a time", function()
+        local ui, saved
+
+        setup(function()
+            saved = { footer = G_reader_settings:readSetting("footer"), mode = G_reader_settings:readSetting("reader_footer_mode") }
+            G_reader_settings:delSetting("footer")
+            ReaderToolbar.applyFooterDefaults()
+            -- the user's own footer: one item at a time (time, then the page), now on the time
+            local footer = G_reader_settings:readSetting("footer")
+            footer.all_at_once, footer.dynamic_filler = false, false
+            G_reader_settings:saveSetting("reader_footer_mode", 1) -- the order's first item, the time
+            DocSettings:open(sample_epub):purge()
+            ui = ReaderUI:new{ dimen = Screen:getSize(), document = DocumentRegistry:openDocument(sample_epub) }
+            UIManager:show(ui)
+            UIManager:forceRePaint()
+        end)
+        teardown(function()
+            while isSettings(topWidget()) do topWidget():closeMenu(true) end
+            ui:closeDocument()
+            UIManager:close(ui)
+            ui:onClose()
+            G_reader_settings:saveSetting("footer", saved.footer)
+            G_reader_settings:saveSetting("reader_footer_mode", saved.mode)
+            DocSettings:open(sample_epub):purge()
+        end)
+
+        it("moves the footer on to its next item when the time it shows is turned off, and keeps that item after", function()
+            local footer = ui.view.footer
+            local time_text = footer.textGeneratorMap.time(footer)
+            assert.are.equal(footer.mode_list.time, footer.mode)
+            assert.are.equal(time_text, footer.footer_text.text)
+            local page = openSettings(ui)
+            local name = _("Show time while reading")
+            local band = 0
+            for x = page.bar.dimen.x, page.bar.dimen.x + page.bar.dimen.w - 1, 3 do
+                band = band + gray(x, page.bar.dimen.y + math.floor(page.bar.dimen.h / 2))
+            end
+            local refreshes = refreshesOf(function() tap(row(page, name).rect) end)
+            assert.are.same({ { mode = "fast", region = row(page, name).toggle_rect } }, refreshes)
+            -- the next item shows, saved as the footer's mode, without painting over the page
+            assert.are.equal(footer.mode_list.page_progress, footer.mode)
+            assert.are.equal(footer.mode, G_reader_settings:readSetting("reader_footer_mode"))
+            assert.are.equal(footer.textGeneratorMap.page_progress(footer), footer.footer_text.text)
+            local after = 0
+            for x = page.bar.dimen.x, page.bar.dimen.x + page.bar.dimen.w - 1, 3 do
+                after = after + gray(x, page.bar.dimen.y + math.floor(page.bar.dimen.h / 2))
+            end
+            assert.are.equal(band, after)
+            tap(page.bar.back.dimen)
+            assert.are.equal(ui, topWidget())
+            assert.is_true(ui.view.footer_visible)
+            -- on again: the time is an item again, the footer stays on the page
+            page = openSettings(ui)
+            tap(row(page, name).rect)
+            assert.is_true(footer.settings.time)
+            assert.are.equal(footer.mode_list.page_progress, footer.mode)
+            assert.are.equal(footer.textGeneratorMap.page_progress(footer), footer.footer_text.text)
+            tap(page.bar.back.dimen)
         end)
     end)
 
