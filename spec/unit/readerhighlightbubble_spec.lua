@@ -1523,29 +1523,28 @@ describe("ReaderHighlightBubble module", function()
             local ok, err = pcall(function()
                 ui.rolling:onGotoPage(10)
                 UIManager:forceRePaint()
-                -- the notes tab's label, in the drawer the contents page's 书签 opens (until the notes page)
-                local function notesTab()
+                -- the cards of the notes page the contents page's 书签 opens
+                local function noteCards()
                     ui:handleEvent(Event:new("ShowToc"))
                     UIManager:forceRePaint()
                     tapWidget(ui.menu.drawer.bookmarks_button)
                     UIManager:forceRePaint()
-                    local drawer = ui.menu.drawer
-                    local label = find(drawer.panel, function(w)
-                        return w.selected ~= nil and w.callback and w.text and w.text:find("Notes", 1, true) end).text
-                    drawer:onClose()
+                    local page = ui.menu.drawer
+                    local cards = #page.cards
+                    page:goBack()
                     UIManager:forceRePaint()
-                    return label
+                    return cards
                 end
                 select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
                 tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
                 ui.highlight:closeBubble()
                 UIManager:forceRePaint()
-                assert.are.equal("Notes 1", notesTab())
+                assert.are.equal(1, noteCards())
                 tap(highlightPoint(ui).x, highlightPoint(ui).y)
                 UIManager:forceRePaint()
                 tapWidget(cell(ui.highlight.highlight_dialog, "Delete highlight"))
                 UIManager:forceRePaint()
-                assert.are.equal("Notes", notesTab())
+                assert.are.equal(0, noteCards())
             end)
             closeReader(ui)
             assert(ok, err)

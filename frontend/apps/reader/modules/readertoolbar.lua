@@ -167,7 +167,7 @@ local ReaderToolbar = ReaderMenu:extend{
     bars = nil, -- ToolbarBars while shown
     panel = nil, -- ui/widget/panel open between the page and the bottom bar
     panel_name = nil, -- the entry of that panel: "progress", "brightness", "more" or "font"
-    drawer = nil, -- the contents page while shown, or the old drawer that 笔记 and the contents page's 书签 open
+    drawer = nil, -- the full-screen page shown over the book: the contents page or the notes page
     hint = nil, -- ReaderToolbarHint while the open-book hint shows
 }
 
@@ -436,19 +436,30 @@ function ReaderToolbar:onShowToc()
     return true
 end
 
---- "ShowNotes" opens the book's notes (笔记), from the bottom bar, or only its bookmarks (`filter`
--- "bookmarks"), from the contents page's 书签: the old drawer on that tab, until the notes page takes over.
+--- "ShowNotes" opens the notes page (笔记页) of the book: every note, from the bottom bar (and any other
+-- entry), or only its bookmarks (`filter` "bookmarks"), from the contents page's 书签.
 function ReaderToolbar:onShowNotes(filter)
     if not Device:isTouchDevice() then return end
-    self:hideToolbar() -- the drawer leaves the bars' right part showing: refresh them away
+    self:hideToolbar(true) -- the page covers the bars
     self:closeDrawer()
-    self.drawer = require("apps/reader/modules/readertocdrawer"):new{
+    local page
+    page = require("apps/reader/modules/readernotespage"):new{
         ui = self.ui,
-        tab = filter == "bookmarks" and "bookmarks" or "notes",
-        on_close = function() self.drawer = nil end,
+        filter = filter,
+        on_close = function()
+            if self.drawer == page then self.drawer = nil end
+        end,
     }
-    UIManager:show(self.drawer, "ui", self.drawer.panel_rect)
+    self.drawer = page
+    UIManager:show(page, "ui", page.dimen)
     return true
+end
+
+--- The notes page shown follows the notes as they change (not consumed: other modules want it too).
+function ReaderToolbar:onAnnotationsModified()
+    if self.drawer and self.drawer.refresh then
+        self.drawer:refresh()
+    end
 end
 
 --- The reorganized settings (apps/settings/einksettings), on an optional group or row id.
