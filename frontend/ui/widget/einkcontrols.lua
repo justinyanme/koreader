@@ -171,8 +171,8 @@ end
 
 --- Track: a 33dp pill between a − and a + circle button (33dp, 1dp ink outline), on a 44dp row. The pill is marker
 -- gray, and ink up to the knob, with a 1dp paper rule at each passed stop when `ticks` is set. `low` and `high` label
--- its ends inside it, and the knob, a paper disc with a 1dp ink outline, shows `label` if any; it widens to a pill for
--- a longer label. A `caption` sits above the knob, in a band above the row.
+-- its ends inside it, and the knob, a paper disc with a 1.5dp ink outline, shows `label` if any; it widens to a pill
+-- for a longer label. A `caption` sits above the knob, in a band above the row.
 -- `position` goes from 1 to `count`, and falls between two stops for a value that is not on one; a value past an end
 -- is drawn at that end. With `clear_ends`, the end stops leave the end labels clear of the knob (the typeset panel);
 -- without, the stops run to the ends of the pill and the knob covers the end label at an end stop (the interface
@@ -253,12 +253,12 @@ function Track:paintTo(bb, x, y)
     local mid = row_y + math.floor(Track.height / 2)
     local bw = Size.border.default
     local anti_alias = G_reader_settings:nilOrTrue("anti_alias_ui")
-    local function disc(dx, w, h, fill, outline)
+    local function disc(dx, w, h, fill, outline, outline_w)
         local r = math.floor(h / 2)
         local dy = mid - r
         bb:paintRoundedRect(dx, dy, w, h, fill, r)
         if outline then
-            bb:paintBorder(dx, dy, w, h, bw, outline, r, anti_alias)
+            bb:paintBorder(dx, dy, w, h, outline_w or bw, outline, r, anti_alias)
         end
     end
     local function centered(widget, cx, cy)
@@ -288,7 +288,7 @@ function Track:paintTo(bb, x, y)
     local low, high = self.low_text:getSize(), self.high_text:getSize()
     self.low_text:paintTo(bb, px + self.end_pad, mid - math.floor(low.h / 2))
     self.high_text:paintTo(bb, px + self.pill_w - self.end_pad - high.w, mid - math.floor(high.h / 2))
-    disc(kx - math.floor(self.knob_w / 2), self.knob_w, h, Palette.paper, Palette.ink)
+    disc(kx - math.floor(self.knob_w / 2), self.knob_w, h, Palette.paper, Palette.ink, Size.border.button)
     if self.knob_text then
         centered(self.knob_text, kx)
     end
