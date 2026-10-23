@@ -9,7 +9,8 @@ and the 段间距 toggle, which set KOReader's paragraph style tweaks for this
 book, then a row to the layout options page (render mode, embedded fonts and
 styles, and links into the existing hyphenation and style tweak menus). Both
 are nested in the toolbar: the bottom bar then holds only a back arrow, back to
-the page they were opened from.
+the page they were opened from. "View more" opens the bottom font panel, about 60% of
+screen height, with both bars hidden; collapse or Back returns to the main panel.
 
 Replaces ReaderConfig (apps/replacements reader_config slot) for reflowable
 books on touch devices. Fixed-layout books and devices without touch keep the
@@ -23,6 +24,7 @@ change re-lays the page out, which the reader refreshes as it does for a page
 turn ("partial", promoted to "full" by the user's full refresh setting).
 ]]
 
+local BD = require("ui/bidi")
 local CanvasContext = require("document/canvascontext")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
@@ -31,20 +33,22 @@ local Event = require("ui/event")
 local Font = require("ui/font")
 local FontList = require("fontlist")
 local FrameContainer = require("ui/widget/container/framecontainer")
-local FullscreenPage = require("ui/widget/fullscreenpage")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local IconButton = require("ui/widget/iconbutton")
 local IconWidget = require("ui/widget/iconwidget")
 local InfoMessage = require("ui/widget/infomessage")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
+local OverlapGroup = require("ui/widget/overlapgroup")
 local Palette = require("ui/palette")
 local Panel = require("ui/widget/panel")
 local ReaderChapterHeader = require("apps/reader/modules/readerchapterheader")
 local ReaderConfig = require("apps/reader/modules/readerconfig")
+local RightContainer = require("ui/widget/container/rightcontainer")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
 local Toast = require("ui/widget/toast")
@@ -322,13 +326,15 @@ function ParagraphCard:onTapCard()
     return true
 end
 
+local FontPanel
+
 local ReaderTypesetPanel = ReaderConfig:extend{
     panel = nil, -- ui/widget/panel while shown by the toolbar
-    page = nil, -- "main", "paragraph" or "more"
+    page = nil, -- "main", "fonts", "paragraph" or "more"
 }
 
 -- The page each nested page goes back to.
-local PARENT_PAGES = { paragraph = "main", more = "paragraph" }
+local PARENT_PAGES = { fonts = "main", paragraph = "main", more = "paragraph" }
 
 --- Registers the panel in its replacement slot.
 function ReaderTypesetPanel.register()
@@ -420,16 +426,15 @@ function ReaderTypesetPanel:closeWithToolbar(no_refresh)
     end
 end
 
---- Shows a page of the panel in the toolbar: "main", or nested with a way back, "paragraph" (the paragraph panel,
+--- Shows a page of the panel in the toolbar: "main", or nested with a way back, "fonts", "paragraph" (the paragraph panel,
 -- opened from the main page) or "more" (the layout options, opened from the paragraph panel).
 function ReaderTypesetPanel:showPage(page)
     self.page = page
     local parent = PARENT_PAGES[page]
-    local panel = Panel:new{
-        content = self:pageContent(),
-        on_back = parent and function() self:showPage(parent) end or nil,
-        hide_top_bar = true,
-    }
+    local panel = page == "fonts" and FontPanel:new{ config = self }
+        or Panel:new{ content = self:pageContent() }
+    panel.on_back = parent and function() self:showPage(parent) end or nil
+    panel.hide_top_bar = true
     panel.on_close = function()
         if self.panel == panel then
             self.panel = nil
@@ -451,7 +456,11 @@ end
 --- Re-renders the shown page with the current values ("ui" on the panel's rect).
 function ReaderTypesetPanel:refreshPanel()
     if self.panel then
-        self.panel:setContent(self:pageContent())
+        if self.panel.buildContent then
+            self.panel:refresh()
+        else
+            self.panel:setContent(self:pageContent())
+        end
     end
 end
 
@@ -703,7 +712,7 @@ function ReaderTypesetPanel:fontCards(width)
         if i == count then
             table.insert(row, FontCard:new{
                 width = card_w, name = _("View more") .. " ›",
-                callback = function() self:showFontMenu() end,
+                callback = function() self:showPage("fonts") end,
             })
         else
             table.insert(row, makeFontCard(self.ui.font, card_w, faces[i], fontDetails,
@@ -837,9 +846,6 @@ function ReaderTypesetPanel:showMenu(item_table)
 end
 
 function ReaderTypesetPanel:closeMenu()
-    if self.font_page then
-        self.font_page:goBack()
-    end
     if self.menu_container then
         UIManager:close(self.menu_container)
         self.menu_container = nil
@@ -864,11 +870,9 @@ function FontCategories:paintTo(bb, x, y)
     end
 end
 
-local FontPage = FullscreenPage:extend{ category = 1 }
+FontPanel = Panel:extend{ category = 1, page = 1, hide_bottom_bar = true, padding_top = Screen:scaleBySize(6) }
 
-function FontPage:init()
-    self.title = _("Font")
-    FullscreenPage.init(self)
+function FontPanel:init()
     local faces
     faces, self.fontDetails = self.config:fontChoices(true)
     self.categories = { faces, {}, {} }
@@ -876,77 +880,130 @@ function FontPage:init()
         local __, file, index = self.fontDetails(face)
         table.insert(self.categories[FontList:hasChinese(file, index) and 2 or 3], face)
     end
-    self:build()
+    Panel.init(self)
+    if Device:hasKeys() then
+        self.key_events.NextPage = { { Device.input.group.PgFwd } }
+        self.key_events.PrevPage = { { Device.input.group.PgBack } }
+    end
 end
 
-function FontPage:buildTitle()
+function FontPanel:build()
+    Panel.build(self)
+    self.ges_events.Swipe = { GestureRange:new{ ges = "swipe", range = self.dimen } }
+    self.ges_events.PanBlock = { GestureRange:new{ ges = "pan", range = self.dimen } }
+end
+
+function FontPanel:buildHeader(width)
     local labels = VerticalGroup:new{
-        TextWidget:new{ text = self.title, face = Font:getFace("ui_title"), bold = true, padding = 0 },
+        TextWidget:new{ text = _("Font"), face = Font:getFace("ui_label_large"), bold = true, padding = 0 },
         TextWidget:new{
             text = T(_("Current selection · %1"), self.fontDetails(self.config.ui.font.font_face)),
-            face = Font:getFace("ui_label"), padding = 0, max_width = self.title_rect.w - Screen:scaleBySize(44),
+            face = Font:getFace("ui_micro"), padding = 0, max_width = width - Screen:scaleBySize(88),
         },
     }
-    -- The current-selection line changes with the body; the fixed title above it stays unrefreshed.
-    self.body_rect.y = math.floor((self.title_rect.h - labels:getSize().h) / 2) + labels[1]:getSize().h
-    self.body_rect.h = self.dimen.h - self.body_rect.y
-    return CenterContainer:new{
-        dimen = Geom:new{ w = self.title_rect.w, h = self.title_rect.h },
-        labels,
+    local height = math.max(Screen:scaleBySize(44), labels:getSize().h)
+    self.collapse = IconButton:new{
+        icon = "eink/chev.up", icon_rotation_angle = 180,
+        width = Screen:scaleBySize(24), height = Screen:scaleBySize(24), padding = Screen:scaleBySize(10),
+        allow_flash = false, callback = function() self.on_back() end,
+        overlap_offset = { -Screen:scaleBySize(10), -self.padding_top },
+    }
+    return OverlapGroup:new{
+        dimen = Geom:new{ w = width, h = height }, allow_mirroring = false,
+        CenterContainer:new{ dimen = Geom:new{ w = width, h = height }, labels },
+        self.collapse,
     }
 end
 
-function FontPage:buildContent(rect)
-    local gutter = Screen:scaleBySize(21)
-    local width = rect.w - 2 * gutter
+function FontPanel:buildContent()
+    local width = Panel.getContentWidth()
     local columns, card_w, gap = fontGridDimensions(width)
     local labels = { C_("Font category", "All"), _("Chinese"), _("Western") }
     for i, label in ipairs(labels) do
         labels[i] = T(_("%1 (%2)"), label, #self.categories[i])
     end
-    local column = VerticalGroup:new{ align = "left" }
+    self.header = self:buildHeader(width)
     self.tabs = FontCategories:new{
         width = width, labels = labels, value = self.category,
         on_change = function(category)
             self.category, self.page = category, 1
-            self:build()
-            UIManager:setDirty(self, "ui", self.body_rect)
+            self:refresh()
         end,
     }
-    table.insert(column, self.tabs)
-    table.insert(column, VerticalSpan:new{ width = Screen:scaleBySize(15) })
-    local rows = math.max(1, math.floor((rect.h - self.tabs:getSize().h - Screen:scaleBySize(15) + gap) / (Screen:scaleBySize(44) + gap)))
+    local head_h = self.header:getSize().h + self.tabs:getSize().h + Screen:scaleBySize(12)
+    -- Panel's padding and rule; leave a 44dp target for the small pager.
+    local content_h = math.floor(Screen:getHeight() * 0.6) - self.padding_top - Screen:scaleBySize(20) - Size.border.default
+    local footer_h, card_h = Screen:scaleBySize(44), Screen:scaleBySize(44)
+    local rows = math.max(1, math.floor((content_h - head_h - footer_h + gap) / (card_h + gap)))
     local per_page = columns * rows
     local faces = self.categories[self.category]
-    local pages = math.max(1, math.ceil(#faces / per_page))
-    self.page = math.max(1, math.min(self.page, pages))
-    local row
+    self.page_count = math.max(1, math.ceil(#faces / per_page))
+    self.page = math.max(1, math.min(self.page, self.page_count))
+    local column = VerticalGroup:new{
+        align = "left", self.header, self.tabs, VerticalSpan:new{ width = Screen:scaleBySize(12) },
+    }
+    local row, visible_rows = nil, 0
     for i = (self.page - 1) * per_page + 1, math.min(self.page * per_page, #faces) do
         if (i - 1) % columns == 0 then
             if row then table.insert(column, VerticalSpan:new{ width = gap }) end
             row = HorizontalGroup:new{}
             table.insert(column, row)
+            visible_rows = visible_rows + 1
         else
             table.insert(row, HorizontalSpan:new{ width = gap })
         end
         table.insert(row, makeFontCard(self.config.ui.font, card_w, faces[i], self.fontDetails,
-            function()
-                self:build()
-                UIManager:setDirty(self, "ui", self.body_rect)
-            end))
+            function() self:refresh() end))
     end
-    return HorizontalGroup:new{ HorizontalSpan:new{ width = gutter }, column }, pages
+    local grid_h = visible_rows * card_h + math.max(0, visible_rows - 1) * gap
+    self.capsule = nil
+    if self.page_count > 1 then
+        table.insert(column, VerticalSpan:new{ width = math.max(0, content_h - head_h - grid_h - footer_h) })
+        self.capsule = EinkControls.PageCapsule:new{
+            width = Screen:scaleBySize(88), height = Screen:scaleBySize(32),
+            page = self.page, pages = self.page_count, on_change = function(page) self:goToPage(page) end,
+        }
+        table.insert(column, RightContainer:new{
+            dimen = Geom:new{ w = width, h = footer_h },
+            CenterContainer:new{ dimen = Geom:new{ w = self.capsule.width, h = footer_h }, self.capsule },
+        })
+    else
+        table.insert(column, VerticalSpan:new{ width = math.max(0, content_h - head_h - grid_h) })
+    end
+    return column
 end
 
-function FontPage:onCloseWidget()
-    self.config.font_page = nil
-    self.config:refreshPanel()
+function FontPanel:goToPage(page)
+    if page == self.page or page < 1 or page > self.page_count then return end
+    self.page = page
+    self:refresh()
 end
 
-function ReaderTypesetPanel:showFontMenu()
-    self:closeMenu()
-    self.font_page = FontPage:new{ config = self }
-    UIManager:show(self.font_page, "ui", self.font_page.dimen)
+function FontPanel:onNextPage()
+    self:goToPage(self.page + 1)
+    return true
+end
+
+function FontPanel:onPrevPage()
+    self:goToPage(self.page - 1)
+    return true
+end
+
+function FontPanel:onSwipe(_, ges)
+    local direction = BD.flipDirectionIfMirroredUILayout(ges.direction)
+    if direction == "west" or direction == "north" then
+        self:onNextPage()
+    elseif direction == "east" or direction == "south" then
+        self:onPrevPage()
+    else
+        return false
+    end
+    self.config.ui:handleEvent(Event:new("HandledAsSwipe"))
+    return true
+end
+
+function FontPanel:onPanBlock()
+    return true
 end
 
 --- The style tweaks submenu holding the tweak `tweak_id`, or all style tweaks.

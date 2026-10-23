@@ -413,20 +413,47 @@ describe("ReaderTypesetPanel module", function()
             ui.menu:hideToolbar()
         end)
 
-        it("should keep the full font page inside its bands at the largest interface font size", function()
+        it("should open more fonts as a bottom panel and collapse to typesetting without turning the book", function()
+            local main = openPanel(ui)
+            local bars, anchor = ui.menu.bars, ui.rolling:getBookLocation()
+            local old_band = main:getRefreshRegion():combine(bars.bottom_rect)
+            local refreshes = refreshesOf(function() tapWidget(fontCard(main, _("View more") .. " ›")) end)
+            local fonts = ui.config.panel
+            assert.are_not.equal(main, fonts)
+            assert.are.equal(fonts, ui.menu.panel)
+            assert.are.equal(bars, topWidget())
+            assert.is_false(bars.show_top)
+            assert.is_false(bars.show_bottom)
+            local region = fonts:getRefreshRegion()
+            assert.are.equal(Screen:getHeight(), region.y + region.h)
+            assert.is_true(region.h >= Screen:getHeight() * 0.58 and region.h <= Screen:getHeight() * 0.62)
+            assert.are.same({ { mode = "ui", region = old_band:combine(region) } }, refreshes)
+            assert.is_true(hasText(fonts, _("Font")))
+            assert.is_truthy(fonts.collapse)
+            tapWidget(fonts.collapse)
+            UIManager:forceRePaint()
+            assert.are.equal("main", ui.config.page)
+            assert.is_true(ui.menu.bars.show_bottom)
+            assert.is_false(ui.menu.bars.show_top)
+            assert.are.equal(anchor, ui.rolling:getBookLocation())
+            ui.menu:hideToolbar()
+        end)
+
+        it("should keep the font panel within its region at the largest interface font size", function()
             local Font = require("ui/font")
             Font:setUIScale(1.35)
             local ok, err = pcall(function()
                 openPanel(ui)
                 tapWidget(fontCard(ui.config.panel, _("View more") .. " ›"))
                 UIManager:forceRePaint()
-                local page = topWidget()
-                local title_h = page[1][1][1][1]:getSize().h
-                assert.is_true(title_h <= page.title_rect.h, title_h .. " > " .. page.title_rect.h)
+                local page = ui.config.panel
+                local title_h = page.header[1][1]:getSize().h
+                assert.is_true(title_h <= page.header.dimen.h)
+                assert.is_true(page:getRefreshRegion().y > 0)
                 find(page, function(w)
                     if w.font_face then
                         assert.is_true(w.dimen.y >= page.tabs.dimen.y + page.tabs.dimen.h)
-                        assert.is_true(w.dimen.y + w.dimen.h <= page.bar.dimen.y)
+                        assert.is_true(w.dimen.y + w.dimen.h <= (page.capsule and page.capsule.dimen.y or Screen:getHeight()))
                         local label = find(w, function(c) return c.text == w.name end)
                         assert.is_true(label:getSize().w < w.dimen.w)
                     end
@@ -439,19 +466,21 @@ describe("ReaderTypesetPanel module", function()
             assert(ok, err)
         end)
 
-        it("should return from the font page to the same panel and toolbar without changing the chosen font", function()
+        it("should return from the font panel to the typesetting panel and toolbar without changing the chosen font", function()
             local panel = openPanel(ui)
             local bars, selected = ui.menu.bars, ui.font.font_face
             tapWidget(fontCard(panel, _("View more") .. " ›"))
             UIManager:forceRePaint()
-            local page = topWidget()
-            assert.is_true(page.covers_fullscreen)
-            assert.are.equal(panel, ui.config.panel)
+            local page = ui.config.panel
+            assert.is_true(page:getRefreshRegion().y > 0)
+            assert.are_not.equal(panel, ui.config.panel)
             assert.are.equal(bars, ui.menu.bars)
             assert.is_true(fontCard(page, selected).selected)
             back()
             assert.are.equal(bars, topWidget())
-            assert.are.equal(panel, ui.config.panel)
+            panel = ui.config.panel
+            assert.are.equal("main", ui.config.page)
+            assert.is_true(bars.show_bottom)
             assert.is_false(bars.show_top)
             assert.is_truthy(find(bars.bottom, function(w) return w.icon == "eink/font.bold" end))
             assert.are.equal(selected, ui.font.font_face)
@@ -459,11 +488,11 @@ describe("ReaderTypesetPanel module", function()
             ui.menu:hideToolbar()
         end)
 
-        it("should record a font selected on the font page and refresh its body", function()
+        it("should record a font selected on the font panel and refresh its body", function()
             local panel = openPanel(ui)
             tapWidget(fontCard(panel, _("View more") .. " ›"))
             UIManager:forceRePaint()
-            local page = topWidget()
+            local page = ui.config.panel
             local refreshes = refreshesOf(function() tapWidget(fontCard(page, "FreeSerif")) end)
             local ui_refreshes = {}
             for _, refresh in ipairs(refreshes) do
@@ -473,14 +502,14 @@ describe("ReaderTypesetPanel module", function()
                     assert.are.equal("partial", refresh.mode) -- the reader's font re-layout
                 end
             end
-            assert.are.same({ { mode = "ui", region = page.body_rect } }, ui_refreshes)
-            assert.is_true(page.body_rect.y > page.dimen.y)
+            assert.are.same({ { mode = "ui", region = page:getRefreshRegion() } }, ui_refreshes)
+            assert.is_true(page:getRefreshRegion().y > 0)
             assert.is_true(hasText(page, require("ffi/util").template(_("Current selection · %1"), "FreeSerif")))
             assert.are.equal("FreeSerif", G_reader_settings:readSetting("cre_fonts_recently_selected")[1])
             assert.is_true(G_reader_settings:readSetting("cre_fonts_explicitly_selected").FreeSerif)
             back()
-            assert.are.equal(panel, ui.config.panel)
-            assert.is_true(fontCard(panel, "FreeSerif").selected)
+            assert.are.equal("main", ui.config.page)
+            assert.is_true(fontCard(ui.config.panel, "FreeSerif").selected)
             ui.menu:hideToolbar()
         end)
 
@@ -491,12 +520,12 @@ describe("ReaderTypesetPanel module", function()
             local xpointer = ui.rolling:getBookLocation()
             tapWidget(fontCard(panel, _("View more") .. " ›"))
             UIManager:forceRePaint()
-            local page = topWidget()
+            local page = ui.config.panel
             local item
             for __ = 1, page.page_count do
                 item = fontCard(page, "FreeSerif")
                 if item then break end
-                tapWidget(page.bar.capsule, 0.75)
+                if page.capsule then tapWidget(page.capsule, 0.75) end
                 UIManager:forceRePaint()
             end
             assert.is_truthy(item)
@@ -1323,8 +1352,8 @@ describe("ReaderTypesetPanel module", function()
         end)
     end)
 
-    describe("closing the book with the panel or font page open", function()
-        it("should leave no bars, panel or font page behind", function()
+    describe("closing the book with the panel or font panel open", function()
+        it("should leave no bars, panel or font panel behind", function()
             for __, open_fonts in ipairs{ false, true } do
                 local ui = openReader(sample_epub)
                 local panel = openPanel(ui)
@@ -1334,7 +1363,7 @@ describe("ReaderTypesetPanel module", function()
                     tapWidget(fontCard(panel, _("View more") .. " ›"))
                     UIManager:forceRePaint()
                 end
-                local page = ui.config.font_page
+                local page = ui.config.panel
                 local ok, err = pcall(function()
                     ui:onClose()
                     UIManager:forceRePaint()
@@ -1343,7 +1372,6 @@ describe("ReaderTypesetPanel module", function()
                 assert.is_nil(ui.menu.bars)
                 assert.is_nil(ui.menu.panel)
                 assert.is_nil(ui.config.panel)
-                assert.is_nil(ui.config.font_page)
                 for _, window in ipairs(UIManager._window_stack) do
                     assert.are_not.equal(bars, window.widget)
                     assert.are_not.equal(page, window.widget)
@@ -1478,14 +1506,14 @@ describe("ReaderTypesetPanel module", function()
             end
             tapWidget(fontCard(ui.config.panel, _("View more") .. " ›"))
             UIManager:forceRePaint()
-            local page, present = topWidget(), {}
+            local page, present = ui.config.panel, {}
             for __ = 1, page.page_count do
                 local function collect(w)
                     if w.font_face then present[w.font_face] = true end
                     return false
                 end
                 find(page, collect)
-                tapWidget(page.bar.capsule, 0.75)
+                if page.capsule then tapWidget(page.capsule, 0.75) end
                 UIManager:forceRePaint()
             end
             for __, face in ipairs{ "Noto Serif CJK SC", "Noto Serif CJK TC", "Noto Serif Mono CJK SC", "Source Han Serif SC" } do
@@ -1502,14 +1530,14 @@ describe("ReaderTypesetPanel module", function()
             assert.is_nil(fontCard(ui.config.panel, "Dancing Script"))
             tapWidget(fontCard(ui.config.panel, _("View more") .. " ›"))
             UIManager:forceRePaint()
-            local page = topWidget()
+            local page = ui.config.panel
             local T = require("ffi/util").template
             assert.are.same({ T(_("%1 (%2)"), _.pgettext("Font category", "All"), 4), T(_("%1 (%2)"), _("Chinese"), 2),
                 T(_("%1 (%2)"), _("Western"), 2) }, page.tabs.labels)
             assert.is_truthy(fontCard(page, "Dancing Script"))
             assert.is_truthy(find(page, function(w) return w.font_face == "Noto Sans CJK TC" end))
             local refreshes = refreshesOf(function() tapWidget(page.tabs, 0.5) end)
-            assert.are.same({ { mode = "ui", region = page.body_rect } }, refreshes)
+            assert.are.same({ { mode = "ui", region = page:getRefreshRegion() } }, refreshes)
             assert.is_truthy(fontCard(page, _("System font")))
             assert.is_nil(fontCard(page, "FreeSerif"))
             tapWidget(page.tabs, 0.85)
@@ -1525,7 +1553,7 @@ describe("ReaderTypesetPanel module", function()
             local FontList = require("fontlist")
             local lfs = require("libs/libkoreader-lfs")
             local ffiUtil = require("ffi/util")
-            font_dir = require("datastorage"):getFullDataDir() .. "/font_page_coverage"
+            font_dir = require("datastorage"):getFullDataDir() .. "/font_panel_coverage"
             require("util").makePath(font_dir)
             available = { "Noto Sans CJK SC" }
             add("Uncached Chinese")
@@ -1556,7 +1584,7 @@ describe("ReaderTypesetPanel module", function()
             for __ = 1, 2 do
                 tapWidget(fontCard(ui.config.panel, _("View more") .. " ›"))
                 UIManager:forceRePaint()
-                local page = topWidget()
+                local page = ui.config.panel
                 assert.are.same({ T(_("%1 (%2)"), _.pgettext("Font category", "All"), 3),
                     T(_("%1 (%2)"), _("Chinese"), 2), T(_("%1 (%2)"), _("Western"), 1) }, page.tabs.labels)
                 assert.is_nil(fontCard(page, "Unreadable Font"))
@@ -1575,27 +1603,29 @@ describe("ReaderTypesetPanel module", function()
             openCatalog()
             tapWidget(fontCard(ui.config.panel, _("View more") .. " ›"))
             UIManager:forceRePaint()
-            local page, seen = topWidget(), {}
+            local page, seen = ui.config.panel, {}
             tapWidget(fontCard(page, _("System font")))
             runTasks()
             UIManager:forceRePaint()
             assert.is_true(page.page_count > 1)
-            assert.is_false(page.bar.capsule.prev_enabled)
-            tapWidget(page.bar.capsule, 0.25)
+            assert.is_false(page.capsule.prev_enabled)
+            tapWidget(page.capsule, 0.25)
             UIManager:forceRePaint()
             assert.are.equal(1, page.page)
             for n = 1, page.page_count do
+                local visible = {}
                 find(page, function(w)
-                    if w.font_face then
-                        assert.is_nil(seen[w.font_face])
-                        seen[w.font_face] = true
-                    end
+                    if w.font_face then visible[w.font_face] = true end
                     return false
                 end)
-                tapWidget(page.bar.capsule, 0.75)
+                for face in pairs(visible) do
+                    assert.is_nil(seen[face])
+                    seen[face] = true
+                end
+                if page.capsule then tapWidget(page.capsule, 0.75) end
                 UIManager:forceRePaint()
             end
-            assert.is_false(page.bar.capsule.next_enabled)
+            assert.is_false(page.capsule.next_enabled)
             assert.are.equal(page.page_count, page.page)
             local count = 0
             for __ in pairs(seen) do count = count + 1 end
@@ -1604,8 +1634,35 @@ describe("ReaderTypesetPanel module", function()
             UIManager:forceRePaint()
             assert.are.equal(1, page.page)
             assert.is_true(fontCard(page, _("System font")).selected)
-            assert.is_false(page.bar.capsule.prev_enabled)
-            assert.is_false(page.bar.capsule.next_enabled)
+            assert.is_nil(page.capsule)
+            back()
+        end)
+
+        it("should page fonts with swipes in all four directions and hardware keys without moving the book", function()
+            available = { "Noto Sans CJK SC" }
+            for i = 1, 80 do add("Reading Family " .. i, "FreeSerif") end
+            openCatalog()
+            local anchor = ui.rolling:getBookLocation()
+            tapWidget(fontCard(ui.config.panel, _("View more") .. " ›"))
+            UIManager:forceRePaint()
+            local fonts = ui.config.panel
+            assert.is_true(fonts.capsule.width < require("ui/widget/einkcontrols").PageCapsule.width)
+            for __, step in ipairs{ { "west", 2 }, { "north", 3 }, { "east", 2 }, { "south", 1 } } do
+                local refreshes = refreshesOf(function()
+                    UIManager:sendEvent(Event:new("Gesture", { ges = "swipe", direction = step[1],
+                        pos = Geom:new{ x = fonts.dimen.w / 2, y = fonts.dimen.y + fonts.dimen.h / 2 } }))
+                end)
+                assert.are.equal(step[2], fonts.page)
+                assert.are.same({ { mode = "ui", region = fonts:getRefreshRegion() } }, refreshes)
+                assert.are.equal(anchor, ui.rolling:getBookLocation())
+            end
+            UIManager:sendEvent(Event:new("KeyPress", require("device/key"):new("LPgFwd", {})))
+            UIManager:forceRePaint()
+            assert.are.equal(2, fonts.page)
+            UIManager:sendEvent(Event:new("KeyPress", require("device/key"):new("LPgBack", {})))
+            UIManager:forceRePaint()
+            assert.are.equal(1, fonts.page)
+            assert.are.equal(anchor, ui.rolling:getBookLocation())
             back()
         end)
 
@@ -1615,16 +1672,15 @@ describe("ReaderTypesetPanel module", function()
             local anchor = ui.rolling:getBookLocation()
             tapWidget(fontCard(ui.config.panel, _("View more") .. " ›"))
             UIManager:forceRePaint()
-            local page = topWidget()
+            local page = ui.config.panel
             tapWidget(page.tabs, 0.85)
             UIManager:forceRePaint()
             assert.are.equal(require("ffi/util").template(_("%1 (%2)"), _("Western"), 0), page.tabs.labels[3])
             assert.is_nil(find(page, function(w) return w.font_face end))
-            assert.is_false(page.bar.capsule.prev_enabled)
-            assert.is_false(page.bar.capsule.next_enabled)
-            tap(page.dimen.w / 2, page.dimen.h / 2)
+            assert.is_nil(page.capsule)
+            tap(page.dimen.w / 2, page.dimen.y + page.dimen.h / 2)
             UIManager:forceRePaint()
-            assert.are.equal(page, topWidget())
+            assert.are.equal(page, ui.config.panel)
             back()
             assert.are.equal(anchor, ui.rolling:getBookLocation())
         end)

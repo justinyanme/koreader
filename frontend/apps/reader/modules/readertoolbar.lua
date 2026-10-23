@@ -15,7 +15,8 @@ on devices without a touch screen.
 Panels (progress, brightness, more, and the typeset panel of ReaderTypesetPanel)
 open between the page and the bottom bar, which keeps showing and draws the open
 panel's icon filled. The top bar stays too, except over the typeset panel, as in
-WeChat Read. Another entry switches the panel
+WeChat Read. The expanded font panel hides both bars and reaches the bottom edge.
+Another entry switches the panel
 in place, the open panel's own entry closes it, and a tap on the page closes the
 panel and the bars without turning the page. Back leaves one layer at a time:
 a nested panel opened from a panel (only a back arrow below, no top bar), the
@@ -107,7 +108,7 @@ function ToolbarBars:init()
 end
 
 --- Lays the bars out around the toolbar's panel. The top bar hides over a panel that asks for it,
--- and over a nested panel, below which the bottom bar holds only a back arrow.
+-- and over a nested panel, below which the bottom bar holds only a back arrow unless hidden by the font panel.
 function ToolbarBars:layout()
     local panel = self.toolbar.panel
     local nested = panel ~= nil and panel.on_back ~= nil
@@ -116,7 +117,8 @@ function ToolbarBars:layout()
     end
     self.bottom = self.toolbar:buildBottomBar(not nested and self.toolbar.panel_name, nested)
     self.show_top = not (nested or panel and panel.hide_top_bar)
-    local bottom_h = self.bottom:getSize().h
+    self.show_bottom = not (panel and panel.hide_bottom_bar)
+    local bottom_h = self.show_bottom and self.bottom:getSize().h or 0
     self.bottom_rect = Geom:new{ x = 0, y = Screen:getHeight() - bottom_h, w = Screen:getWidth(), h = bottom_h }
     -- children receive events: the bars first
     for i = #self, 1, -1 do
@@ -125,7 +127,9 @@ function ToolbarBars:layout()
     if self.show_top then
         table.insert(self, self.top)
     end
-    table.insert(self, self.bottom)
+    if self.show_bottom then
+        table.insert(self, self.bottom)
+    end
     if panel then
         panel.bottom_y = self.bottom_rect.y
         panel.show_parent = self
@@ -152,7 +156,9 @@ function ToolbarBars:paintTo(bb, x, y)
     if self.show_top then
         self.top:paintTo(bb, x, y)
     end
-    self.bottom:paintTo(bb, x, y + self.bottom_rect.y)
+    if self.show_bottom then
+        self.bottom:paintTo(bb, x, y + self.bottom_rect.y)
+    end
 end
 
 function ToolbarBars:onTapOutside(_, ges)
