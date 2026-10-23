@@ -32,6 +32,7 @@ describe("Interface font size", function()
         C_ = _.pgettext
         require("apps/shelf/shelffilemanager") -- registers the replacement
         Replacements.reader_menu = ReaderToolbar
+        Replacements.reader_config = require("apps/reader/modules/readertypesetpanel")
 
         saved_settings = {}
         for __, key in ipairs{ "home_dir", "lastdir", "ui_font_scale" } do
@@ -57,6 +58,7 @@ describe("Interface font size", function()
         end
         Replacements.filemanager = nil
         Replacements.reader_menu = nil
+        Replacements.reader_config = nil
         ffiUtil.purgeDir(home)
     end)
 
@@ -154,7 +156,7 @@ describe("Interface font size", function()
         end
     end
 
-    -- the first widget in a tree for which pred(widget) holds (a sheet keeps its tiles in `content`)
+    -- the first widget in a tree for which pred(widget) holds (a panel keeps its tiles in `content`)
     local function findWidget(widget, pred, seen)
         seen = seen or {}
         if type(widget) ~= "table" or seen[widget] then return end
@@ -183,9 +185,9 @@ describe("Interface font size", function()
     -- The way a reader gets there: 我 → 设置 on the shelf, 更多 → 全部设置 in the reader.
     local function openSettings(ui)
         if ui.document then
-            ui.menu:openPanel("more")
-            UIManager:forceRePaint()
-            tap(findWidget(ui.menu.sheet, function(w) return w.label == _("All settings") and w.callback ~= nil end).dimen)
+            tap(Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }) -- the toolbars
+            tap(findWidget(ui.menu.bars.top, function(w) return w.icon == "eink/more" and w.callback ~= nil end).dimen)
+            tap(findWidget(ui.menu.panel, function(w) return w.label == _("All settings") and w.callback ~= nil end).dimen)
         else
             tap(tab(ui, "user").dimen)
             tap(tappable(ui.me_view, function(w) return w.text == _("Settings") end).dimen)
@@ -572,6 +574,16 @@ describe("Interface font size", function()
             assert.is_near(roleSize("ui_body", 1.35), findText(settings, _("Interface font size")).face.orig_size, 1e-9)
             assertFits(settings)
             settings:closeMenu(true)
+            -- the toolbar's panels: more, progress, brightness and the typeset panel
+            tap(Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() })
+            for __, icon in ipairs{ "eink/more", "eink/progress", "eink/light", "eink/font" } do
+                local entry = findWidget(ui.menu.bars, function(w) return w.icon == icon and w.callback ~= nil end)
+                tap(entry.dimen)
+                assert.is_truthy(ui.menu.panel)
+                assertFits(ui.menu.panel)
+            end
+            ui.menu:hideToolbar()
+            UIManager:forceRePaint()
             ui:handleEvent(Event:new("ShowToc"))
             UIManager:forceRePaint()
             local contents = topWidget()
