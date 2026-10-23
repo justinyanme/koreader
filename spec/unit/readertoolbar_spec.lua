@@ -214,14 +214,14 @@ describe("ReaderToolbar module", function()
             assert.is_nil(find(bars.bottom, function(w) return w.icon == "eink/progress.bold" end))
 
             -- the top bar's more opens its panel the same way
+            local brightness_band = brightness:getRefreshRegion():combine(bars.bottom_rect)
             refreshes = refreshesOf(function()
                 tapWidget(find(bars.top, function(w) return w.icon == "eink/more" and w.callback end))
             end)
             assert.are.equal("more", ui.menu.panel_name)
             assert.are.equal(windows, #UIManager._window_stack)
-            for _, r in ipairs(refreshes) do
-                assert.are.equal("ui", r.mode)
-            end
+            local more_band = ui.menu.panel:getRefreshRegion():combine(bars.bottom_rect)
+            assert.are.same({ { mode = "ui", region = brightness_band:combine(more_band) } }, refreshes)
             assert.is_nil(find(bars.bottom, function(w) return type(w.icon) == "string" and w.icon:find("%.bold$") end))
             -- the open entry, below the page's right third, closes only the panel
             tapWidget(find(bars.top, function(w) return w.icon == "eink/more" and w.callback end))
@@ -231,6 +231,56 @@ describe("ReaderToolbar module", function()
             ui.menu:hideToolbar()
             UIManager:forceRePaint()
             assert.are.equal(ui, topWidget())
+        end)
+
+        it("should leave the page keys to the open panel, without turning the page", function()
+            local Key = require("device/key")
+            local function pageKey(name) UIManager:sendEvent(Event:new("KeyPress", Key:new(name, {}))) end
+            local page = ui:getCurrentPage()
+            pageKey("LPgFwd") -- without the toolbar, the key turns the page
+            assert.are.equal(page + 1, ui:getCurrentPage())
+            pageKey("LPgBack")
+            assert.are.equal(page, ui:getCurrentPage())
+
+            local panel = openFromToolbar(_("Progress"))
+            pageKey("LPgFwd")
+            pageKey("LPgBack")
+            UIManager:forceRePaint()
+            assert.are.equal(page, ui:getCurrentPage())
+            assert.are.equal(panel, ui.menu.panel)
+            assert.are.equal(ui.menu.bars, topWidget())
+            ui.menu:hideToolbar()
+            UIManager:forceRePaint()
+        end)
+
+        it("should close the bars and the panel on rotation, and lay them out again for the new screen", function()
+            local function runTasks() for _ = 1, 3 do UIManager:_checkTasks() end end
+            local panel = openFromToolbar(_("Progress"))
+            local bars = ui.menu.bars
+            assert.is_truthy(panel)
+            local ok, err = pcall(function()
+                ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_CLOCKWISE))
+                runTasks()
+                UIManager:forceRePaint()
+                assert.is_true(Screen:getWidth() > Screen:getHeight())
+                assert.is_nil(ui.menu.bars)
+                assert.is_nil(ui.menu.panel)
+                for _, window in ipairs(UIManager._window_stack) do
+                    assert.are_not.equal(bars, window.widget)
+                end
+                assert.are.equal(ui, topWidget())
+
+                panel = openFromToolbar(_("Progress"))
+                local rect = panel:getRefreshRegion()
+                assert.are.equal(Screen:getWidth(), rect.w)
+                assert.are.equal(Screen:getHeight(), ui.menu.bars.bottom_rect.y + ui.menu.bars.bottom_rect.h)
+                assert.are.equal(ui.menu.bars.bottom_rect.y, rect.y + rect.h)
+                ui.menu:hideToolbar()
+            end)
+            ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_UPRIGHT))
+            runTasks()
+            UIManager:forceRePaint()
+            assert(ok, err)
         end)
 
         it("should keep the bookmark icon in step with the page the panel jumps to", function()
@@ -379,9 +429,7 @@ describe("ReaderToolbar module", function()
         end)
 
         it("should refresh only the brightness panel, and fully only for night mode", function()
-            ui.menu:openPanel("brightness")
-            UIManager:forceRePaint()
-            local panel = ui.menu.panel
+            local panel = openFromToolbar(_("Brightness"))
             local bars = ui.menu.bars
             assert.are.equal(bars, topWidget())
             local rect = panel:getRefreshRegion()

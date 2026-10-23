@@ -8,8 +8,9 @@ thirds turn pages. The original menu stays reachable through "ShowOriginalMenu",
 menu search, and on devices without a touch screen.
 
 Panels (progress, brightness, more, and the typeset panel of ReaderTypesetPanel)
-open between the page and the bottom bar, with both bars still showing; the
-bottom bar draws the open panel's icon filled. Another entry switches the panel
+open between the page and the bottom bar, which keeps showing and draws the open
+panel's icon filled. The top bar stays too, except over the typeset panel, as in
+WeChat Read. Another entry switches the panel
 in place, the open panel's own entry closes it, and a tap on the page closes the
 panel and the bars without turning the page. Back leaves one layer at a time:
 a nested panel opened from a panel (only a back arrow below, no top bar), the
@@ -91,8 +92,8 @@ function ToolbarBars:init()
     self:layout()
 end
 
---- Lays the bars out around the toolbar's panel. Below a nested panel,
--- the bottom bar holds only a back arrow and the top bar hides.
+--- Lays the bars out around the toolbar's panel. The top bar hides over a panel that asks for it,
+-- and over a nested panel, below which the bottom bar holds only a back arrow.
 function ToolbarBars:layout()
     local panel = self.toolbar.panel
     local nested = panel ~= nil and panel.on_back ~= nil
@@ -100,7 +101,7 @@ function ToolbarBars:layout()
         self.bottom:free()
     end
     self.bottom = self.toolbar:buildBottomBar(not nested and self.toolbar.panel_name, nested)
-    self.show_top = not nested
+    self.show_top = not (nested or panel and panel.hide_top_bar)
     local bottom_h = self.bottom:getSize().h
     self.bottom_rect = Geom:new{ x = 0, y = Screen:getHeight() - bottom_h, w = Screen:getWidth(), h = bottom_h }
     -- children receive events: the bars first
@@ -437,7 +438,7 @@ function ReaderToolbar:hideToolbar(no_refresh)
 end
 
 --- Shows `panel` (a ui/widget/panel) between the page and the bottom bar, in place of the open one,
--- with both bars. `name` is its entry ("progress", "brightness", "more" or "font").
+-- with the bars it keeps. `name` is its entry ("progress", "brightness", "more" or "font").
 function ReaderToolbar:showPanel(name, panel)
     local bars = self.bars
     local before = bars and bars:snapshot()
@@ -531,8 +532,9 @@ end
 -- Shows whether the current page has a bookmark ("fast" on the button only, when that changed).
 function ReaderToolbar:updateBookmarkButton()
     local button = self.bookmark_button
+    if not button then return end -- no bars: nothing to do on every page turn or scroll step
     local icon = self:bookmarkIcon()
-    if button and button.icon ~= icon then
+    if button.icon ~= icon then
         local rect = button.dimen:copy()
         button:setIcon(icon)
         button.dimen.x, button.dimen.y = rect.x, rect.y

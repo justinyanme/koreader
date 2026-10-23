@@ -2,8 +2,9 @@
 Panel of the e-ink redesign (see DESIGN.md, Panels): a paper band between the
 page and the reader's bottom bar, with a 1dp rule-gray top edge and square
 corners. It has no title bar and no close button: the reader toolbar hosts it
-with both bars still showing, switches it in place and closes it (see
-ReaderToolbar:showPanel()).
+with the bottom bar still showing, and the top bar too unless `hide_top_bar`
+is set (the typeset panel, as in WeChat Read). The toolbar switches it in
+place and closes it (see ReaderToolbar:showPanel()).
 
 A panel with `on_back` is nested: opened from another panel, such as the
 typeset panel's layout options (DESIGN.md's paragraph panel). The toolbar
@@ -44,6 +45,7 @@ local GUTTER = Screen:scaleBySize(22)
 local Panel = InputContainer:extend{
     content = nil, -- widget
     on_back = nil, -- function: leaves this nested panel for the one it was opened from
+    hide_top_bar = false, -- the toolbar hides its top bar while this panel shows
     on_close = nil, -- function, called once the panel is closed
     -- set by the toolbar while the panel shows
     bottom_y = nil, -- the panel sits right above this line

@@ -1,18 +1,21 @@
 --[[--
 排版面板 of the e-ink redesign (see DESIGN.md, Panels): font size, font, line
 spacing and margins of reflowable books in one panel between the page and the
-reader toolbar's bottom bar, opened from the toolbar's "Font" ("ShowConfigMenu")
-with both bars still showing. The pill at the right of its title row opens the
-layout options page (weight, render mode, embedded fonts and styles, and links
-into the existing hyphenation and style tweak menus), nested in the toolbar:
-the top bar hides and the bottom bar holds only a back arrow, back to the panel.
+reader toolbar's bottom bar, opened from the toolbar's "Font" ("ShowConfigMenu").
+The bottom bar keeps showing; the top bar hides, as in WeChat Read. The pill at
+the right of its title row opens the layout options page (weight, render mode,
+embedded fonts and styles, and links into the existing hyphenation and style
+tweak menus), nested in the toolbar: the bottom bar then holds only a back
+arrow, back to the panel.
 
 Replaces ReaderConfig (apps/replacements reader_config slot) for reflowable
 books on touch devices. Fixed-layout books and devices without touch keep the
 original bottom bar, which stays reachable for every book through the
 "ShowOriginalConfigMenu" event. Also registers the chapter page header.
 
-Showing, updating and closing the panel only refresh its rect ("ui"). A type
+Showing and closing the panel refresh ("ui") only its rect and the toolbar's
+bars it shows or hides, with the page under what they no longer cover; updating
+it refreshes only its rect. A type
 change re-lays the page out, which the reader refreshes as it does for a page
 turn ("partial", promoted to "full" by the user's full refresh setting).
 ]]
@@ -283,6 +286,7 @@ function ReaderTypesetPanel:showPage(page)
     local panel = Panel:new{
         content = self:pageContent(),
         on_back = page == "more" and function() self:showPage("main") end or nil,
+        hide_top_bar = true,
     }
     panel.on_close = function()
         if self.panel == panel then

@@ -1,14 +1,16 @@
 --[[--
-Bottom sheet of the e-ink redesign (see DESIGN.md, Bottom sheet): a paper plane
-with a 1dp ink border and 16dp top corners, bleeding past the screen edges, with
-a 54dp header (bold title and close button) above the caller's content.
+Bottom sheet of the e-ink redesign (see DESIGN.md, Bottom sheet), kept for the
+书源 sheets, the lookup sheet and the thought editor: a paper plane with a 1dp
+ink border and 16dp top corners, bleeding past the screen edges, with a 54dp
+header (bold title and close button) above the caller's content. The reader
+toolbar's panels are not sheets (see ui/widget/panel).
 
 The rest of the screen is a transparent scrim: a tap there closes the sheet.
 Showing, updating and closing only refresh the sheet's own rect ("ui").
 
 @usage
     local sheet = BottomSheet:new{
-        title = _("Progress"),
+        title = _("Browse"),
         content = VerticalGroup:new{ ... }, -- at most BottomSheet:getContentWidth() wide
         on_close = function() ... end,
     }
@@ -35,7 +37,6 @@ local BottomSheet = InputContainer:extend{
     title = nil,
     content = nil, -- widget
     on_close = nil, -- function, called once the sheet is closed
-    on_back = nil, -- function; when set, the header starts with a back button
     close_on_scrim = true,
     bottom_inset = 0, -- height kept free at the screen bottom, e.g. for the on-screen keyboard
 }
@@ -58,8 +59,7 @@ function BottomSheet:build()
     local close_size = Screen:scaleBySize(24)
     local close_pad = Screen:scaleBySize(10)
     local content_w = self.getContentWidth()
-    local back_w = self.on_back and close_size + close_pad or 0
-    local title_w = content_w - close_size - close_pad - back_w
+    local title_w = content_w - close_size - close_pad
     local title = TextWidget:new{
         text = self.title or "",
         face = Font:getFace("ui_title"),
@@ -81,17 +81,6 @@ function BottomSheet:build()
             callback = function() self:onClose() end,
         },
     }
-    if self.on_back then
-        table.insert(header, 1, IconButton:new{
-            icon = "eink/back",
-            width = close_size,
-            height = close_size,
-            padding_left = 0,
-            padding_right = close_pad,
-            allow_flash = false,
-            callback = function() self.on_back() end,
-        })
-    end
     local radius = Screen:scaleBySize(16)
     local border = Screen:scaleBySize(1)
     self.frame = FrameContainer:new{
@@ -153,13 +142,8 @@ function BottomSheet:onTapScrim(_, ges)
     return true
 end
 
--- Back goes to the previous page when there is one, else closes the sheet.
 function BottomSheet:onBackKey()
-    if self.on_back then
-        self.on_back()
-    else
-        self:onClose()
-    end
+    self:onClose()
     return true
 end
 

@@ -128,6 +128,12 @@ describe("ReaderTypesetPanel module", function()
         return ui.config.panel
     end
 
+    -- Taps the pill of the panel's title row: the more layout options.
+    local function openLayoutOptions(panel)
+        tapWidget(find(panel, function(w) return w.callback and hasText(w, _("More layout options")) end))
+        UIManager:forceRePaint()
+    end
+
     -- the back arrow of the bottom bar under a nested panel
     local function backArrow(bars)
         return find(bars.bottom, function(w)
@@ -145,7 +151,7 @@ describe("ReaderTypesetPanel module", function()
         setup(function() ui = openReader(sample_epub) end)
         teardown(function() closeReader(ui) end)
 
-        it("should open with both bars and close with them, refreshing only their rects", function()
+        it("should open above the bottom bar, without the top bar, and close with it, refreshing only their rects", function()
             local panel
             local refreshes = refreshesOf(function()
                 ui:handleEvent(Event:new("ShowConfigMenu"))
@@ -156,52 +162,70 @@ describe("ReaderTypesetPanel module", function()
             assert.are.equal(panel, ui.menu.panel)
             assert.are.equal("font", ui.menu.panel_name)
             assert.are.equal(bars, topWidget())
+            assert.is_false(bars.show_top) -- as in WeChat Read: the page shows up to the panel
             local band = panel:getRefreshRegion():combine(bars.bottom_rect)
-            assert.are.same({ { mode = "ui", region = bars.top_rect }, { mode = "ui", region = band } }, refreshes)
+            assert.are.same({ { mode = "ui", region = band } }, refreshes)
             assert.are.equal(bars.bottom_rect.y, panel:getRefreshRegion().y + panel:getRefreshRegion().h)
             assert.is_nil(find(panel, function(w) return w.icon == "eink/close" end))
 
-            -- a tap on the page above closes the panel and the bars
-            refreshes = refreshesOf(function() tap(Screen:getWidth() / 2, bars.top_rect.h + 10) end)
+            -- a tap on the page, where the top bar would be, closes the panel and the bottom bar
+            refreshes = refreshesOf(function() tap(Screen:getWidth() / 2, 10) end)
             assert.is_nil(ui.config.panel)
             assert.is_nil(ui.menu.bars)
             assert.are.equal(ui, topWidget())
-            assert.are.same({ { mode = "ui", region = bars.top_rect }, { mode = "ui", region = band } }, refreshes)
+            assert.are.same({ { mode = "ui", region = band } }, refreshes)
         end)
 
         it("should open from the toolbar's Font entry, under its title row, and switch to another panel in place", function()
             tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
             UIManager:forceRePaint()
             local bars = ui.menu.bars
-            local font = find(bars.bottom, function(w) return w.callback and hasText(w, _("Font")) end)
-            local refreshes = refreshesOf(function() tapWidget(font) end)
+            local function entry(text)
+                return find(bars.bottom, function(w) return w.callback and hasText(w, text) end)
+            end
+            local page = ui:getCurrentPage()
+            -- the top bar hides over the typeset panel: it and the band of the panel and the bottom bar refresh
+            local refreshes = refreshesOf(function() tapWidget(entry(_("Font"))) end)
             local panel = ui.config.panel
             assert.is_truthy(panel)
             assert.are.equal(bars, ui.menu.bars)
             assert.are.equal(bars, topWidget())
-            assert.is_true(bars.show_top)
+            assert.is_false(bars.show_top)
             assert.is_true(hasText(panel, _("Font settings")))
             assert.is_truthy(find(bars.bottom, function(w) return w.icon == "eink/font.bold" end))
-            assert.are.same({ { mode = "ui", region = panel:getRefreshRegion():combine(bars.bottom_rect) } }, refreshes)
+            local font_band = panel:getRefreshRegion():combine(bars.bottom_rect)
+            assert.are.same({
+                { mode = "ui", region = bars.top_rect },
+                { mode = "ui", region = font_band },
+            }, refreshes)
 
-            local progress = find(bars.bottom, function(w) return w.callback and hasText(w, _("Progress")) end)
-            refreshes = refreshesOf(function() tapWidget(progress) end)
+            -- the progress panel brings the top bar back
+            refreshes = refreshesOf(function() tapWidget(entry(_("Progress"))) end)
             assert.is_nil(ui.config.panel)
             assert.are.equal("progress", ui.menu.panel_name)
             assert.are.equal(bars, topWidget())
-            for _, r in ipairs(refreshes) do
-                assert.are.equal("ui", r.mode)
-            end
+            assert.is_true(bars.show_top)
+            local progress_band = ui.menu.panel:getRefreshRegion():combine(bars.bottom_rect)
+            assert.are.same({
+                { mode = "ui", region = bars.top_rect },
+                { mode = "ui", region = font_band:combine(progress_band) },
+            }, refreshes)
 
-            tapWidget(find(bars.bottom, function(w) return w.callback and hasText(w, _("Font")) end))
+            tapWidget(entry(_("Font")))
             UIManager:forceRePaint()
             assert.are.equal(ui.config.panel, ui.menu.panel)
-            -- the open entry closes its panel; the bars stay
-            tapWidget(find(bars.bottom, function(w) return w.callback and hasText(w, _("Font")) end))
-            UIManager:forceRePaint()
+            font_band = ui.config.panel:getRefreshRegion():combine(bars.bottom_rect)
+            -- the open entry closes its panel; the bars stay, the top bar with them
+            refreshes = refreshesOf(function() tapWidget(entry(_("Font"))) end)
             assert.is_nil(ui.config.panel)
             assert.is_nil(ui.menu.panel)
             assert.are.equal(bars, topWidget())
+            assert.is_true(bars.show_top)
+            assert.are.same({
+                { mode = "ui", region = bars.top_rect },
+                { mode = "ui", region = font_band },
+            }, refreshes)
+            assert.are.equal(page, ui:getCurrentPage())
             ui.menu:hideToolbar()
             UIManager:forceRePaint()
         end)
@@ -278,32 +302,27 @@ describe("ReaderTypesetPanel module", function()
         it("should open the more layout options from its title row's pill, with only a back arrow below", function()
             local main = openPanel(ui)
             local bars = ui.menu.bars
-            local refreshes = refreshesOf(function()
-                tapWidget(find(main, function(w) return w.callback and hasText(w, _("More layout options")) end))
-            end)
+            local main_band = main:getRefreshRegion():combine(bars.bottom_rect)
+            local refreshes = refreshesOf(function() openLayoutOptions(main) end)
             local more = ui.config.panel
             assert.are.equal("more", ui.config.page)
             assert.are.equal(more, ui.menu.panel)
             assert.is_true(hasText(more, _("Render Mode")))
-            -- the top bar hides, the bottom bar holds only a back arrow
+            -- the top bar stays hidden, the bottom bar holds only a back arrow
             assert.are.equal(bars, topWidget())
             assert.is_false(bars.show_top)
-            UIManager:forceRePaint()
             assert.is_truthy(backArrow(bars))
             assert.are.equal(0, backArrow(bars).dimen.x) -- at the bottom left, as on full-screen pages
             assert.is_nil(find(bars.bottom, function(w) return w.callback and hasText(w, _("Progress")) end))
-            local saw_top = false
-            for _, r in ipairs(refreshes) do
-                assert.are.equal("ui", r.mode)
-                saw_top = saw_top or require("util").tableEquals(r.region, bars.top_rect)
-            end
-            assert.is_true(saw_top) -- the page shows again where the top bar was
+            assert.are.same({
+                { mode = "ui", region = main_band:combine(more:getRefreshRegion():combine(bars.bottom_rect)) },
+            }, refreshes)
 
             tapWidget(backArrow(bars))
             UIManager:forceRePaint()
             assert.are.equal("main", ui.config.page)
             assert.are.equal(ui.config.panel, ui.menu.panel)
-            assert.is_true(bars.show_top)
+            assert.is_false(bars.show_top)
             assert.is_truthy(find(bars.bottom, function(w) return w.icon == "eink/font.bold" end))
             ui.menu:hideToolbar()
         end)
@@ -316,10 +335,9 @@ describe("ReaderTypesetPanel module", function()
                 { "more", _("Paragraph spacing") },
                 { "more", _("Style tweaks") },
             } do
-                openPanel(ui)
+                local main = openPanel(ui)
                 if case[1] == "more" then
-                    ui.config:showPage("more")
-                    UIManager:forceRePaint()
+                    openLayoutOptions(main)
                 end
                 local link = find(ui.config.panel, function(w) return w.callback and w.dimen and (w.name == case[2] or (w.label and w.label.text == case[2])) end)
                 assert.is_truthy(link, case[2])
@@ -345,9 +363,7 @@ describe("ReaderTypesetPanel module", function()
         end)
 
         it("should leave the original bottom bar's link with the panel and the bars closed", function()
-            openPanel(ui)
-            ui.config:showPage("more")
-            UIManager:forceRePaint()
+            openLayoutOptions(openPanel(ui))
             tapWidget(find(ui.config.panel, function(w) return w.callback and w.label and w.label.text == _("All layout options (original)") end))
             UIManager:forceRePaint()
             assert.is_nil(ui.config.panel)
@@ -414,17 +430,17 @@ describe("ReaderTypesetPanel module", function()
             local page = ui:getCurrentPage()
             local main = openPanel(ui)
             local bars = ui.menu.bars
-            tapWidget(find(main, function(w) return w.callback and hasText(w, _("More layout options")) end))
-            UIManager:forceRePaint()
+            openLayoutOptions(main)
             assert.are.equal("more", ui.config.page)
             back()
             assert.are.equal("main", ui.config.page)
             assert.are.equal(ui.config.panel, ui.menu.panel)
-            assert.is_true(bars.show_top)
+            assert.is_false(bars.show_top)
             assert.are.equal(bars, topWidget())
             back()
             assert.is_nil(ui.config.panel)
             assert.are.equal(bars, topWidget())
+            assert.is_true(bars.show_top) -- the toolbar, as before the panel
             back()
             assert.is_nil(ui.menu.bars)
             assert.are.equal(ui, topWidget())
@@ -497,6 +513,27 @@ describe("ReaderTypesetPanel module", function()
             ui:handleEvent(Event:new("SetPageHorizMargins", { 15, 15 }))
             runTasks()
             assert.is_nil(ui.doc_settings:readSetting("typeset_margin_step"))
+        end)
+    end)
+
+    describe("closing the book with the panel open", function()
+        it("should leave no bars or panel behind", function()
+            local ui = openReader(sample_epub)
+            local panel = openPanel(ui)
+            local bars = ui.menu.bars
+            assert.are.equal(panel, ui.menu.panel)
+            local ok, err = pcall(function()
+                ui:onClose()
+                UIManager:forceRePaint()
+            end)
+            assert(ok, err)
+            assert.is_nil(ui.menu.bars)
+            assert.is_nil(ui.menu.panel)
+            assert.is_nil(ui.config.panel)
+            for _, window in ipairs(UIManager._window_stack) do
+                assert.are_not.equal(bars, window.widget)
+                assert.are_not.equal(ui, window.widget)
+            end
         end)
     end)
 
