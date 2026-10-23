@@ -329,7 +329,7 @@ describe("ReaderMorePanel module", function()
             assert.are.equal(ui, topWidget())
         end)
 
-        it("should wash the page only once, also when the bookmark is toggled with the list open", function()
+        it("should remove the wash when a bookmark action closes the list, and wash once on reopening", function()
             local list = openMore(ui)
             local bars = ui.menu.bars
             local band_y = bars.bottom_rect.y - list.band_h
@@ -338,16 +338,26 @@ describe("ReaderMorePanel module", function()
                 return v >= Palette.wash.a - 2 and v <= Palette.wash.a + 2
             end
             assert.is_true(washedOnce())
-            local bookmark = find(bars.top, function(w) return w.icon == "eink/bookmark" and w.callback end)
+            local bookmark = find(bars.top, function(w) return w.icon == "eink/bookmark-add" and w.callback end)
             local refreshes = refreshesOf(function() tapWidget(bookmark) end)
             assertNoFlash(refreshes)
-            assert.are.equal("eink/bookmark-on", bookmark.icon)
-            assert.are.equal(list, ui.menu.panel)
+            assert.is_true(ui.bookmark:isPageBookmarked())
+            assert.is_nil(ui.menu.panel)
+            assert.is_nil(ui.menu.bars)
+            assert.is_true(topWidget().toast)
+            UIManager:close(topWidget())
+            UIManager:forceRePaint()
+            assert.is_true(darkest(bars.top_rect.h + 1, band_y - 1) < 0x40)
+            openMore(ui)
             assert.is_true(washedOnce())
+            bookmark = ui.menu.bookmark_button
+            assert.are.equal("eink/bookmark-on", bookmark.icon)
             tapWidget(bookmark) -- remove the test bookmark
             UIManager:forceRePaint()
             assert.is_false(ui.bookmark:isPageBookmarked())
-            assert.is_true(washedOnce())
+            assert.is_nil(ui.menu.panel)
+            assert.is_nil(ui.menu.bars)
+            assert.is_true(darkest(bars.top_rect.h + 1, band_y - 1) < 0x40)
         end)
 
         it("should show the book details with the reader's own rating and review, and keep them", function()
