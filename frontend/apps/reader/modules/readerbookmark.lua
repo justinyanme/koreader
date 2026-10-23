@@ -465,11 +465,8 @@ function ReaderBookmark:removeItemByIndex(index)
 end
 
 function ReaderBookmark:deleteItemNote(item)
-    local index = self:getBookmarkItemIndex(item)
-    self.ui.annotation.annotations[index].note = nil
-    if item.type == "note" then
-        self.ui:handleEvent(Event:new("AnnotationsModified", { item, nb_highlights_added = 1, nb_notes_added = -1 }))
-    end
+    local index = self.ui.annotation:getItemIndex(item) -- deleting direct thoughts shifts indexes during bulk deletion
+    self.ui.annotation:setNote(index, "")
 end
 
 -- navigation
@@ -1224,10 +1221,17 @@ function ReaderBookmark:showBookmarkDetails(item_or_index)
             _showBookmarkDetails(item_idx + 1)
         end
     end
-    local function edit_details_callback()
-        self.details_updated = true
+    local function edit_details_callback(removed)
+        self.details_updated = not removed
         UIManager:close(textviewer)
-        self:showBookmarkDetails(item_or_index)
+        if removed then
+            if bm_menu then
+                table.remove(item_table, item_idx)
+                self:updateBookmarkList(item_table, -1)
+            end
+        else
+            self:showBookmarkDetails(item_or_index)
+        end
     end
     local function close_callback()
         if self.details_updated then
@@ -1366,7 +1370,6 @@ function ReaderBookmark:setBookmarkNote(item_or_index, is_new_note, new_note, ca
         index = item_or_index
     end
     local annotation = self.ui.annotation.annotations[index]
-    local type_before = item and item.type or self.getBookmarkType(annotation)
     local input_text = annotation.note
     if new_note then
         if input_text then
@@ -1410,33 +1413,15 @@ function ReaderBookmark:setBookmarkNote(item_or_index, is_new_note, new_note, ca
                     callback = function()
                         local value = input_dialog:getInputText()
                         value = value ~= "" and value or nil -- blank input deletes note
-                        annotation.note = value
-                        local type_after, datetime_updated
-                        if type_before ~= "bookmark" then
-                            self.ui.highlight:writePdfAnnotation("content", annotation, value or "")
-                            type_after = self.getBookmarkType(annotation)
-                            if type_before ~= type_after then
-                                if type_before == "highlight" then
-                                    self.ui:handleEvent(Event:new("AnnotationsModified",
-                                        { annotation, nb_highlights_added = -1, nb_notes_added = 1 }))
-                                else -- "note"
-                                    self.ui:handleEvent(Event:new("AnnotationsModified",
-                                        { annotation, nb_highlights_added = 1, nb_notes_added = -1 }))
-                                end
-                                datetime_updated = true
-                            end
-                        end
-                        if not datetime_updated then
-                            self.ui.annotation:onAnnotationsModified({ annotation })
-                        end
+                        local type_after, removed = self.ui.annotation:setNote(index, value)
                         UIManager:close(input_dialog)
                         if item then
                             item.note = value
                             item.type = type_after
-                            item.text = self:getBookmarkItemText(item)
+                            if not removed then item.text = self:getBookmarkItemText(item) end
                         end
                         if caller_callback then
-                            caller_callback()
+                            caller_callback(removed)
                         end
                     end,
                 },

@@ -40,8 +40,8 @@ describe("ReaderNotesPage module", function()
     before_each(function() G_reader_settings:saveSetting("default_highlight_action", "ask") end)
     after_each(function() G_reader_settings:delSetting("default_highlight_action") end)
 
-    local function openReader(file)
-        DocSettings:open(file):purge()
+    local function openReader(file, keep_settings)
+        if not keep_settings then DocSettings:open(file):purge() end
         local ui = ReaderUI:new{
             dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(file),
@@ -55,8 +55,6 @@ describe("ReaderNotesPage module", function()
         if ui.menu.drawer then
             ui.menu:closeDrawer()
         end
-        ui:closeDocument()
-        UIManager:close(ui)
         ui:onClose()
     end
 
@@ -76,6 +74,13 @@ describe("ReaderNotesPage module", function()
 
     local function tapWidget(widget)
         tapRect(widget.dimen)
+    end
+
+    local function holdWidget(widget)
+        local r = widget.dimen
+        UIManager:sendEvent(Event:new("Gesture", { ges = "hold",
+            pos = Geom:new{ x = r.x + math.floor(r.w / 2), y = r.y + math.floor(r.h / 2) } }))
+        UIManager:forceRePaint()
     end
 
     -- Runs fn, repaints, and returns the refreshes that were requested.
@@ -138,6 +143,16 @@ describe("ReaderNotesPage module", function()
         UIManager:forceRePaint()
     end
 
+    local function saveThought(thought)
+        local sheet
+        for i = #UIManager._window_stack, 1, -1 do
+            local w = UIManager._window_stack[i].widget
+            if w.input and w.getRefreshRegion then sheet = w break end
+        end
+        sheet.input:setText(thought)
+        tapWidget(find(sheet, function(w) return w.text == "Save" and w.callback end))
+    end
+
     -- Selects from pos0 to pos1 and writes `thought` on it from the popover.
     local function writeThought(ui, pos0, pos1, thought)
         ui.highlight:onHold(nil, { pos = pos0 })
@@ -146,13 +161,7 @@ describe("ReaderNotesPage module", function()
         ui.highlight:onHoldRelease()
         UIManager:forceRePaint()
         tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
-        local sheet
-        for i = #UIManager._window_stack, 1, -1 do
-            local w = UIManager._window_stack[i].widget
-            if w.input and w.getRefreshRegion then sheet = w break end
-        end
-        sheet.input:setText(thought)
-        tapWidget(find(sheet, function(w) return w.text == "Save" and w.callback end))
+        saveThought(thought)
     end
 
     -- Shows the toolbar with a tap in the middle of the page.
@@ -167,7 +176,9 @@ describe("ReaderNotesPage module", function()
     local function bookmarkPage(ui)
         showToolbar(ui)
         tapWidget(ui.menu.bookmark_button)
-        ui.menu:hideToolbar()
+        local toast = topWidget()
+        assert.is_true(toast.toast)
+        UIManager:close(toast)
         UIManager:forceRePaint()
     end
 
@@ -353,6 +364,32 @@ describe("ReaderNotesPage module", function()
             assert.is_nil(ui.menu.drawer)
         end)
 
+        it("should open this same notes page by tapping the progress count, including all three kinds", function()
+            highlight(ui, Geom:new{ x = 260, y = 70 }, Geom:new{ x = 260, y = 100 })
+            ui.rolling:onGotoPage(30)
+            UIManager:forceRePaint()
+            bookmarkPage(ui)
+            writeThought(ui, Geom:new{ x = 260, y = 200 }, Geom:new{ x = 260, y = 230 }, "Progress count thought")
+            local position = ui:getCurrentPage()
+            local bars = showToolbar(ui)
+            tapWidget(iconCell(bars.bottom, "eink/progress"))
+            local panel = ui.menu.panel
+            assert.is_true(hasText(panel, "3"))
+            local column = find(panel, function(w)
+                return w.ges_events and hasText(w, C_("Notes page", "Notes"))
+                    and w ~= panel
+            end)
+            tapWidget(column)
+            local page = ui.menu.drawer
+            assert.are.equal(3, page.count)
+            assert.is_true(hasText(page.overview, countLine(ui, 3)))
+            assert.is_nil(ui.menu.panel)
+            assert.is_nil(ui.menu.bars)
+            UIManager:sendEvent(Event:new("KeyPress", require("device/key"):new("Back", {})))
+            assert.are.equal(position, ui:getCurrentPage())
+            assert.is_nil(ui.menu.drawer)
+        end)
+
         it("should leave out the reading time without statistics, and close on the Back key", function()
             local page = openFromToolbar(ui)
             assert.is_false(holdsText(page.overview, "minute"))
@@ -523,6 +560,50 @@ describe("ReaderNotesPage module", function()
             assert.are.equal(1, #ui.annotation.annotations)
         end)
 
+        it("should cancel or delete just the held bookmark, updating the last-bookmark filter", function()
+            highlight(ui, Geom:new{ x = 260, y = 70 }, Geom:new{ x = 260, y = 100 })
+            bookmarkPage(ui) -- on the same page as the highlight
+            local saved = require("util").tableDeepCopy(ui.annotation.annotations)
+            local page = openFromContents(ui)
+            local refreshes = refreshesOf(function() holdWidget(page.cards[1]) end)
+            local confirm = topWidget()
+            assert.is_true(hasText(confirm, _("Delete this note?")))
+            assert.is_truthy(cell(confirm, _("Delete")))
+            assert.are.same({ { mode = "ui", region = page.dimen } }, refreshes)
+            tapWidget(cell(confirm, _("Cancel")))
+            assert.are.equal(page, topWidget())
+            assert.are.same(saved, ui.annotation.annotations)
+            assert.are.equal("bookmarks", page.filter)
+
+            holdWidget(page.cards[1])
+            refreshes = refreshesOf(function() tapWidget(cell(topWidget(), _("Delete"))) end)
+            for _, r in ipairs(refreshes) do assert.are.equal("ui", r.mode) end
+            assert.are.equal(page, topWidget())
+            assert.is_nil(page.filter)
+            assert.is_nil(page.filter_button)
+            assert.are.equal(1, #page.cards)
+            assert.are.equal("highlight", page.cards[1].kind)
+            assert.is_true(hasText(page.overview, countLine(ui, 1)))
+            assert.is_false(ui.view.dogear_visible)
+            local kept = require("util").tableDeepCopy(ui.annotation.annotations)
+            closeReader(ui)
+            ui = openReader(sample_epub, true)
+            assert.are.same(kept, ui.annotation.annotations)
+            page = openFromToolbar(ui)
+            assert.is_nil(page.filter_button)
+            assert.are.equal("highlight", page.cards[1].kind)
+            holdWidget(page.cards[1])
+            tapWidget(cell(topWidget(), _("Delete")))
+            assert.is_truthy(page.empty_card)
+            assert.is_true(hasText(page.overview, countLine(ui, 0)))
+            assert.is_false(page.bar.capsule.next_enabled)
+            closeReader(ui)
+            ui = openReader(sample_epub, true)
+            assert.are.same({}, ui.annotation.annotations)
+            page = openFromToolbar(ui)
+            assert.is_truthy(page.empty_card)
+        end)
+
         it("should jump to a bookmark's page without marking anything", function()
             ui.rolling:onGotoPage(20)
             UIManager:forceRePaint()
@@ -534,6 +615,149 @@ describe("ReaderNotesPage module", function()
             assert.are.equal(20, ui:getCurrentPage())
             local focus = ui.view.view_modules.notes_jump_focus
             assert.is_true(focus == nil or #focus:rects() == 0)
+        end)
+
+        it("should open all notes from the toolbar except the first return after a bookmark jump", function()
+            highlight(ui, Geom:new{ x = 260, y = 70 }, Geom:new{ x = 260, y = 100 })
+            bookmarkPage(ui)
+            local page = openFromContents(ui)
+            back(page)
+            page = openFromToolbar(ui)
+            assert.is_nil(page.filter)
+            assert.are.equal(2, #page.cards)
+            tapWidget(page.filter_button)
+            tapWidget(page.cards[1])
+            page = openFromToolbar(ui)
+            assert.are.equal("bookmarks", page.filter)
+            assert.are.equal(1, #page.cards)
+            back(page)
+            page = openFromToolbar(ui)
+            assert.is_nil(page.filter)
+            assert.are.equal(2, #page.cards)
+        end)
+
+        it("should return to the filtered list even when the bookmark is on the current reading page", function()
+            bookmarkPage(ui)
+            local page = openFromToolbar(ui)
+            tapWidget(page.cards[1])
+            page = openFromToolbar(ui)
+            assert.is_nil(page.filter)
+            tapWidget(page.filter_button)
+            tapWidget(page.cards[1])
+            local bars = showToolbar(ui)
+            local refreshes = refreshesOf(function()
+                tapWidget(iconCell(bars.bottom, "eink/notes"))
+                page = ui.menu.drawer
+            end)
+            assert.are.equal("bookmarks", page.filter)
+            assert.are.equal(1, #page.cards)
+            assert.are.same({ { mode = "ui", region = page.dimen } }, refreshes)
+        end)
+
+        it("should restore the filtered list page and jump to the bookmark after font reflow", function()
+            for p = 12, 60, 4 do
+                ui.rolling:onGotoPage(p)
+                UIManager:forceRePaint()
+                bookmarkPage(ui)
+            end
+            ui:handleEvent(Event:new("ChangeSize", 2))
+            UIManager:forceRePaint()
+            ui.rolling:onGotoPage(3)
+            UIManager:forceRePaint()
+            local before = ui.document:getXPointer()
+            local page = openFromContents(ui)
+            nextPage(page)
+            local item = page.cards[1].item
+            local destination = ui.document:getPageFromXPointer(item.page)
+            tapWidget(page.cards[1])
+            assert.are.equal(destination, ui:getCurrentPage())
+            ui:handleEvent(Event:new("GoBackLink"))
+            UIManager:forceRePaint()
+            assert.are.equal(before, ui.document:getXPointer())
+            page = openFromToolbar(ui)
+            assert.are.equal("bookmarks", page.filter)
+            assert.are.equal(2, page.page)
+            assert.are.equal(item, page.cards[1].item)
+        end)
+
+        for _i, origin in ipairs{ "note", "highlight", "legacy" } do
+            it("should delete a thought with " .. origin .. " origin safely and persist it", function()
+                writeThought(ui, Geom:new{ x = 260, y = 70 }, Geom:new{ x = 260, y = 100 }, "Keep the quote")
+                -- Sidecar variants from J05, including old records with no origin.
+                ui.annotation.annotations[1].origin = origin ~= "legacy" and origin or nil
+                closeReader(ui)
+                ui = openReader(sample_epub, true)
+                local saved = require("util").tableDeepCopy(ui.annotation.annotations)
+                local page = openFromToolbar(ui)
+                assert.are.equal("thought", page.cards[1].kind)
+                holdWidget(page.cards[1])
+                tapWidget(cell(topWidget(), _("Cancel")))
+                assert.are.same(saved, ui.annotation.annotations)
+                holdWidget(page.cards[1])
+                tapWidget(cell(topWidget(), _("Delete")))
+                if origin == "note" then
+                    assert.is_truthy(page.empty_card)
+                else
+                    assert.are.equal("highlight", page.cards[1].kind)
+                    assert.are.equal(saved[1].text, page.cards[1].item.text)
+                    assert.are.equal(saved[1].drawer, page.cards[1].item.drawer)
+                    assert.is_nil(page.cards[1].item.note)
+                end
+                closeReader(ui)
+                ui = openReader(sample_epub, true)
+                page = openFromToolbar(ui)
+                if origin == "note" then
+                    assert.is_truthy(page.empty_card)
+                    assert.is_true(hasText(page.overview, countLine(ui, 0)))
+                else
+                    assert.are.equal(1, #page.cards)
+                    assert.are.equal("highlight", page.cards[1].kind)
+                    assert.is_nil(page.cards[1].item.note)
+                    assert.are.equal(saved[1].pos0, page.cards[1].item.pos0)
+                    assert.are.equal(saved[1].pos1, page.cards[1].item.pos1)
+                end
+            end)
+        end
+
+        it("should keep the last list page after cancel and clamp it after deleting its last card", function()
+            for p = 12, 60, 4 do
+                ui.rolling:onGotoPage(p)
+                UIManager:forceRePaint()
+                bookmarkPage(ui)
+            end
+            -- These are distinct bookmarks even when their creation timestamps coincide.
+            for _, item in ipairs(ui.annotation.annotations) do item.datetime = "2026-10-24 00:00:00" end
+            local page = openFromContents(ui)
+            while page.bar.capsule.next_enabled do nextPage(page) end
+            local last_page, last_count = page.page, #page.cards
+            holdWidget(page.cards[1])
+            UIManager:sendEvent(Event:new("KeyPress", require("device/key"):new("Back", {})))
+            UIManager:forceRePaint()
+            assert.are.equal(page, topWidget())
+            assert.are.equal(last_page, page.page)
+            assert.are.equal(last_count, #page.cards)
+            for _i = 1, last_count do
+                holdWidget(page.cards[1])
+                tapWidget(cell(topWidget(), _("Delete")))
+            end
+            assert.are.equal(last_page - 1, page.page)
+            assert.is_true(#page.cards > 0)
+            assert.is_false(page.bar.capsule.next_enabled)
+        end)
+
+        it("should not delete another note if the held bookmark disappears before confirmation", function()
+            highlight(ui, Geom:new{ x = 260, y = 70 }, Geom:new{ x = 260, y = 100 })
+            bookmarkPage(ui)
+            local page = openFromContents(ui)
+            holdWidget(page.cards[1])
+            local confirm = topWidget()
+            ui:handleEvent(Event:new("ToggleBookmark"))
+            UIManager:forceRePaint()
+            tapWidget(cell(confirm, _("Delete")))
+            assert.are.equal(page, topWidget())
+            assert.are.equal(1, #page.cards)
+            assert.are.equal("highlight", page.cards[1].kind)
+            assert.is_nil(page.filter_button)
         end)
 
         it("should drop the gray mark and its timer when the page turns before it goes", function()
@@ -620,6 +844,19 @@ describe("ReaderNotesPage module", function()
     end)
 
     describe("when the reader closes", function()
+        it("should close a pending deletion without changing the bookmark", function()
+            local ui = openReader(sample_epub)
+            bookmarkPage(ui)
+            holdWidget(openFromToolbar(ui).cards[1])
+            local confirm = topWidget()
+            closeReader(ui)
+            assert.is_false(UIManager:isWidgetShown(confirm))
+            ui = openReader(sample_epub, true)
+            local page = openFromToolbar(ui)
+            assert.are.equal(1, #page.cards)
+            assert.are.equal("bookmark", page.cards[1].kind)
+            closeReader(ui)
+        end)
         it("should go with the reader while it is shown", function()
             local ui = openReader(sample_epub)
             local page = openFromToolbar(ui)
@@ -667,6 +904,60 @@ describe("ReaderNotesPage module", function()
                 tapWidget(page.cards[1])
                 assert.are.equal(5, ui:getCurrentPage())
                 assert.are.equal(ui, topWidget())
+                ui:handleEvent(Event:new("GoBackLink"))
+                UIManager:forceRePaint()
+                assert.are.equal(10, ui:getCurrentPage())
+                page = openFromToolbar(ui)
+                assert.are.equal("bookmarks", page.filter)
+                holdWidget(page.cards[1])
+                tapWidget(cell(topWidget(), _("Delete")))
+                assert.is_nil(page.filter_button)
+                assert.are.equal(1, #page.cards)
+                assert.are.equal("highlight", page.cards[1].kind)
+                closeReader(ui)
+                ui = openReader(sample_pdf, true)
+                assert.are.equal(1, #ui.annotation.annotations)
+                assert.is_truthy(ui.annotation.annotations[1].drawer)
+                page = openFromToolbar(ui)
+                local pdf_write = spy.on(ui.highlight, "writePdfAnnotation")
+                holdWidget(page.cards[1])
+                tapWidget(cell(topWidget(), _("Delete")))
+                local match = require("luassert.match")
+                assert.spy(pdf_write).was.called_with(match._, "delete", match.is_table())
+                pdf_write:revert()
+                assert.is_truthy(page.empty_card)
+                closeReader(ui)
+                ui = openReader(sample_pdf, true)
+                assert.are.same({}, ui.annotation.annotations)
+            end)
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
+        it("should clear an attached thought in the PDF and keep its highlight after reopening", function()
+            local ui = openReader(sample_pdf)
+            local ok, err = pcall(function()
+                ui:handleEvent(Event:new("SetScrollMode", false))
+                ui.paging:onGotoPage(10)
+                UIManager:forceRePaint()
+                highlight(ui, Geom:new{ x = 260, y = 70 }, Geom:new{ x = 260, y = 150 })
+                tapRect(ui.view:pageToScreenTransform(10, ui.view.highlight.visible_boxes[1].rect))
+                tapWidget(cell(ui.highlight.highlight_dialog, "Write note"))
+                saveThought("PDF thought")
+                local page = openFromToolbar(ui)
+                assert.are.equal("thought", page.cards[1].kind)
+                local pdf_write = spy.on(ui.highlight, "writePdfAnnotation")
+                holdWidget(page.cards[1])
+                tapWidget(cell(topWidget(), _("Delete")))
+                local match = require("luassert.match")
+                assert.spy(pdf_write).was.called_with(match._, "content", match.is_table(), "")
+                pdf_write:revert()
+                assert.are.equal("highlight", page.cards[1].kind)
+                closeReader(ui)
+                ui = openReader(sample_pdf, true)
+                assert.are.equal(1, #ui.annotation.annotations)
+                assert.is_truthy(ui.annotation.annotations[1].drawer)
+                assert.is_nil(ui.annotation.annotations[1].note)
             end)
             closeReader(ui)
             assert(ok, err)
