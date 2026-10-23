@@ -1003,11 +1003,16 @@ end
 
 function ReaderHighlightBubble:onTap(arg, ges)
     local marks = self.view.view_modules.note_marks
+    local chosen, area
     for index, rect in pairs(marks and marks.targets or {}) do
-        if ges.pos:intersectWith(rect) then
-            self:showThoughtCard(index)
-            return true
+        local size = rect.w * rect.h
+        if ges.pos:intersectWith(rect) and (not area or size < area or size == area and index < chosen) then
+            chosen, area = index, size
         end
+    end
+    if chosen then
+        self:showThoughtCard(chosen)
+        return true
     end
     return ReaderHighlight.onTap(self, arg, ges)
 end

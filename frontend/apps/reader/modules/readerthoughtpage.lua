@@ -10,13 +10,18 @@ local FullscreenPage = require("ui/widget/fullscreenpage")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local IconWidget = require("ui/widget/iconwidget")
+local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local Palette = require("ui/palette")
 local ShelfWidgets = require("apps/shelf/shelfwidgets")
 local TextBoxWidget = require("ui/widget/textboxwidget")
+local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local datetime = require("datetime")
+local T = require("ffi/util").template
 local Screen = require("device").screen
 local util = require("util")
 local _ = require("gettext")
@@ -86,13 +91,26 @@ function ThoughtPage:buildContent(rect)
                 },
             },
         })
+        table.insert(footer, VerticalSpan:new{ width = dp(18) })
+        table.insert(footer, LineWidget:new{ dimen = Geom:new{ w = width, h = dp(0.94) }, background = Palette.rule })
         table.insert(footer, VerticalSpan:new{ width = dp(16) })
-        table.insert(footer, text(_("Only visible to you"), width, "ui_label"))
-        table.insert(footer, ShelfWidgets.Tappable:new{
-            callback = function() self:confirmDelete() end,
-            CenterContainer:new{
-                dimen = Geom:new{ w = width, h = dp(44) },
-                text(C_("Thought editor", "Delete note"), width, "ui_label"),
+        table.insert(footer, HorizontalGroup:new{
+            IconWidget:new{ icon = "eink/lock", width = dp(12), height = dp(14), alpha = true },
+            HorizontalSpan:new{ width = dp(5) },
+            text(_("Only visible to you"), width - dp(17), "ui_label"),
+        })
+        local written = self:writtenAt()
+        local stamp = TextWidget:new{
+            text = written ~= "" and written .. "  " or "", face = Font:getFace("ui_label"),
+        }
+        local delete = TextWidget:new{ text = _("Delete"), face = Font:getFace("ui_label") }
+        table.insert(footer, HorizontalGroup:new{
+            stamp,
+            ShelfWidgets.Tappable:new{
+                callback = function() self:confirmDelete() end,
+                LeftContainer:new{
+                    dimen = Geom:new{ w = math.max(dp(44), delete:getSize().w), h = dp(44) }, delete,
+                },
             },
         })
     end
@@ -100,7 +118,7 @@ function ThoughtPage:buildContent(rect)
     local note_h = math.max(dp(44), rect.h - column:getSize().h - footer:getSize().h
         - heading:getSize().h - dp(12 + 16) - (self.detail and 0 or 2 * padding))
     local note = TextBoxWidget:new{
-        text = self.item.note, face = Font:getFace("ui_body"), fgcolor = Palette.ink,
+        text = self.item.note, face = Font:getFace("ui_body", self.detail and 16 or nil), fgcolor = Palette.ink,
         width = inner, height = note_h, height_adjust = true,
         virtual_line_num = (self.page - 1) * (self.lines_per_page or 1) + 1,
     }
@@ -122,6 +140,21 @@ function ThoughtPage:buildContent(rect)
         HorizontalSpan:new{ width = math.floor((rect.w - width) / 2) }, column,
     }
     return self.content, pages
+end
+
+-- Creation time stays the writing time after edits, as the annotation model records it.
+function ThoughtPage:writtenAt()
+    local stamp = self.item.datetime or ""
+    if stamp == "" then return "" end
+    local now = os.time()
+    local label = stamp:sub(1, 10)
+    local seconds = datetime.stringToSeconds(stamp)
+    if now >= seconds and now - seconds < 60 then
+        label = _("Just now")
+    elseif label == os.date("%Y-%m-%d", now) then
+        label = T(_("Today %1"), stamp:sub(12, 16))
+    end
+    return T(_("Written %1"), label)
 end
 
 -- The detail's cover is 42 × 60dp in reference 09, smaller than the notes overview.
@@ -150,6 +183,13 @@ function ThoughtPage:paintTo(bb, x, y)
     self.content:paintTo(bb, x, y)
     bb:paintRect(x, y + self.content_rect.h, self.dimen.w, self.bar:getSize().h, Palette.paper)
     self.bar:paintTo(bb, x, y + self.content_rect.h)
+end
+
+function ThoughtPage:onTapBlock(_, ges)
+    if not self.detail and ges.pos.y < self.content_rect.h then
+        self:goBack()
+    end
+    return true
 end
 
 function ThoughtPage:showDetail()
