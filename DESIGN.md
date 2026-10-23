@@ -1,115 +1,105 @@
 ---
 name: KOReader e-ink redesign
-description: KOReader re-cut in WeChat Read e-ink grammar; ink on paper, 1px rules, one bottom sheet, fewer refreshes.
+description: KOReader re-cut to WeChat Read's e-ink edition as captured on a BOOX Leaf5; white paper, black ink, gray rules, full-screen lists, panels that keep the toolbars, fewer refreshes.
 colors:
-  paper: "#F1F1EC"
-  ink: "#151515"
-  ink-2: "#565653"
-  ink-3: "#9A9A96"
-  rule: "#C4C4BF"
-  mark: "#C6C6C1"
-  bubble-rule: "#4A4A47"
-  marker-on-ink: "#8E8E8A"
-  cover-stock: "#E2E2DD"
-  cover-tint: "#BBBBB6"
-  cover-gray: "#8B8B87"
+  paper: "#FFFFFF"
+  ink: "#000000"
+  ink-2: "#555555"
+  ink-3: "#999999"
+  rule: "#BBBBBB"
+  mark: "#CCCCCC"
+  tint: "#EEEEEE"
+  hit: "#AAAAAA"
+  cover-stock: "#DDDDDD"
+  cover-tint: "#BBBBBB"
+  cover-gray: "#888888"
 typography:
   reading:
-    fontFamily: "Noto Serif SC, Songti SC, STSong, SimSun, serif"
+    fontFamily: "the reader's choice (see Typography)"
     fontSize: "19px"
     fontWeight: 400
-    lineHeight: 1.8
-  reading-latin:
-    fontFamily: "Noto Serif, Georgia, Noto Serif SC, serif"
-    fontSize: "19px"
-    fontWeight: 400
-    lineHeight: 1.8
+    lineHeight: "125% of the face's line height"
   reading-chapter:
-    fontFamily: "Noto Serif SC, Songti SC, STSong, SimSun, serif"
+    fontFamily: "the reading face"
     fontSize: "1.5em"
     fontWeight: 700
     lineHeight: 1.35
-  headword:
-    fontFamily: "Noto Serif SC, Songti SC, STSong, SimSun, serif"
-    fontSize: "26px"
-    fontWeight: 700
-    lineHeight: 1.2
-  headline:
-    fontFamily: "Noto Sans SC, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif"
+  display:
+    fontFamily: "Noto Serif CJK SC / Source Han Serif SC if installed, else Noto Serif with CJK falling back to Noto Sans CJK SC"
     fontSize: "22px"
     fontWeight: 700
+    lineHeight: 1.2
+  headword:
+    fontFamily: "Noto Sans, Noto Sans CJK SC"
+    fontSize: "20px"
+    fontWeight: 700
     lineHeight: 1.3
+  headline:
+    fontFamily: "Noto Sans, Noto Sans CJK SC"
+    fontSize: "18px"
+    fontWeight: 700
+    lineHeight: 1.3
+  figure:
+    fontFamily: "Noto Sans, Noto Sans CJK SC"
+    fontSize: "24px"
+    fontWeight: 700
+    lineHeight: 1.2
+    fontFeature: "tnum"
+  excerpt:
+    fontFamily: "Noto Sans, Noto Sans CJK SC"
+    fontSize: "18px"
+    fontWeight: 400
+    lineHeight: 1.45
   title:
-    fontFamily: "Noto Sans SC, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif"
+    fontFamily: "Noto Sans, Noto Sans CJK SC"
     fontSize: "16px"
     fontWeight: 700
     lineHeight: 1.3
   body:
-    fontFamily: "Noto Sans SC, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif"
-    fontSize: "15px"
+    fontFamily: "Noto Sans, Noto Sans CJK SC"
+    fontSize: "16px"
     fontWeight: 400
     lineHeight: 1.45
-  excerpt:
-    fontFamily: "Noto Serif SC, Songti SC, STSong, SimSun, serif"
-    fontSize: "14.5px"
-    fontWeight: 400
-    lineHeight: 1.6
   label:
-    fontFamily: "Noto Sans SC, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif"
+    fontFamily: "Noto Sans, Noto Sans CJK SC"
     fontSize: "13px"
     fontWeight: 400
     lineHeight: 1.35
   caption:
-    fontFamily: "Noto Sans SC, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif"
+    fontFamily: "Noto Sans, Noto Sans CJK SC"
     fontSize: "12px"
     fontWeight: 400
     lineHeight: 1.45
     fontFeature: "tnum"
-  micro:
-    fontFamily: "Noto Sans SC, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif"
-    fontSize: "11px"
-    fontWeight: 400
-    lineHeight: 1.45
 rounded:
-  hairline: "2px"
-  cover: "3px"
-  badge: "4px"
-  card: "10px"
-  tile: "12px"
+  tile: "8px"
+  choice: "12px"
+  popover: "13px"
+  card: "14px"
   sheet: "16px"
+  large: "19px"
   pill: "999px"
 spacing:
   xs: "4px"
   sm: "8px"
   md: "12px"
   lg: "18px"
-  gutter: "24px"
+  gutter: "22px"
   touch: "44px"
-  row: "56px"
+  band: "58px"
 components:
-  chip:
+  pill-outline:
     backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
-    typography: "{typography.label}"
     rounded: "{rounded.pill}"
-    padding: "0 13px"
-    height: "30px"
-  chip-selected:
-    backgroundColor: "{colors.ink}"
-    textColor: "{colors.paper}"
-    rounded: "{rounded.pill}"
-  button-outline:
+    padding: "0 14px"
+    height: "34px"
+  searchfield:
     backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
     rounded: "{rounded.pill}"
     padding: "0 16px"
-    height: "40px"
-  button-solid:
-    backgroundColor: "{colors.ink}"
-    textColor: "{colors.paper}"
-    rounded: "{rounded.pill}"
-    padding: "0 16px"
-    height: "40px"
+    height: "50px"
   segmented:
     backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
@@ -118,249 +108,356 @@ components:
   segmented-selected:
     backgroundColor: "{colors.ink}"
     textColor: "{colors.paper}"
-  searchfield:
-    backgroundColor: "{colors.paper}"
-    textColor: "{colors.ink-2}"
-    rounded: "{rounded.pill}"
-    padding: "0 14px"
-    height: "40px"
-  sheet:
+  chip:
     backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.sheet}"
-    padding: "0 24px 20px"
-  selection-bubble:
+    typography: "{typography.label}"
+    rounded: "{rounded.pill}"
+    padding: "0 13px"
+    height: "30px"
+  track:
+    backgroundColor: "{colors.mark}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.pill}"
+    height: "33px"
+  track-passed:
     backgroundColor: "{colors.ink}"
     textColor: "{colors.paper}"
+  font-tile:
+    backgroundColor: "{colors.mark}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.tile}"
+    height: "41px"
+  font-tile-selected:
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.paper}"
+  card:
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.ink}"
     rounded: "{rounded.card}"
-    height: "44px"
+    padding: "20px"
+  selection-popover:
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.popover}"
+    height: "81px"
+  confirm-layer:
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.ink}"
+    typography: "{typography.title}"
+    height: "59px"
   list-row:
     backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
     typography: "{typography.body}"
-    padding: "8px 0"
-    height: "56px"
-  tabbar:
-    backgroundColor: "{colors.paper}"
-    textColor: "{colors.ink-2}"
-    typography: "{typography.micro}"
-    height: "56px"
-  reader-toolbar-bottom:
+    height: "53px"
+  bottom-band:
     backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
-    typography: "{typography.caption}"
-    height: "76px"
-  pager-button:
+    height: "58px"
+  pager:
     backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
     rounded: "{rounded.pill}"
-    width: "44px"
-    height: "32px"
+    width: "133px"
+    height: "42px"
+  search-bar:
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.paper}"
+    rounded: "{rounded.large}"
+    height: "58px"
   toast:
     backgroundColor: "{colors.ink}"
     textColor: "{colors.paper}"
-    rounded: "{rounded.pill}"
-    padding: "10px 18px"
+    typography: "{typography.label}"
+    rounded: "{rounded.tile}"
+    padding: "0 18px"
+    height: "47px"
 ---
 
 # Design System: KOReader e-ink redesign
 
-Scope: this system governs everything drawn inside the simulated e-ink screen (`.screen` and its descendants) of `design/demo/index.html`. The desk, bezel and control column around the device are demo chrome and are out of scope (see the end of Layout). All sizes are in dp: 1 CSS px in the prototype equals 1 dp, which KOReader produces with `Screen:scaleBySize()`. KOReader's existing token home is `frontend/ui/size.lua`, which covers borders, margins, paddings and radii. Colors and type sizes have no tokens there yet, and porting this system means adding them.
+Scope: this system governs every screen the redesign draws in KOReader: the shelf, 书源, 我 and settings pages, the reader's chrome, full-screen pages, panels and overlays. The original KOReader screens behind the 原版入口 are out of scope.
+
+**Source of truth.** The look and the interaction model come from WeChat Read's e-ink edition 2.1.2, captured on a BOOX Leaf5 (1264 × 1680 portrait) on 2026-10-23 in `design/references/weread-eink-leaf5-2026-10-23/`. The owner's rulings on that capture are in its `DECISIONS.md`, and the item list is in `REQUIREMENTS.md`. When sources disagree, the order is: the owner's rulings and `DECISIONS.md`, then the reference screenshots, then the notes in `REQUIREMENTS.md`, then this file, then the UI already merged. `design/demo/index.html` is the first-round prototype. It is not updated and it is no longer used to accept work.
+
+**Units.** Sizes are KOReader dp, produced by `Screen:scaleBySize()`. A portrait panel is 600dp wide (see Layout), so on the Leaf5 1dp is 2.107px. The dp values below were measured from the reference screenshots at that ratio and rounded; the front matter writes them as px. When a value here and a screenshot disagree, the screenshot wins. KOReader's token homes are `frontend/ui/size.lua` (borders, margins, paddings, radii), `frontend/ui/palette.lua` (colors) and `frontend/ui/font.lua` (type roles).
 
 ## Overview
 
-**Creative North Star: "Ink on Paper, One Sheet at a Time"**
+**Creative North Star: "Ink on Paper, Chrome on Request"**
 
-The page owns the screen. Chrome appears only when asked for: a center tap brings a calm black-on-paper toolbar, and every adjustment lives in one bottom sheet that rises over the page. The world is a paper ground and an ink black, with grays only where they carry a job: secondary text, dividers, disabled states and the marker highlight. Structure comes from 1px ink rules and sheet edges, never from shadow or motion. WeChat Read's e-ink edition is the pinned look and interaction model; deviating from it is a defect unless KOReader has a capability with no WeChat Read equivalent.
+The page owns the screen. A swipe up, or a tap in the middle, brings two quiet bands: a top bar of icons on the right and a bottom bar that starts with a back arrow. Typesetting and progress open as panels that slot between the page and the bottom bar, with both toolbars still in place, so the reader can switch panels or leave without closing anything first. Everything longer than a panel (contents, notes, search results, lookup, settings) is a full-screen page with a back arrow at the bottom left and a joined pager at the bottom right. Overlays are white with an ink outline. The world is white paper and black ink. Grays appear only where they do a named job: rules, tracks, resting tiles, temporary marks, disabled states. Structure comes from 1dp rules and outlines, never from shadow or motion.
 
-Density is calm and touch-first. Targets are at least 44dp, rows are 56dp, and the screen gutter is 24dp. Long lists paginate with a pager instead of scrolling, because scrolling on e-ink means a repaint storm. Every interaction is designed around the area it repaints and the KOReader refresh type it needs (partial, ui, fast, full). Only `full` flashes.
+WeChat Read's e-ink edition is the pinned look and interaction model. A deviation is a defect, unless the owner ruled a local substitute (see Local substitutes) or KOReader has a capability that WeChat Read lacks, which then moves to a secondary entry instead of being dropped.
+
+Density is calm and touch-first. Targets are at least 44dp. Long lists paginate instead of scrolling, because scrolling on e-ink means a repaint storm. Every interaction is designed around the area it repaints and the KOReader refresh type it needs (partial, ui, fast, full). Only `full` flashes.
 
 Night mode is a pixel inversion of the whole screen, the same as KOReader's. There is no second palette.
 
 **Key Characteristics:**
-- Paper ground, ink black, grays only for secondary text, rules, disabled states and highlights; monochrome is a confirmed constraint
-- 1px ink rules and 1.5px ink outlines carry all structure; no shadows anywhere
-- Black-filled pill is the selected state for chips and segmented controls
-- Solid black selection bubble with paper labels
-- Bottom sheets with a 1px ink border and 16dp top corners hold every adjustment
-- Paginated lists with a pill pager; no scrolling surfaces
-- Line icons with the label under the icon in tab bars and toolbars
-- Typographic grayscale covers when a book has no cover image
+- Pure white paper and pure black ink; grays only for named jobs, from the panel's 16 levels
+- 1dp gray rules for structure (bar edges, list dividers); 1dp ink outlines for what you touch or read as one unit (cards, pills, the popover)
+- Ink fill marks the current choice: the font tile, the paragraph card, a toggle that is on, the passed part of a track
+- Icons without labels in the tab bar and both reader toolbars
+- Panels between the page and the bottom bar; the toolbars stay
+- Full-screen pages with a bottom-left back arrow and a bottom-right joined pager; no scrolling surfaces
+- A white selection popover with icons over labels, pointing at the selection
+- Confirmations rise from the bottom over a washed-out, inert background
 - Every interaction maps to one KOReader refresh type
 
 ## Colors
 
-A warm-neutral grayscale that quantizes cleanly onto a 16-level panel. The slight warmth of paper is a screen simulation; on device each value maps to its nearest Blitbuffer gray step.
+Every token is one of Blitbuffer's 16 gray steps. The first-round prototype simulated a warm paper (#F1F1EC) and a near-black ink. Those were never device values. The reference screenshots are ADB captures: they keep book covers in color and do not show the panel's real gray levels, so only the UI grays are read from them.
 
 ### Primary
-- **Ink** (ink): All primary text, icon strokes, structural rules (tab bar, toolbars, sheet and drawer edges, nav bar, group headers), interactive outlines, and every selected fill: chips, segments, the solid button, the selection bubble, the toast, the dog-ear bookmark and the text-selection highlight.
+- **Ink** (ink, `COLOR_BLACK`): text, icons, interactive outlines (cards, pills, the search field, the popover, buttons), selected fills, the search bar, the toast, the dog-ear, selection handles, the line highlight, and the confirm layer's top rule. Secondary text in the reference is ink at a smaller size, not gray: page header and footer, meta lines, list subtitles and captions are all ink.
 
 ### Neutral
-- **Paper** (paper): The screen ground and the fill behind every sheet, drawer, toolbar and subpage. It is also the text color on ink fills.
-- **Pencil Gray** (ink-2): Secondary text such as meta lines, list sub-lines, values, sheet row labels, inactive tab labels, page header and footer, and placeholders.
-- **Faded Gray** (ink-3): Disabled controls, chevrons, unavailable TOC entries and fine print.
-- **Rule Gray** (rule): 1px dividers between list rows and the disabled outline of pager and stepper buttons. Also the resting border of the font and action tile cards.
-- **Marker Gray** (mark): The marker highlight fill behind reading text and its swatch in notes.
-- **Bubble Rule** (bubble-rule): Dividers inside the black selection bubble.
-- **Marker-on-Ink** (marker-on-ink): The marker swatch shown on the black bubble's style row.
+- **Paper** (paper, `COLOR_WHITE`): the ground of every screen, panel, card and overlay. It is also the text color on ink fills.
+- **Pencil Gray** (ink-2, `COLOR_GRAY_5`): placeholders and the open-book hint (↑ 上滑显示工具栏). Nothing else.
+- **Faded Gray** (ink-3, `COLOR_GRAY_9`): disabled labels, such as a font that is not installed.
+- **Rule Gray** (rule, `COLOR_GRAY_B`): 1dp structural rules: the toolbar, panel and tab-bar edges, list dividers, the column rules in the progress panel, the rule after the back arrow, cover frames, and disabled outlines and glyphs (the disabled half of the pager).
+- **Marker Gray** (mark, `COLOR_LIGHT_GRAY`): the unpassed part of a track, resting font tiles, the origin dot on the progress track, the marker highlight fill, and the brief focus behind the target of a note or bookmark jump.
+- **Tint** (tint, `COLOR_GRAY_E`): resting large choice cards (the paragraph cards).
+- **Hit Gray** (hit, `COLOR_GRAY`, 0xAA): the temporary mark behind a search hit in the text.
+
+The black bubble's two grays (bubble-rule and marker-on-ink) are retired with the bubble.
 
 ### Cover grays
-Generated typographic covers draw from three extra fills: **Cover Stock** (cover-stock), the light card ground for the frame and stripe covers; **Cover Tint** (cover-tint), the field behind the oversized glyph on split covers; and **Cover Gray** (cover-gray), the mid-tone block cover. Ink and paper complete the set. These grays appear only on covers.
+Generated typographic covers draw from three extra fills: **Cover Stock** (cover-stock, `COLOR_GRAY_D`), the light card ground for the frame and stripe covers; **Cover Tint** (cover-tint, `COLOR_GRAY_B`), the field behind the oversized glyph on split covers; and **Cover Gray** (cover-gray, `COLOR_DARK_GRAY`), the mid-tone block cover. Ink and paper complete the set. These grays appear only on covers.
 
 ### Named Rules
 **The Monochrome Rule.** Color never carries meaning. Every state reads in black, white and gray, because every target panel is monochrome.
 
-**The Job-Only Gray Rule.** A gray must do a named job (secondary text, divider, disabled, highlight). Never introduce a gray for mood or depth.
+**The Job-Only Gray Rule.** A gray must do a named job (rule, track, resting tile, temporary mark, disabled). Never introduce a gray for mood or depth, and never gray secondary text that the reference sets in ink.
+
+**The Wash Rule.** The only scrim is the wash behind a confirm layer, the 更多 list or the thought editor. Everything behind it is redrawn lighter, so ink lands near `COLOR_GRAY_D`, and it takes no touches. Panels never wash the page: the typesetting preview must stay readable.
 
 ## Typography
 
-**UI Font:** Noto Sans SC (with PingFang SC, Hiragino Sans GB, Microsoft YaHei)
-**Reading Font:** Noto Serif SC (with Songti SC, STSong, SimSun); Noto Sans SC is the user-selectable alternative
-**Latin reading faces:** Noto Serif, with Noto Sans as the sans option. Both are KOReader-bundled faces, so English quotes do not set full-width.
+**UI font:** Noto Sans with Noto Sans CJK SC, both bundled.
+**Reading font:** the reader's choice from the font grid (bundled faces, the user's fonts folder and Android system fonts). The 系统字体 tile is the device's system CJK face, or the bundled Noto Sans CJK SC when there is none. No commercial face is bundled.
+**Display serif:** Noto Serif CJK SC or Source Han Serif SC when installed. Otherwise Noto Serif, with CJK glyphs falling back to Noto Sans CJK SC.
 
-**Character:** A neutral CJK sans for every control, and a book serif for everything that is the book's own words. That covers the page, excerpts in notes and search results, dictionary headwords, and cover titles.
+**Character:** a neutral CJK sans for every control and every list, including excerpts quoted in notes, search results and lookup cards (the reference sets them in sans). The serif belongs to the reading page, generated covers and the two display titles.
 
 ### Hierarchy
-- **Reading** (400, user-set 15–28dp in steps 15/16/17/18/19/20/22/24/26/28, default 19; line-height 1.55 / 1.8 / 2.1, default 1.8): Justified body text. Chinese paragraphs get a 2em first-line indent and a 0.45em paragraph gap. English paragraphs get a 1.5em indent, no gap, and automatic hyphenation.
-  - *KOReader port:* crengine sets line spacing as a percentage of the face's own line height, which is about 1.45em for the CJK faces. The three steps are therefore 105 / 125 / 145 % (紧凑 / 标准 / 宽松). On the CJK sans this measures about 1.55 / 1.8 / 2.1em; Latin faces have a shorter natural line height (about 1.36em), so they come out slightly tighter. Font sizes are KOReader dp (`Screen:scaleBySize`), the same numbers as above.
-  - *KOReader port:* the serif and sans cards follow the book's typography language. CJK books get 思源宋体 (Source Han Serif / Noto Serif CJK, not bundled) or 思源黑体 (the bundled Noto Sans CJK SC). Other books get the bundled Noto Serif or Noto Sans, so English quotes and apostrophes never set full-width. When the serif is missing, the card is grayed and marked 未安装. As in upstream ReaderFont, only the first face of a .ttc collection is recognized. Books without a usable language tag (txt, `und`, missing) follow the UI language. Tapping it, or opening a CJK book for the first time (once per install), says where to put the font files and uses 思源黑体.
-- **Reading chapter** (700, 1.5em, 1.35): Chapter titles in the flow, left-aligned and balanced.
-- **Headword** (serif 700, 26dp, 1.2): Dictionary sheet entry word.
-- **Headline** (700, 22dp, 1.3): Top-level page titles such as 文件 and 我的.
-- **Title** (700, 16dp): Nav bar titles and sheet headers. Drawer book titles are 17dp.
-- **Body** (400, 15dp, 1.45): The screen default and the first line of list rows.
-- **Excerpt** (serif 400, 14.5dp, 1.6–1.65): Quoted book text in notes and search results, clamped to 2–3 lines.
-- **Label** (400–500, 13–14dp): Chips, segments, buttons, book titles under covers (13/500), and bubble actions (14).
-- **Caption** (400, 12dp, tabular figures): Status bar, page header and footer, list sub-lines, group headers and progress meta.
-- **Micro** (11dp): Tab bar labels, tags and day labels.
+- **Reading** (400, user-set 15–28dp in steps 15/16/17/18/19/20/22/24/26/28, default 19; line spacing default 125 %): justified body text. Chinese paragraphs get a 2em first-line indent and a 0.45em paragraph gap. English paragraphs get a 1.5em indent, no gap, and automatic hyphenation. The paragraph panel can set the indent and the gap.
+  - *KOReader port:* crengine sets line spacing as a percentage of the face's own line height, which is about 1.45em for the CJK faces. The first-round steps 105 / 125 / 145 % measure about 1.55 / 1.8 / 2.1em on the CJK sans. Latin faces have a shorter natural line height (about 1.36em), so they come out slightly tighter. Font sizes are KOReader dp (`Screen:scaleBySize`), the same numbers as above.
+  - *KOReader port:* when a CJK book is opened for the first time (once per install) and no CJK serif is installed, the reader says where to put font files and uses 思源黑体 (the bundled Noto Sans CJK SC). As in upstream ReaderFont, only the first face of a .ttc collection is recognized. Books without a usable language tag (txt, `und`, missing) follow the UI language.
+- **Reading chapter** (700, 1.5em, 1.35): chapter titles in the flow, left-aligned and balanced.
+- **Display** (serif 700, 22dp): the 书架 title. The 我 page sets the reader's name in the same role at about 28dp.
+- **Headword** (700, 20dp): the looked-up word on the first lookup card.
+- **Headline** (700, 18dp): titles of full-screen pages (笔记, the book title on the contents page), the book title in the notes overview card, chapter group headings in the notes page, and panel titles (字体设置).
+- **Figure** (700, 24dp, tabular): the three figures of the progress panel, each followed by a 13dp unit (%, 分钟, 条).
+- **Excerpt** (400, 18dp, 1.45): quoted book text on note cards, clamped to 3 lines with an ellipsis; lookup cards use the same role.
+- **Title** (700, 16dp): the 导入 and 选择 actions, selection-mode titles, settings and 我 row titles (17dp on 我), centered page titles (设置), and confirm-layer actions.
+- **Body** (400, 16dp, 1.45): contents rows (their page numbers at 14dp, tabular), search-history rows and other list rows.
+- **Label** (13dp): book titles under covers (700, one line), popover labels, font-tile names, meta lines, row subtitles, captions under progress figures, the toast, and the confirm-layer question (700, 14dp).
+- **Caption** (400, 12dp, tabular figures): the page header and footer, and labels inside tracks (700).
+
+The interface font-size setting (小 / 默认 / 大 / 较大 / 特大 = 0.9 / 1.0 / 1.1 / 1.2 / 1.35) scales every role above except Reading and Reading chapter. It never changes the page or the DPI. Layouts must keep their touch targets when it is at 特大.
 
 ### Named Rules
-**The Book Voice Rule.** Serif marks the book's own words. Controls never use the serif, and book text never uses the UI sans unless the reader chose the sans reading font.
+**The Book Voice Rule.** Serif is for the book's own page, generated covers and the two display titles (书架 and the reader's name on 我). Everything else, including quoted excerpts, uses the UI sans. Book text never uses the UI sans unless the reader chose a sans reading face.
 
-**The Tabular Rule.** Every number that updates in place (page counts, percentages, time, battery, pager) uses tabular figures, so a partial refresh does not shift its neighbours.
+**The Tabular Rule.** Every number that updates in place (page counts, percentages, time, battery, progress figures, track values) uses tabular figures, so a partial refresh does not shift its neighbours.
 
 ## Layout
 
-The screen is laid out at 1:1 dp on three reference panels: 6" at 536 × 724, 7" at 632 × 840 (the default) and 10.3" at 936 × 1248. Layouts scale by proportion, not by separate designs.
+The design is one layout scaled by proportion; the Leaf5 reference fixes its proportions.
 
-- **Fixed bands.** The 24dp status bar is always at the top. Library views keep a 56dp tab bar at the bottom. The view between them is a flex column.
-- **Gutter.** 24dp on the left and right of every list, grid and sheet.
-- **Cover grid.** Columns are computed per panel with space-between distribution, 18dp row gap and 3:4 covers. Title and 读到 x% sit under each cover.
-- **Reading page.** The page header sits at 14dp and the text viewport runs from 44dp to 42dp above the bottom. Side margins are 18 / 28 / 44dp (narrow / standard / wide). Panels wider than 800dp add 72dp per side to keep a line near 38 CJK characters. Pages are columns, never scroll.
-  - *KOReader port:* KOReader's dp is proportional, not physical: `scaleBySize` is min(w, h) / 600, unless the user overrides the DPI. Every portrait panel is therefore 600dp wide, and font size scales with it, so 6", 7" and 10.3" set the same line length. The literal "+72dp above 800dp" rule would cut a 10.3" line to about 21 characters. The port instead widens each side by max(0, (W − 2·margin − 38·font size) / 2) dp, recomputed whenever the panel changes the size or the margin step, when a book opens, and on rotation. This changes nothing in portrait; it only applies in landscape or with a DPI override, where several steps can widen to the same margins. The chosen step is therefore saved per book (`typeset_margin_step`) instead of being read back from the margins. It is forgotten when the margins are set some other way (the original bottom bar, gestures). The cap is skipped in two-column mode.
-  - *KOReader port:* the page header is the chapter title (the book title when there is no TOC), drawn at 14dp, left-aligned with the text, 12dp caption in pencil gray, truncated to the text width. It is drawn only when the top margin holds it with a 4dp gap, so it never overlaps the text. It is hidden in scroll mode, when crengine's own top status bar is on, and for fixed-layout books. The design defaults are top margin 44dp, font 19, line spacing 125 % and side margin 28dp; they are written once as global defaults when a book opens with the panel, never over the user's own (whether in the reader settings or customized in defaults.lua).
-- **Pagination over scrolling.** Every list (shelf, files, TOC, notes, search, settings) fills its region and pages with a 44dp pager band: a pill back button, "n / N" and a pill forward button. Overflow is hidden.
-- **Overlay stack.** In order: page, toolbars, scrim, drawer or sheet, subpage, tap-zone overlay, bubble, toast. A sheet opened from a full-screen subpage (书源's long-press, 分类浏览, edit and menu sheets) stacks above that subpage, with its scrim just below it. The drawer opens from the left at min(86%, 560dp). Sheets rise from the bottom, up to 84% of the screen height.
-- **Rhythm.** Gaps step 4 / 8 / 12 / 18 / 24; 10 and 14 are used for intra-component gaps.
+- **Bottom band.** The shelf, 书源 and 我 tabs and every new full-screen page end in a 58dp band with a 1dp rule-gray top edge. On the tabs it holds the three tab icons at the left and the joined pager at the right. On full-screen pages it holds the back arrow at the left, optional outline pill actions, and the pager at the right. The reading page has no band; its bottom toolbar appears on request.
+- **Gutter.** About 22dp on the left and right of the shelf, panels, lists and settings. Card pages (notes, lookup) center a column about 416dp wide. The import page centers one card about 457dp wide.
+- **Shelf.** From the top: a full-width search field (50dp pill) that opens the home search page, then a title row (the 书架 title or the current filter, such as 在读 ▾, at the left; 导入 and 选择 with circled icons at the right), then the cover grid. On the Leaf5 the grid has four columns: covers about 123 × 178dp with a 22dp column gap, then 12dp down to one bold 13dp title line ending in an ellipsis, and about 24dp to the next row. Other panels compute the column count, keeping the cover size and never shrinking a title's touch area.
+- **Reading page.** Only the text, a page header and a page footer. The header is a small circled ‹ glyph and the chapter title, at the top left in 12dp ink. The footer has the time at the left and the current page / total pages at the right, 12dp ink and tabular. Side margins come from the margin track; the design default is 28dp. Pages are columns, never scroll.
+  - *KOReader port:* KOReader's dp is proportional, not physical: `scaleBySize` is min(w, h) / 600, unless the user overrides the DPI. Every portrait panel is therefore 600dp wide, and font size scales with it, so 6", 7" and 10.3" set the same line length. The first-round rule "+72dp per side above 800dp" would cut a 10.3" line to about 21 characters. The port instead widens each side by max(0, (W − 2·margin − 38·font size) / 2) dp, recomputed whenever the panel changes the size or the margin, when a book opens, and on rotation. This changes nothing in portrait; it only applies in landscape or with a DPI override, where several steps can widen to the same margins. The chosen step is therefore saved per book (`typeset_margin_step`) instead of being read back from the margins. It is forgotten when the margins are set some other way (the original bottom bar, gestures). The cap is skipped in two-column mode.
+  - *KOReader port:* the page header is drawn only when the top margin holds it with a 4dp gap, so it never overlaps the text. It is hidden in scroll mode, when crengine's own top status bar is on, and for fixed-layout books. The design defaults are top margin 44dp, font 19, line spacing 125 % and side margin 28dp; they are written once as global defaults when a book opens with the panel, never over the user's own (whether in the reader settings or customized in defaults.lua). A new default footer must leave a footer the user already customized alone.
+- **Pagination over scrolling.** Every list (shelf, files, contents, notes, search, lookup, settings, fonts) fills its region and pages with the joined pager. There is no "n / N" count between the buttons; the pager's disabled half shows the boundary. Overflow is hidden.
+- **Overlay stack.** In order: page (with header and footer), toolbars, panel, full-screen page, popover and selection handles, search bar, wash with a confirm layer or the thought editor, toast. A sheet opened from a full-screen page (书源's long-press, 分类浏览, edit and menu sheets) stacks above that page.
+- **Rhythm.** Gaps step 4 / 8 / 12 / 18 / 22; 13 is the gap between cards.
 
 **The Proportion Rule.** One design from 6" to 10.3". Change columns and margins with the panel and keep the component sizes.
 
-**Out of scope: demo chrome.** The desk background, dark bezel, 292px control column (device size segment, refresh-region and night switches, refresh log, jump list, context path in monospace) and the orange signal color `#D9481F` exist only to present and instrument the prototype. The orange belongs only to the refresh-region overlay (2px dashed outline plus type label) and the control-column switches. The warm front-light tint is a multiply overlay that simulates the light, not pixels. None of these are product tokens.
-
 ## Elevation & Depth
 
-Flat by construction. E-ink cannot render soft shadows, and the system does not fake them. Depth is conveyed by edges and by occlusion only. A sheet is a paper plane with a 1px ink border drawn over the page. Toolbars are paper bands with a 1px ink rule on their inner edge. The drawer has a 1px ink right edge. The one exception to "edges only" is the black bubble, which separates by solid fill.
+Flat by construction. E-ink cannot render soft shadows, and the system does not fake them. Depth is conveyed by edges, occlusion and the wash only. A panel is a paper band with a 1dp rule-gray top edge drawn over the page. Toolbars are paper bands with a 1dp rule-gray inner edge. Cards and the popover are paper with a 1dp ink outline. A confirm layer is paper with a 2dp ink top rule over a washed background.
 
-**The Edge, Not Shadow Rule.** Separate surfaces with a 1px ink rule or a sheet edge. Never use a drop shadow, blur or translucent scrim tint. Scrims exist only to catch taps and are fully transparent.
+**The Edge, Not Shadow Rule.** Separate surfaces with a 1dp rule or an outline. Never use a drop shadow, blur or gradient. The only scrim is the wash (see Colors).
 
 **The No-Motion Rule.** Nothing animates on the product surface. State changes are a repaint of a named region with a named refresh type.
 
 ## Shapes
 
-Two families. **Pills** (radius = half the height) are for everything tappable that sits on a line of controls: chips (30dp), search fields (40–42dp), segmented controls and steppers (38dp), buttons (40dp), pager buttons (44 × 32dp), toggles and the toast. **Soft rectangles** are for containers: font cards at 10dp, the selection bubble at 10dp, the note textarea at 10dp, action tiles at 12dp, and sheet top corners at 16dp. Small square-ish marks are badges (format badge and part-of-speech tag at 4dp) and covers (3dp, 2dp in the drawer).
+Two families. **Pills** (radius = half the height) are for everything tappable that sits on a line of controls: search fields (50dp, 40dp on the contents page), segmented controls (38dp), outline pill buttons (34dp; the paragraph pill 29dp), tracks (33dp; the progress track 35dp), the joined pager (42dp), toggles and chips (书源 facets only, 30dp). **Soft rectangles** are for containers: font tiles at 8dp (`tile`), paragraph cards at 12dp (`choice`), the popover at 13dp (`popover`), cards at 14dp (`card`), the bottom sheet's top corners at 16dp (`sheet`), and the import card and the search bar's top corners at 19dp (`large`). Square corners: covers, panels, toolbars and the confirm layer. **Circles** are the ± buttons beside tracks (33dp), the type discs on note cards (25dp), the icon rings on 我 rows (37dp), selection handles and the import page's close button (57dp).
 
-Border weights form a three-step ladder that maps onto `size.lua`:
-- **1px** (`Size.border.default`): structural rules and row dividers, chips, pager buttons, tags.
-- **1.5px** (`Size.border.button` / `window`): interactive outlines such as the search field, segmented controls, steppers, outline buttons, toggles and the textarea.
-- **2px** (`Size.border.thick`): selected font card and tap-zone outlines.
+Line weights map onto `size.lua`:
+- **1dp** (`Size.border.default`): every rule and every outline (cards, pills, the popover, ± buttons, the pager, type discs).
+- **1.5dp** (`Size.border.button`): toggles and the line highlight.
+- **2dp** (`Size.border.thick`): the confirm layer's top rule.
+- **4–5dp**: the ink frame around a selected cover in selection mode.
 
-`size.lua` radii (default 2, window 7, button 7) do not cover the pill or the 16dp sheet; they need new entries.
+`size.lua` radii (default 2, window 7, button 7) cover none of these; they need new entries.
 
 ## Components
 
-### Buttons
-Quiet outlines that turn solid for the one committing action.
-- **Shape:** pill, 40dp tall, 0 16dp padding, 14dp label, icon gap 6dp.
-- **Outline:** paper fill, 1.5px ink border, ink label.
-- **Solid:** ink fill, paper label. Use one per sheet, for the commit (保存, 搜索 go button).
-- **Disabled:** border to rule gray, label to faded gray.
-- **Focus:** 2px ink outline inset 3px. No hover state on device.
+### Buttons and pills
+- **Outline pill:** paper fill, 1dp ink outline, ink label. Used for 返回原进度, the paragraph entry (首行顶格 ›), 开启自动翻页 (full width, 35dp) and the contents page's 书签.
+- **Text action:** 16dp bold ink text with an optional circled line icon, such as 导入, 选择, 全选, 取消, 保存. No outline.
+- **Disabled:** outline and glyph go to rule gray, labels to faded gray.
+- **Focus:** 2dp ink outline inset 3dp. No hover state on device.
 
 ### Chips
-- **Style:** 30dp pill, 1px ink border, 13dp label with an optional count at 75% opacity, 8dp apart.
-- **State:** selected is a solid ink fill with paper text. Use them for single-choice filters (全部 / 在读 / 未读 / 读完).
+Only 书源 uses chips, for its facets: a 30dp pill, 1dp ink outline, 13dp label, 8dp apart; selected is ink fill with paper text. The shelf has no chips: its status filter lives in the title (see Navigation).
 
 ### Segmented control
-A 38dp pill with a 1.5px ink border. Segments are split by 1px ink rules and the selected segment is ink-filled with paper text. It is the standard single-choice control inside sheets (line spacing, margins, sort). In sheets it sits in a row that has a 56dp column for a gray label on the left.
+A 38dp pill with a 1dp ink outline. Segments are split by 1dp ink rules and the selected one is ink-filled with paper text. It is the single-choice control inside a page, such as 全部 / 中文 / 西文 (with counts) on the full-screen font page.
 
-### Stepper and tick scale
-Two 44 × 38dp pill buttons, with a small and a large serif "A", flank a tick track. The track is a 1.5px ink line with 7dp hollow dots. Passed ticks fill ink, and the current tick is a 16dp solid dot. Font size uses this control. Each step repaints the page with a partial refresh.
+### Tracks (typesetting and progress)
+A pill track flanked by two 33dp circle buttons (− and +, 1dp ink outline). The track's passed part is ink and the rest is marker gray. On stepped tracks a 1dp paper rule marks each passed step. The knob is a paper disc with a 1dp ink outline. It shows the real value in 12dp bold (the font size in dp, the weight step), or the row's name (行距, 边距) when the value has no short number. End labels sit inside the track in 12dp bold: paper on ink at the left (小, 细, 紧, 小), ink on gray at the right (大, 粗, 松, 大). Line spacing and margins have more steps than the first round's three. The old 105 / 125 / 145 % and 18 / 28 / 44dp stay on the track, and a value set elsewhere reads back at its own position without being snapped. Each change re-lays the page out with a partial refresh while the panel stays open.
 
-### Cards / Containers
-- **Font and action tiles:** 1px rule-gray border at rest. The selected tile turns to a 2px ink border. Font tiles are 66dp at 10dp radius; action tiles are 84dp at 12dp radius, with icon over label.
-- **Background:** paper.
-- **Shadow Strategy:** none (see Elevation & Depth).
+The progress track is 35dp tall and runs the gutter width without ± buttons. Chapter arrows ‹ and › sit inside its ends; at the first or last chapter the arrow turns rule gray, like any disabled glyph. Dragging moves only the knob and a preview of the target percentage; the jump happens once, on release.
+
+### Cards
+- **Card:** paper, 1dp ink outline, 14dp radius, 20dp padding, 13dp apart. Used for the notes overview, note cards, lookup cards and empty states.
+- **Note card:** a 25dp type disc (1dp ink ring) at the left holds the type glyph (an underlined A for a highlight, a bookmark, a thought bubble), then the excerpt (Excerpt role). The highlight keeps its own style and its thought.
+- **Font tile:** marker-gray fill, no outline, 8dp radius, about 106 × 41dp, five per row on the Leaf5. Each name is set in its own face. The current font is ink-filled with paper text. The last tile is 查看更多 ›.
+- **Paragraph card:** about 275 × 139dp, 12dp radius, a line icon over a 14dp bold label (首行顶格, 首行缩进). Selected is ink fill with paper content; the other is tint. The 段间距 toggle sits at the foot of the 首行缩进 card.
 
 ### Inputs / Fields
-- **Search field:** 40–42dp pill, 1.5px ink border, search icon, 15dp input, pencil-gray placeholder, and an inset solid 32dp go pill.
-- **Note textarea:** 1.5px ink border, 10dp radius, 12dp padding, 15dp at line-height 1.6, no resize.
-- **Toggle:** 42 × 26dp pill. When off it has a 1.5px ink outline and an ink knob. When on it is ink-filled with a paper knob.
-- **Labelled field** (forms in sheets, such as 添加书源): a 13dp `ink-2` label column beside a 40dp pill input with a 1.5px ink border, 15dp text and a pencil-gray placeholder. Rows are 52dp minimum. The label column is 92dp, wider than a sheet row's 56dp, because labels such as "Client Secret" must fit on one line. Optional groups sit under a 12dp gray group header. A form commits with one solid button, disabled (rule border, faded label) until its required fields are filled.
+- **Search field:** a pill with a 1dp ink outline, a search icon and 16dp text; 50dp tall on the shelf and the home search page, 40dp on the contents page. A filled field shows a round clear button at the right. Placeholders are pencil gray.
+- **Toggle:** about 47 × 23dp. Off is paper with a 1.5dp ink outline and an ink knob at the left; on is ink with a paper knob at the right.
+- **Thought editor:** a compact band docked on top of the keyboard over the wash. A back column (← 返回) is split off by a rule; next to it are a thought icon, the input (placeholder 写下这一刻的想法…) and the quoted excerpt behind a short ink bar; 保存 sits at the right. There is no privacy pill.
+- **Labelled field** (forms in sheets, such as 添加书源): a 13dp label column beside a 40dp pill input with a 1dp ink outline. Rows are 52dp minimum. The label column is 92dp, because labels such as "Client Secret" must fit on one line. A form commits with one solid button, disabled until its required fields are filled.
 
 ### Navigation
-- **Tab bar** (书架 / 文件 / 我的): 56dp, with a 1px ink rule on top. Each tab is a line icon over an 11dp label. Inactive tabs are pencil gray. The current tab is ink and bold, and its icon stroke thickens from 1.7 to 2.2.
-- **Nav bar** (subpages): 52dp with a 1px ink bottom rule. A 52dp back column sits on the left, with a centered 16dp bold title.
-- **Drawer tabs** (目录 / 书签 / 笔记): equal columns over a 1px ink rule. The selected tab is ink, bold, with a 3px ink underline across the middle 40%.
-- **List row:** at least 56dp, with a 1px rule-gray bottom divider. It has a 15dp first line, a 12dp gray second line, an optional right-hand value and a faded chevron. Group headers are 12dp gray over a 1px ink rule.
+- **Tab bar** (书源 / 书架 / 我): in the bottom band, three 28dp line icons with no labels, about 91dp apart from a 32dp left inset: a compass, a stack of books and a person. The current tab's icon is filled. The joined pager sits at the right.
+- **Shelf title row:** the 书架 title is a menu. Tapping it lists 全部 / 在读 / 未读 / 读完 / 搁置. The title then reads the current filter with a ▾ (在读 ▾); 全部 reads plain 书架. Sorting lives in 设置 → 书架, default 最近阅读.
+- **Selection mode:** a long press on a cover enters it with that book selected; 选择 enters it with none. While it is on, a tap on a cover only toggles it. The title row becomes 全选 (or 取消全选, covering the whole shelf, not just the page) at the left, 已选择 N 本书籍 in the middle and 取消 at the right, all 16dp bold. Each cover gets a 25dp ring at its lower right; a selected cover gets a 4–5dp ink frame and an ink check in the ring. The bottom band swaps the tab icons for the two local actions, 移出书架 and 标记为.
+- **Nav bar** (subpages merged before this round, such as 书源 and the 我 subpages): 52dp with a 1dp ink rule at the bottom, a 52dp back column at the left and a centered 16dp bold title. Those pages keep it until their own tickets move them to the full-screen page form below; new pages do not use it.
+- **Full-screen page:** a headline at the top left with an optional text action at the right (↓去底部, 仅显示书签 / 显示全部, 取消). Content follows, then the bottom band: a 28dp back arrow at the left, optional outline pills, and the joined pager.
+- **Joined pager:** a 133 × 42dp pill split in two by a 1dp rule: ︿ (previous page) at the left, ﹀ (next page) at the right. An enabled half has an ink outline and glyph; a disabled half has rule-gray ones. These arrows page the list only and never turn book pages.
+- **List row:** at least 53dp, with a 1dp rule-gray divider. Contents rows put a 16dp title at the left (indented about 15dp per level, with a collapse chevron before a group) and the page number at the right. Settings and 我 rows are about 92dp: a bold title over a 13dp subtitle, and a toggle or a chevron at the right; 我 rows lead with a 37dp circled icon.
 
 ### Reader toolbars
-A center tap brings two paper bands. The top bar is 56dp (back, then bookmark, search, more) with a 1px ink bottom rule. The bottom bar is 76dp with four equal cells, each a line icon over a 12dp label: 目录, 进度, 亮度, 字体. It has a 1px ink top rule. Both appear and hide with a `ui` refresh limited to their own rects.
+A swipe up, or a tap in the middle, brings two paper bands; while they show, a tap on the page closes them without turning the page. The **top bar** (about 50dp) puts line icons at the right, about 76dp apart, in this order: 书签, 书架状态, 更多. Future 繁简 and 手写 entries go to the left of 书签; nothing holds their place now. The bookmark icon shows whether this page has a bookmark; the 书架状态 icon carries a check while the book is on the shelf. The **bottom bar** (58dp) has a back arrow at the left, a 1dp rule-gray vertical rule about 25dp tall, then four icons with no labels sharing the rest evenly: 目录, 笔记, 进度, 字体. There is no fifth slot for 听, not even a blank one. The icon of the open panel is drawn filled. Each bar has a 1dp rule-gray inner edge, and both appear and hide with a `ui` refresh limited to their own rects.
+
+**Open-book hint:** each time a book opens, ↑ 上滑显示工具栏 sits centered on the footer line in 13dp pencil gray. It goes away the first time the toolbars show, or after about a minute; turning pages does not bring it back.
+
+### Panels
+The 排版面板 and the 进度面板 are paper bands between the page and the bottom bar, with a 1dp rule-gray top edge and square corners. There is no title bar and no close button. Back leaves one layer at a time, starting with the panel, and another bottom icon switches to its panel in place. The page above stays readable and live.
+
+- **排版面板:** a title row (字体设置 in headline at the left; at the right an outline pill naming the current paragraph mode, 首行顶格 › or 首行缩进 ›), then four track rows about 44dp apart: 字号, 字重, 行距, 边距. Below them, 当前选择 · font name (16dp bold), then the font grid in three rows. 查看更多 › opens the full-screen font page.
+- **Paragraph panel:** opened from the pill. The top bar hides and the bottom bar shows only the back arrow. The panel holds the two paragraph cards.
+- **进度面板:** three columns split by 1dp rule-gray vertical rules: the position (figure and %) over 约 N 小时后读完, the reading time over 阅读时长, and the note count over 笔记. The estimate line is left out when there are no statistics. Tapping the note count opens the notes page. Below are the progress track and 开启自动翻页.
+- **返回原进度:** after the first jump from the progress panel, an outline pill ‹ 返回原进度 (about 95 × 34dp, 13dp) sits centered just above the panel, and a gray dot marks the origin on the track: marker gray over the passed ink part, and outlined in 1dp ink over the gray part so it stays visible. The dot is not tappable. Tapping the pill returns to the 原进度 and closes the panel and the toolbars.
+- **Auto page turn** (`03-progress/02-auto-page-turn.png`, `03-auto-page-turn-settings.png`): 开启自动翻页 starts it. While it runs, an outline pill with a sliders icon and 自动翻页设置 (13dp) sits at the page's bottom left. The pill opens the settings panel: a ∨ at the left that only folds the panel away, 自动阅读 centered, and a 划线导读 toggle at the right (reflowable books only). Below is a speed scale from 慢 to 快 with the five speeds 1.0 / 1.5 / 2.0 / 3.0 / 4.0 (60 / 40 / 30 / 20 / 15 s per page), the current one circled in ink. Last is a full-width outline pill 关闭自动翻页, the only control that stops it. The 划线导读 line is a short ink rule under the current line that steps down line by line, splitting the page interval evenly.
 
 ### Bottom sheet
-The single home for every adjustment. A paper plane with a 1px ink border and 16dp top corners, bleeding 1px past the screen edges. Content has 24dp side padding and 20dp at the bottom. The 54dp header holds a 16dp bold title and a close icon button. Rows are 52dp minimum. An optional link row at the foot has a 1px rule above it and a chevron. A sheet that only navigates (书源's 分类浏览) may lay its rows out in two columns with a 24dp gap; the current item is bold with a check mark instead of a chevron.
+Kept only where it already serves: 书源's long-press sheet, 分类浏览, and the edit and menu sheets of 书源. It is a paper plane with a 1dp ink border and 16dp top corners, bleeding 1dp past the screen edges, with 22dp side padding. Its 54dp header holds a 16dp bold title and a close icon button. Rows are 52dp minimum. A sheet that only navigates (分类浏览) may lay out its rows in two columns with a 22dp gap; the current item is bold with a check mark instead of a chevron. New panels and confirmations do not use this sheet (see Panels and Confirm layer).
 
-### Selection bubble
-A solid ink 10dp-radius bar with paper labels, 44dp action cells (复制 / 划线 / 写想法 / 查询 / 搜索) separated by bubble-rule dividers, and a 7dp arrow pointing at the selection. On device the selection bubble's dividers are paper instead of bubble-rule: the bubble shows with a `fast` refresh, which renders only black and white, and a bubble-rule gray would come out wrong. The highlight bubble keeps bubble-rule, as it refreshes with `ui` for its gray marker swatch. When neither above nor below the selection has room, the bubble overlays the selection without the arrow. A second row carries highlight styles. The selected style is a 2dp paper inset ring. Text selection itself is ink fill with paper text.
+### Confirm layer
+A full-width paper layer rising from the bottom with square corners and a 2dp ink top rule, over the wash. It has a centered question row (about 53dp, 14dp bold, such as 确认删除该笔记吗？ or 是否将《…》移出书架？), then one row per action (about 59dp, 16dp bold, centered; two-character labels letter-spaced: 删 除, 移 出), then 取 消 last. Rows are split by 1dp rule-gray dividers. Cancel changes nothing, and no touch passes through the wash to the page. The 更多 list uses the same form without the question row: 亮度与色温, 书籍详情, 导出笔记, 点击区域, 阅读统计, 全部设置（原版）. The reference has no 更多 list; this is the closest form it does show.
+
+### Selection popover (formerly the selection bubble)
+A paper popover with a 1dp ink outline, 13dp radius and an arrow about 8dp deep (the outline runs around it) pointing at the selection. Its cells are about 62dp wide: a 21dp line icon over a 13dp label. The order is 划线, then 查询 (for CJK text) or 翻译 (for Latin text), 写想法, 复制. On an existing highlight the first cell becomes 删除划线 in the same place. It sits above the selection when there is room, also at the page foot, otherwise below with the arrow flipped, and it stays inside the gutter. It is pure black and white, so it shows and closes with `fast` on its own rect. There is no second row of styles (see Highlights).
+
+**Selection:** a temporary selection is a 1dp ink underline under the selected text, with an ink drop handle (about 25dp) hanging under each end. It is not an ink fill and not the engine's gray. The handles can be dragged across lines and pages.
 
 ### Highlights
-Three styles, all monochrome: **marker** (marker-gray fill), **line** (2dp ink underline offset 0.3em) and **wave** (1.3dp wavy ink underline). A note adds a small ink note glyph after the highlight's last character.
+Three styles, all monochrome. **Line** is the default for new highlights: an ink underline about 1.5dp thick just under the glyphs. **Marker** (marker-gray fill) and **wave** (1.3dp wavy ink underline) stay for existing highlights. The default style is chosen in 设置 → 阅读 → 划线样式; restyling one existing highlight moves to a secondary entry (ADR-0006). A thought adds a small ink thought mark after the text's last character. A thought written straight on a selection, with no highlight, draws only that mark.
+
+**Search hit:** hit-gray fill behind the matched word while the search bar is up. **Jump focus:** after a jump from the notes page, a brief marker-gray fill behind the target passage. Neither is saved, and both are cleared without touching real highlights.
+
+### Search bar
+After a jump to a search hit, an ink band (58dp, 19dp top corners) docks at the bottom: a search icon and the keyword in 15dp bold paper at the left, × at the right. The bar leads back to the results, at the results page the reader left; × closes the search and clears the hit marks.
 
 ### Typographic cover
-Generated when a book has no cover. It is 3:4, 3dp radius, with a 1px 20%-ink hairline frame. Variants: **frame** (double-ruled border with a vertical CJK title), **band** (ink field, paper title, rule, author), **block** (cover-gray field, sans title), **split** (cover-tint top 60% with an oversized paper glyph) and **stripe** (2dp ink stripes behind a ruled cover-stock label). Titles use the reading serif; authors use the UI sans. On Latin titles the title size is capped by the longest word, so no word ever breaks or clips.
-- **With a cover image:** a real cover (from the book, or an OPDS thumbnail) fills the same 3:4, 3dp frame, cropped to fill and quantized to 16 grays. For remote books the typographic cover stands in until the image arrives, and a page of images lands in one `ui` repaint of the grid (at most 3 s after the page; later images only go to the cache).
-- **Download band:** while a remote book downloads, a 24dp paper band with a 1px ink top rule sits at the cover's foot, holding a 4dp ink-on-rule progress bar; the caption under the cover reads 下载中 n%. The cover itself is never tinted. Each progress tick repaints only the band and caption with `fast` (both are pure black and white); the band appearing or leaving over a gray cover is a `ui` repaint of the tile.
-- **Downloaded mark:** a remote book already on the device carries a 13dp gray check before the first line of its title, the way WeChat Read marks local books; the caption under the title reads 读到 x% once the book is started, otherwise the author. A finished download only repaints its tile (`ui`); it never opens the book, so several downloads can run side by side. Tapping a marked tile opens the book.
+Generated when a book has no cover. Titles use the display serif and authors use the UI sans. Variants: **frame** (double-ruled border with a vertical CJK title), **band** (ink field, paper title, rule, author), **block** (cover-gray field, sans title), **split** (cover-tint top 60% with an oversized paper glyph) and **stripe** (2dp ink stripes behind a ruled cover-stock label). On Latin titles the title size is capped by the longest word, so no word ever breaks or clips.
+- **Frame:** every cover, real or generated, has square corners and a 1dp rule-gray frame, about 2:3 on the Leaf5.
+- **With a cover image:** a real cover (from the book, or an OPDS thumbnail) fills the same frame, cropped to fill and quantized to 16 grays. For remote books the typographic cover stands in until the image arrives, and a page of images lands in one `ui` repaint of the grid (at most 3 s after the page; later images only go to the cache).
+- **读完 badge:** a finished book carries a paper corner tag at the cover's top right, about 31 × 17dp with a 1dp rule-gray frame and 13dp ink 读完.
+- **Download band (书源 only):** while a remote book downloads, a 24dp paper band with a 1dp ink top rule sits at the cover's foot, holding a 4dp ink-on-rule progress bar; the caption under the cover reads 下载中 n%. The cover itself is never tinted. Each progress tick repaints only the band and caption with `fast` (both are pure black and white); the band appearing or leaving over a gray cover is a `ui` repaint of the tile.
+- **Downloaded mark (书源 only):** a remote book already on the device carries a 13dp check before the first line of its title; the caption under the title reads 读到 x% once the book is started, otherwise the author. A finished download only repaints its tile (`ui`); it never opens the book, so several downloads can run side by side (ADR-0005). Tapping a marked tile opens the book. Books on the shelf never carry this check: everything on the shelf is local.
 
-### Pager and toast
-The pager has 44 × 32dp pill buttons with a 1px ink border; disabled buttons go to the rule border and faded glyph. The page count sits between them in 13dp tabular figures. When a server has more pages than the device has fetched, the count reads "n / …" and the forward button stays enabled. While the next batch loads, both buttons disable and the count reads 取下一批…, a `fast` repaint of the pager band only. The toast is an ink pill with paper 14dp text, centered 96dp above the bottom, at most 84% wide.
+### Toast
+An ink rounded rectangle (8dp radius, about 47dp tall) with 13dp paper text, centered over the lower part of the page, such as the copy confirmation. It shows and leaves with `fast` and must be gone before the next popover appears.
 
 ### Loading, empty and error states
-They sit in the region they replace (a grid, a list), never in a dialog, centred with 40dp above. In order: a 15dp bold ink line, a 14dp `ink-2` reason, an optional 12dp `ink-2` tabular line with the technical detail (HTTP 401 · host), then at most one outline button for the next step (重试, 编辑书源). Loading is the reason line alone (正在连接家里的 NAS…). The same block is the empty state of every list.
+They sit in the region they replace (a grid, a list), never in a dialog. In order: a 16dp bold ink line, a 13dp ink reason, an optional 12dp tabular line with the technical detail (HTTP 401 · host), then at most one outline pill for the next step (重试, 编辑书源). Loading is the reason line alone (正在连接家里的 NAS…). On card pages the empty state is a card: the notes page keeps its overview card and adds a card that reads 你可以在这里记录本书的想法、划线和书签, with the pager disabled.
+
+### Other pages
+These follow their reference screenshots directly, using the parts above:
+- **Import** (`15-supplement/02-import-instructions.png`): one centered card with a section per route (浏览设备文件, 从书源下载, 从电脑传书 with the real home folder path), and a 57dp circled × centered at the bottom.
+- **Home search** (`15-supplement/08-home-search-query.png`, `09-home-search-results.png`): the search field, then 搜索历史 with an underlined 清空 at the right and history rows. Results are titled 在书架中搜索：xx. There are no recommendation chips.
+- **Contents** (`04-contents-and-search/01-contents.png`): book title and ↓去底部, the 搜索全书内容 field, collapsible rows, and 书签 beside the pager.
+- **Notes** (`06-notes/01-notes-list.png`, `05-bookmarks/04-bookmark-in-notes.png`): the overview card (book title, → 已读到 x% · 共 N 条笔记, ↗ 时长 N 分钟, cover at the right), then cards grouped under chapter headings. 仅显示书签 / 显示全部 shows only when the book has bookmarks.
+- **Lookup** (`07-selection-and-lookup/19-chinese-lookup-settled.png`, `22-english-translation-result.png`): a stack of cards: the headword, one card per dictionary named on the card, the 维基百科 card with ›, a centered 加入生词本 card, and an 在本书中搜索 › row card.
+- **我** (`13-reading-preferences/01-profile-entry.png`): the name (display), 累计阅读 X 小时 Y 分钟 with figure-sized numbers, 本周阅读 … | 连续 N 天, then rows.
+- **Settings** (`13-reading-preferences/02-settings.png`): a centered title, then toggle and chevron rows.
+- **Thought card and detail** (`07-selection-and-lookup/08-private-thought-detail.png`, `09-private-thought-full-detail.png`): tapping a thought mark shows a card with the quote and the thought; the card opens a full-screen detail with the quote (which leads back to the text), edit and delete. No avatar, likes or comments; a static 仅自己可见 is allowed.
+- **Book end** (`15-supplement/21-finish-page-mark-button.png`, `12-book-ending/04-book-end.png`): 全书完 with 标记读完 or the finished state and local statistics; the toolbars still open here.
+- **Image preview** (`09-images/02-image-preview.png`): the image centered on an ink ground; a double tap toggles fit and zoom.
+- **Footnote popup:** there is no reference sample; KOReader's popup keeps its flow and takes a card's paper, 1dp ink outline and radius.
 
 ### Refresh mapping
 Each interaction declares one KOReader refresh type and the smallest rect set it repaints:
-- **partial:** page turns, reflow after type changes, jumps to a chapter, bookmark, note or search hit.
-- **ui:** toolbars, sheets, drawers, tab switches, list pages and filters.
-- **fast:** toggles, selection and bubble, bookmark dog-ear, hints.
-- **full:** opening a book, returning to the shelf, night mode, and every 6th page turn to clear ghosting.
+- **partial:** page turns, reflow after a type change (the panel stays open), and jumps to a chapter, bookmark, note, search hit or the 原进度.
+- **ui:** toolbars and panels (their own rects), switching panels, full-screen pages opening, paging and filtering, tab switches, the confirm layer and its wash.
+- **fast:** the selection popover, selection handles and underline, the bookmark dog-ear, toggles, the open-book hint, the toast, and the auto page-turn guide line (only its own strip).
+- **full:** opening a book, returning to the shelf and switching night mode. Page turns keep KOReader's own full-refresh cadence. No other new UI action asks for `full`.
+
+A static screenshot cannot show which refresh ran; check refreshes on the device by watching.
+
+## Local substitutes
+
+Where the reference depends on WeChat accounts, the cloud, the community or the bookstore, the fork shows a local substitute or nothing. It never draws a fake button. These substitutes are deliberate; do not "fix" them back toward the reference. The full rulings are in `DECISIONS.md`.
+
+| Reference | This fork |
+| --- | --- |
+| Tabs 发现 / 书架 / 我 | 书源 / 书架 / 我; 书源 uses a compass icon. Files open from 导入 and from 我. |
+| 导入 explains the phone app and r.qq.com | 浏览设备文件, 从书源下载, and 从电脑传书 (Calibre wireless, or USB into the home folder, with its real path) |
+| Selection mode: 下载, 移出书架, 私密 | 移出书架 (hides the book, never deletes the file, always confirmed) and 标记为 (读完 / 在读 / 搁置) |
+| Home search: recommendation chips and a bookstore section | Local titles and authors only, under 在书架中搜索：xx |
+| Top bar: 繁简, 书签, 手写, 书架, 下载状态 | 书签, 书架状态, 更多. 更多 takes the place of 下载状态. 繁简 and 手写 are left out this round. |
+| Bottom bar ends with 听 | No 听, and no empty slot |
+| Popover action 听当前 | None |
+| Thought editor: 发表 and a 私密 pill | 保存 and no privacy control; a thought's detail may show a static 仅自己可见 |
+| Lookup: Sogou encyclopedia | 维基百科 summary; › opens the full article |
+| Lookup: 全书繁转简 card | 加入生词本 (with its source) |
+| Lookup: 去书城搜索 row | 在本书中搜索 |
+| One highlight style | Line by default; marker and wave stay for old highlights and in 设置 → 阅读 → 划线样式 (ADR-0006) |
+| 我: account, 微信文章, 微信读书阅读器 rows | 全部书笔记, 生词本, 文件, 同步与传书, 设置, 版本更新 (KOReader OTA with the current version) |
+| Book end: community rating and recommendations | Local statistics; 读完的第 N 本 counts the books marked 读完 locally, with no year limit |
+| Community bubbles, popular highlights, other readers' thoughts | None |
+
+Listening, handwriting, simplified/traditional conversion and image highlights are left to the owner this round. They get no entry and no placeholder.
+
+KOReader capabilities that WeChat Read lacks stay reachable from a secondary entry: brightness and warmth, book details with the reader's own rating and review, note export, tap zones, statistics and the 原版入口 under 更多; 刷新与残影 under 设置 → 屏幕; advanced typesetting, search options and the original settings through their existing paths.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** separate surfaces with 1px ink rules and divide list rows with 1px rule gray.
-- **Do** show single-choice selection as an ink-filled pill with paper text.
-- **Do** put every reading adjustment in one bottom sheet with a 1px ink border and 16dp top corners.
-- **Do** paginate lists with the pill pager and "n / N"; keep overflow hidden.
-- **Do** put the label under the icon in tab bars and toolbars, with line icons at 1.7 stroke and 2.2 for the current tab.
-- **Do** keep touch targets at 44dp or more and list rows at 56dp or more.
+- **Do** separate structure with 1dp rule-gray rules and outline touchable units in 1dp ink.
+- **Do** show the current choice as an ink fill with paper text.
+- **Do** open typesetting and progress as panels between the page and the bottom bar, with both toolbars still showing.
+- **Do** put contents, notes, search results, lookup and settings on full-screen pages with the back arrow at the bottom left and the joined pager at the bottom right.
+- **Do** use icons without labels in the tab bar and the reader toolbars, and labels under icons in the selection popover.
+- **Do** confirm destructive or hiding actions with the confirm layer over the wash.
+- **Do** keep touch targets at 44dp or more, also at the largest interface font size.
 - **Do** use tabular figures for every number that updates in place.
 - **Do** name the refresh type and repaint region for every new interaction; only `full` may flash.
 - **Do** implement night mode as inversion of the whole screen, not as a second palette.
+- **Do** keep other UI languages, fixed-layout books' own controls, physical page keys and the 原版入口 working; the reference only shows Chinese, touch and reflowable books.
 
 ### Don't:
 - **Don't** use color to carry meaning; the panels are monochrome.
-- **Don't** use drop shadows, blur, gradients for depth, or tinted scrims.
+- **Don't** use drop shadows, blur or gradients for depth, or any scrim other than the wash.
 - **Don't** animate anything on the product surface.
 - **Don't** make lists scroll.
-- **Don't** set controls in the serif, or book text in the UI sans unless the reader chose it.
-- **Don't** bring the demo's orange signal color, desk grays or bezel into the product.
+- **Don't** put new adjustments in a rounded sheet with a close button, or hide the toolbars when a panel opens.
+- **Don't** gray secondary text that the reference sets in ink.
+- **Don't** set controls or excerpts in the serif, or book text in the UI sans unless the reader chose it.
+- **Don't** draw a button for a service the fork does not have, not even disabled.
+- **Don't** take sizes or colors from `design/demo/`; it is the first-round prototype.
