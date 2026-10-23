@@ -1,7 +1,8 @@
 --[[--
 Small controls of the e-ink redesign (see DESIGN.md, Components): a pill
-button, a tick stepper, a toggle and a list pager. They only use @{ui.palette} colors and
-the ui_* font roles, and leave refreshing to their owner.
+button, a tick stepper, a toggle, a list pager, and the bottom bar of a full-screen page
+with its page capsule. They only use @{ui.palette} colors and the ui_* font roles, and
+leave refreshing to their owner.
 
 @usage
     local EinkControls = require("ui/widget/einkcontrols")
@@ -17,9 +18,11 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local LineWidget = require("ui/widget/linewidget")
 local Palette = require("ui/palette")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
+local VerticalGroup = require("ui/widget/verticalgroup")
 local Screen = require("device").screen
 local _ = require("gettext")
 
@@ -320,7 +323,162 @@ function Pager:init()
     }
 end
 
+--- Page capsule: a 132 × 42dp pill split by a 1dp rule into an up half (previous page) and a down half (next page),
+-- each with its own 1.5dp outline. A half that can't turn has a rule-gray outline and a dimmed chevron, and ignores
+-- taps; with one page the whole capsule is gray. Each half takes taps over `touch_h`, centered on the capsule.
+local PageCapsule = InputContainer:extend{
+    page = 1,
+    pages = 1,
+    on_change = nil, -- function(new_page)
+    width = Screen:scaleBySize(132),
+    height = Screen:scaleBySize(42),
+    touch_h = nil, -- at least 44dp
+}
+
+function PageCapsule:init()
+    self.dimen = Geom:new{ w = self.width, h = self.height }
+    self.half_w = math.floor(self.width / 2)
+    self.prev_enabled = self.page > 1
+    self.next_enabled = self.page < self.pages
+    local size = Screen:scaleBySize(24)
+    self.prev_icon = IconWidget:new{ icon = "eink/chev.up", width = size, height = size, alpha = true,
+        dim = not self.prev_enabled or nil }
+    self.next_icon = IconWidget:new{ icon = "eink/chev.up", width = size, height = size, alpha = true,
+        rotation_angle = 180, dim = not self.next_enabled or nil }
+    local touch_h = math.max(self.touch_h or 0, Screen:scaleBySize(44))
+    self.prev_rect = Geom:new{ w = self.half_w, h = touch_h }
+    self.next_rect = Geom:new{ w = self.width - self.half_w, h = touch_h }
+    self.ges_events = {
+        TapPrev = { GestureRange:new{ ges = "tap", range = self.prev_rect } },
+        TapNext = { GestureRange:new{ ges = "tap", range = self.next_rect } },
+    }
+end
+
+function PageCapsule:paintTo(bb, x, y)
+    self.dimen.x, self.dimen.y = x, y
+    local w, h, half = self.width, self.height, self.half_w
+    local touch_y = y - math.floor((self.prev_rect.h - h) / 2)
+    self.prev_rect.x, self.prev_rect.y = x, touch_y
+    self.next_rect.x, self.next_rect.y = x + half, touch_y
+    local r = math.floor(h / 2)
+    local bw = Size.border.button
+    local anti_alias = G_reader_settings:nilOrTrue("anti_alias_ui")
+    bb:paintRoundedRect(x, y, w, h, Palette.paper, r)
+    -- A half's outline: a full ring at its round end with the inner side wiped, then its straight top and bottom.
+    local function outline(enabled, end_x, wipe_x, line_x, line_w)
+        local color = enabled and Palette.ink or Palette.rule
+        bb:paintBorder(end_x, y, h, h, bw, color, r, anti_alias)
+        bb:paintRect(wipe_x, y + bw, h - r, h - 2 * bw, Palette.paper)
+        bb:paintRect(line_x, y, line_w, bw, color)
+        bb:paintRect(line_x, y + h - bw, line_w, bw, color)
+    end
+    outline(self.prev_enabled, x, x + r, x + r, half - r)
+    outline(self.next_enabled, x + w - h, x + w - h, x + half, w - half - r)
+    local any = self.prev_enabled or self.next_enabled
+    bb:paintRect(x + half, y, Size.border.default, h, any and Palette.ink or Palette.rule)
+    local size = self.prev_icon:getSize()
+    local icon_y = y + math.floor((h - size.h) / 2)
+    self.prev_icon:paintTo(bb, x + math.floor((half - size.w) / 2), icon_y)
+    self.next_icon:paintTo(bb, x + half + math.floor((w - half - size.w) / 2), icon_y)
+end
+
+function PageCapsule:onTapPrev()
+    if self.prev_enabled and self.on_change then
+        self.on_change(self.page - 1)
+    end
+    return true
+end
+
+function PageCapsule:onTapNext()
+    if self.next_enabled and self.on_change then
+        self.on_change(self.page + 1)
+    end
+    return true
+end
+
+-- The icons are painted by hand, not children: free them on rebuild and on close.
+function PageCapsule:free()
+    self.prev_icon:free()
+    self.next_icon:free()
+end
+
+PageCapsule.onCloseWidget = PageCapsule.free
+
+--- The ← back arrow at the start of a bottom bar: a 24dp icon after the 24dp gutter, tappable over its whole cell.
+local BackArrow = InputContainer:extend{
+    width = Screen:scaleBySize(72),
+    height = nil,
+    callback = nil,
+}
+
+function BackArrow:init()
+    self.dimen = Geom:new{ w = self.width, h = self.height }
+    local size = Screen:scaleBySize(24)
+    local gutter = Screen:scaleBySize(24)
+    self[1] = HorizontalGroup:new{
+        HorizontalSpan:new{ width = gutter },
+        CenterContainer:new{
+            dimen = Geom:new{ w = size, h = self.height },
+            IconWidget:new{ icon = "eink/arrow.left", width = size, height = size, alpha = true },
+        },
+    }
+    self.ges_events = tapEvents(self.dimen)
+end
+
+function BackArrow:onTapSelect()
+    if self.callback then
+        self.callback()
+    end
+    return true
+end
+
+--- Bottom bar of a full-screen page: 58dp under a 1dp rule-gray rule, the back arrow on the left and the page
+-- capsule on the right, 8dp from the edge. `left` replaces the back arrow (the shelf's tabs); `actions` are
+-- widgets set just left of the capsule (a pill button such as 书签). `back` and `capsule` are its parts.
+local BottomBar = InputContainer:extend{
+    width = nil,
+    page = 1,
+    pages = 1,
+    on_change = nil, -- function(new_page)
+    on_back = nil, -- function(), for the back arrow
+    left = nil,
+    actions = nil,
+}
+BottomBar.height = Screen:scaleBySize(58)
+
+function BottomBar:init()
+    local rule_h = Size.border.default
+    local row_h = BottomBar.height - rule_h
+    self.dimen = Geom:new{ w = self.width, h = BottomBar.height }
+    if not self.left then
+        self.back = BackArrow:new{ height = row_h, callback = self.on_back }
+    end
+    self.capsule = PageCapsule:new{ page = self.page, pages = self.pages, on_change = self.on_change, touch_h = row_h }
+    local right = HorizontalGroup:new{ align = "center" }
+    for _, action in ipairs(self.actions or {}) do
+        table.insert(right, action)
+        table.insert(right, HorizontalSpan:new{ width = Screen:scaleBySize(16) })
+    end
+    table.insert(right, self.capsule)
+    table.insert(right, HorizontalSpan:new{ width = Screen:scaleBySize(8) })
+    local left = self.left or self.back
+    self[1] = VerticalGroup:new{
+        LineWidget:new{ background = Palette.rule, dimen = Geom:new{ w = self.width, h = rule_h } },
+        CenterContainer:new{
+            dimen = Geom:new{ w = self.width, h = row_h },
+            HorizontalGroup:new{
+                align = "center",
+                left,
+                HorizontalSpan:new{ width = self.width - left:getSize().w - right:getSize().w },
+                right,
+            },
+        },
+    }
+end
+
 return {
+    BottomBar = BottomBar,
+    PageCapsule = PageCapsule,
     Pager = Pager,
     PillButton = PillButton,
     TickTrack = TickTrack,
