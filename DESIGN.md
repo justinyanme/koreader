@@ -253,7 +253,7 @@ Generated typographic covers draw from three extra fills: **Cover Stock** (cover
 - **Figure** (700, 24dp, tabular): the three figures of the progress panel, each followed by a 13dp unit (%, 分钟, 条).
 - **Excerpt** (400, 18dp, 1.45): quoted book text on note cards, clamped to 3 lines with an ellipsis; lookup cards use the same role.
 - **Title** (700, 16dp): the 导入 and 选择 actions, selection-mode titles, settings and 我 row titles (17dp on 我), and centered page titles (设置). Confirm-layer actions are 15dp in the same weight.
-- **Body** (400, 16dp, 1.45): contents rows (their page numbers at 14dp, tabular), search-history rows and other list rows.
+- **Body** (400, 16dp, 1.45): search-history rows and other list rows. Contents rows set their titles in 700, as in the reference, and their page numbers in 400 at 14dp, tabular.
 - **Label** (13dp): book titles under covers (700, one line), font-tile names, meta lines, row subtitles, captions under progress figures, the toast, the confirm-layer question (700, 14dp) and popover labels (700, 12dp).
 - **Caption** (400, 12dp, tabular figures): the page header and footer, and labels inside tracks (700).
 
@@ -303,7 +303,7 @@ Line weights map onto `size.lua`:
 ## Components
 
 ### Buttons and pills
-- **Outline pill:** paper fill, 1dp ink outline, ink label. Used for 返回原进度, the paragraph entry (首行顶格 ›), 开启自动翻页 (full width, 35dp) and the contents page's 书签.
+- **Outline pill:** paper fill, 1dp ink outline, ink label. Used for 返回原进度, the paragraph entry (首行顶格 ›), 开启自动翻页 (full width, 35dp) and the contents page's 书签 (with a bookmark icon, 42dp like the pager beside it, as in the reference).
 - **Text action:** 16dp bold ink text with an optional circled line icon, such as 导入, 选择, 全选, 取消, 保存. No outline.
 - **Disabled:** outline and glyph go to rule gray, labels to faded gray.
 - **Focus:** 2dp ink outline inset 3dp. No hover state on device.
@@ -326,7 +326,7 @@ The progress track is 35dp tall and runs the gutter width without ± buttons. Ch
 - **Paragraph card:** about 275 × 139dp, 12dp radius, a line icon over a 14dp bold label (首行顶格, 首行缩进). Selected is ink fill with paper content; the other is tint. The 段间距 toggle sits at the foot of the 首行缩进 card.
 
 ### Inputs / Fields
-- **Search field:** a pill with a 1dp ink outline, a search icon and 16dp text; 50dp tall on the shelf and the home search page, 40dp on the contents page. A filled field shows a round clear button at the right. Placeholders are pencil gray.
+- **Search field:** a pill with a 1dp ink outline, a search icon and 16dp text; 50dp tall on the shelf and the home search page, 40dp on the contents page. A filled field shows a round clear button at the right. Placeholders are pencil gray; the contents page's 搜索全书内容 is bold ink, as in the reference.
 - **Toggle:** about 47 × 23dp. Off is paper with a 1.5dp ink outline and an ink knob at the left; on is ink with a paper knob at the right.
 - **Thought editor:** a compact band docked on top of the keyboard over the wash. A back column (← 返回) is split off by a rule; next to it are a thought icon, the input (placeholder 写下这一刻的想法…) and the quoted excerpt behind a short ink bar; 保存 sits at the right. There is no privacy pill.
 - **Labelled field** (forms in sheets, such as 添加书源): a 13dp label column beside a 40dp pill input with a 1dp ink outline. Rows are 52dp minimum. The label column is 92dp, because labels such as "Client Secret" must fit on one line. A form commits with one solid button, disabled until its required fields are filled.
@@ -336,9 +336,9 @@ The progress track is 35dp tall and runs the gutter width without ± buttons. Ch
 - **Shelf title row:** the 书架 title is a menu. Tapping it lists 全部 / 在读 / 未读 / 读完 / 搁置. The title then reads the current filter with a ▾ (在读 ▾); 全部 reads plain 书架. Sorting lives in 设置 → 书架, default 最近阅读.
 - **Selection mode:** a long press on a cover enters it with that book selected; 选择 enters it with none. While it is on, a tap on a cover only toggles it. The title row becomes 全选 (or 取消全选, covering the whole shelf, not just the page) at the left, 已选择 N 本书籍 in the middle and 取消 at the right, all 16dp bold. Each cover gets a 25dp ring at its lower right; a selected cover gets a 4–5dp ink frame and an ink check in the ring. The bottom band swaps the tab icons for the two local actions, 移出书架 and 标记为.
 - **Nav bar** (subpages merged before this round, such as 书源 and the 我 subpages): 52dp with a 1dp ink rule at the bottom, a 52dp back column at the left and a centered 16dp bold title. Those pages keep it until their own tickets move them to the full-screen page form below; new pages do not use it.
-- **Full-screen page:** a headline at the top left with an optional text action at the right (↓去底部, 仅显示书签 / 显示全部, 取消). Content follows, then the bottom band: a 28dp back arrow at the left, optional outline pills, and the joined pager.
+- **Full-screen page:** a headline at the top left with an optional text action at the right (↓去底部, 仅显示书签 / 显示全部, 取消). On the contents page ↓去底部 (14dp, as in the reference) becomes ↑去顶部 on the last page, and there is none with a single page. Content follows, then the bottom band: a 28dp back arrow at the left, optional outline pills, and the joined pager.
 - **Joined pager:** a 133 × 42dp pill split in two by a 1dp rule: ︿ (previous page) at the left, ﹀ (next page) at the right. An enabled half has an ink outline and glyph; a disabled half has rule-gray ones. These arrows page the list only and never turn book pages.
-- **List row:** at least 53dp, with a 1dp rule-gray divider. Contents rows put a 16dp title at the left (indented about 15dp per level, with a collapse chevron before a group) and the page number at the right. Settings and 我 rows are about 92dp: a bold title over a 13dp subtitle, and a toggle or a chevron at the right; 我 rows lead with a 37dp circled icon.
+- **List row:** at least 53dp, with a 1dp rule-gray divider. Contents rows put a 16dp title at the left (indented about 15dp per level, with a collapse chevron before a group) and the page number at the right. As in the reference, only a top-level entry with entries under it is a group; the groups a reader collapses stay collapsed for that book, but the page shows the current chapter even inside one. The reference has no sample of the current chapter, so it takes the mark of a current item (the font tiles'): its page number is paper on an ink pill. Settings and 我 rows are about 92dp: a bold title over a 13dp subtitle, and a toggle or a chevron at the right; 我 rows lead with a 37dp circled icon.
 
 ### Reader toolbars
 A swipe up, or a tap in the middle, brings two paper bands; while they show, a tap on the page closes them without turning the page. The **top bar** (about 50dp) puts line icons at the right, about 76dp apart, in this order: 书签, 书架状态, 更多. Future 繁简 and 手写 entries go to the left of 书签; nothing holds their place now. The bookmark icon shows whether this page has a bookmark; the 书架状态 icon carries a check while the book is on the shelf. The **bottom bar** (58dp) has a back arrow at the left, a 1dp rule-gray vertical rule about 25dp tall, then four icons with no labels sharing the rest evenly: 目录, 笔记, 进度, 字体. There is no fifth slot for 听, not even a blank one. The icon of the open panel is drawn filled. Each bar has a 1dp rule-gray inner edge, and both appear and hide with a `ui` refresh limited to their own rects.

@@ -102,6 +102,7 @@ end
 local ReaderToolbar = ReaderMenu:extend{
     bars = nil, -- ToolbarBars while shown
     sheet = nil, -- BottomSheet of an open panel
+    drawer = nil, -- the contents page while shown, or the old drawer that its 书签 opens
 }
 
 --- Registers the toolbar in its replacement slot and applies its footer defaults.
@@ -245,19 +246,30 @@ function ReaderToolbar:onCloseWidget()
     self:closeDrawer()
 end
 
---- The contents drawer (目录 / 书签 / 笔记) takes over "ShowToc", from the toolbar and gestures alike;
+--- The contents page (目录页) takes over "ShowToc", from the toolbar and gestures alike;
 -- the original table of contents stays in the original menu, which calls ReaderToc directly.
 function ReaderToolbar:onShowToc()
     if not Device:isTouchDevice() then return end -- no D-pad navigation here: ReaderToc handles it
     self:hideToolbar(true)
     self:closeSheet(true)
     self:closeDrawer()
+    self.drawer = require("apps/reader/modules/readertocpage"):new{
+        ui = self.ui,
+        on_close = function() self.drawer = nil end,
+        on_bookmarks = function() self:showBookmarks() end,
+    }
+    UIManager:show(self.drawer, "ui", self.drawer.dimen)
+    return true
+end
+
+--- The old drawer's bookmarks (and notes): where the contents page's 书签 goes until the notes page.
+function ReaderToolbar:showBookmarks()
+    self:closeDrawer()
     self.drawer = require("apps/reader/modules/readertocdrawer"):new{
         ui = self.ui,
         on_close = function() self.drawer = nil end,
     }
     UIManager:show(self.drawer, "ui", self.drawer.panel_rect)
-    return true
 end
 
 --- The reorganized settings (apps/settings/einksettings), on an optional group or row id.
