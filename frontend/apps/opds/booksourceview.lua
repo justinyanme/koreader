@@ -507,8 +507,10 @@ function BookSourceView:cellStatus(page, book)
     local file = BookSource.localFile(page.source, book)
     if file then
         local progress = BookSource.progress(file)
-        if progress and progress.status ~= "new" then
-            return ShelfView.statusText(progress), true, progress.status == "complete"
+        if progress and progress.status == "complete" then
+            return book.author or "", true, true
+        elseif progress and progress.status ~= "new" then
+            return ShelfView.statusText(progress), true
         end
         return book.author or "", true
     end
@@ -649,15 +651,14 @@ end
 function BookSourceView:buildPager(page, pages)
     page.pages = pages
     -- An unfetched batch is one available next page; while fetching, both halves are disabled.
-    self.bar = EinkControls.BottomBar:new{
+    return EinkControls.BottomBar:new{
         width = self.dimen.w,
         page = page.loading_more and 1 or page.page_no,
-        pages = page.loading_more and 1 or pages + (page.result and page.result.next and 1 or 0),
+        pages = page.loading_more and 1 or pages + (page.per_page and page.result and page.result.next and 1 or 0),
         actions = page.loading_more and { text(_("Loading more…"), "ui_caption", Palette.ink_2) } or nil,
         on_change = function(p) self:turnPage(p) end,
         on_back = function() self:pop() end,
     }
-    return self.bar
 end
 
 -- Items the page lists: books on a grid, rows on a list.
@@ -1051,7 +1052,7 @@ function BookSourceView:download(page, book, format)
         done = 0, buffer = "" }
     self.downloads[book.key] = dl
     self:refreshTile(book, "ui")
-    UIManager:show(Toast:new{ text = _("Download started. Tap the cover to cancel."), close_refresh_type = "ui" })
+    UIManager:show(Toast:new{ text = T(_("Download started: %1. Tap the cover to cancel."), book.title), close_refresh_type = "ui" })
     dl.poll = function() self:pollDownload(dl) end
     UIManager:scheduleIn(1, dl.poll)
 end
@@ -1106,7 +1107,7 @@ function BookSourceView:finishDownload(dl, finished)
     BookSource.recordDownload(self.opds, dl.source, dl.book, file)
     -- not opened: that would close the page and cancel the other downloads; a tap on the marked tile opens it
     self:refreshTile(dl.book, "ui")
-    UIManager:show(Toast:new{ text = _("Downloaded"), close_refresh_type = "ui" })
+    UIManager:show(Toast:new{ text = T(_("Downloaded: %1"), dl.book.title), close_refresh_type = "ui" })
 end
 
 -- Reaps a finished or killed child and closes its pipe.
@@ -1132,7 +1133,7 @@ function BookSourceView:cancelDownload(key, quiet)
     os.remove(dl.part)
     if not quiet then
         self:refreshTile(dl.book, "ui")
-        UIManager:show(Toast:new{ text = _("Download canceled"), close_refresh_type = "ui" })
+        UIManager:show(Toast:new{ text = T(_("Download canceled: %1"), dl.book.title), close_refresh_type = "ui" })
     end
 end
 

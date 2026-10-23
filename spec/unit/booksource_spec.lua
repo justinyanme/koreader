@@ -112,6 +112,10 @@ describe("书源 (OPDS as a remote shelf)", function()
             return 200, {}, '<?xml version="1.0"?><OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">'
                 .. '<Url type="application/atom+xml" template="' .. ROOT .. '/search/{searchTerms}"/></OpenSearchDescription>'
         elseif path == "/opds/new" then
+            if mode == "empty_next" then
+                return 200, atom, xmlFeed("Recently added Books",
+                    '<link rel="next" href="/opds/new?offset=40" type="application/atom+xml;profile=opds-catalog"/>')
+            end
             if mode == "empty" then return 200, atom, xmlFeed("Recently added Books") end
             return 200, atom, xmlFeed("Recently added Books",
                 '<link rel="next" href="/opds/new?offset=40" type="application/atom+xml;profile=opds-catalog"/>', books(1, 40))
@@ -304,6 +308,14 @@ describe("书源 (OPDS as a remote shelf)", function()
             return false
         end
         return check(tile(view))
+    end
+
+    local function bottomBar(widget)
+        if getmetatable(widget).__index == require("ui/widget/einkcontrols").BottomBar then return widget end
+        for _, child in ipairs(widget) do
+            local bar = bottomBar(child)
+            if bar then return bar end
+        end
     end
 
     local function topWidget()
@@ -570,7 +582,7 @@ describe("书源 (OPDS as a remote shelf)", function()
             local grid = require("apps/shelf/shelfwidgets").gridGeometry(view.dimen.w, 1000)
             assert.are.equal(grid.cols, view.grid.cols)
             -- the server has more: the capsule can move forward
-            assert.is_true(view.bar.capsule.next_enabled)
+            assert.is_true(bottomBar(view).capsule.next_enabled)
             for _, r in ipairs(refreshes) do assert.are.equal("ui", r.type) end
         end)
 
@@ -614,27 +626,42 @@ describe("书源 (OPDS as a remote shelf)", function()
         it("turns with the shared bottom capsule and returns without fetching again", function()
             local view = openSources(openFM())
             local first = bookTitles(view)
-            assert.is_not_nil(view.bar)
-            assert.is_false(view.bar.capsule.prev_enabled)
-            assert.is_true(view.bar.capsule.next_enabled)
+            assert.is_not_nil(bottomBar(view))
+            assert.is_false(bottomBar(view).capsule.prev_enabled)
+            assert.is_true(bottomBar(view).capsule.next_enabled)
             view:paintTo(Screen.bb, 0, 0)
-            local x, y = pointIn({ dimen = view.bar.capsule.next_rect })
+            local x, y = pointIn({ dimen = bottomBar(view).capsule.next_rect })
             touch(x, y)
             assert.are.equal(2, view:top().page_no)
-            view:paintTo(Screen.bb, 0, 0)
-            x, y = pointIn({ dimen = view.bar.capsule.prev_rect })
-            touch(x, y)
-            assert.are.same(first, bookTitles(view))
+            local second, page_no = bookTitles(view), view:top().page_no
+            assert.are_not.same(first, second)
             tap(view, "eink/grid")
             tap(topWidget(), "Authors")
             waitFor(function() return view:top().result.state == "ok" end, "authors")
             local count = #feedRequests()
             view:paintTo(Screen.bb, 0, 0)
-            x, y = pointIn(view.bar.back)
+            x, y = pointIn(bottomBar(view).back)
             touch(x, y)
             assert.are.equal("home", view:top().kind)
-            assert.are.same(first, bookTitles(view))
+            assert.are.equal(2, page_no)
+            assert.are.equal(page_no, view:top().page_no)
+            assert.are.same(second, bookTitles(view))
             assert.are.equal(count, #feedRequests())
+        end)
+
+        it("disables the next arrow for an empty batch even when the feed has a next link", function()
+            server.mode = "empty_next"
+            local view = openSources(openFM())
+            assert.are.same({}, bookTitles(view))
+            assert.is_true(has(view, _("No books here yet")))
+            assert.is_false(bottomBar(view).capsule.prev_enabled)
+            assert.is_false(bottomBar(view).capsule.next_enabled)
+            view:paintTo(Screen.bb, 0, 0)
+            local x, y = pointIn({ dimen = bottomBar(view).capsule.next_rect })
+            touch(x, y)
+            flush()
+            assert.are.equal(1, view:top().page_no)
+            assert.are.same({}, requestsTo(ROOT .. "/new?offset=40"))
         end)
 
         it("keeps vertical swipes and page keys on the same paginated book list", function()
@@ -663,11 +690,11 @@ describe("书源 (OPDS as a remote shelf)", function()
                 end
                 local before = page.page_no
                 view:paintTo(Screen.bb, 0, 0)
-                local x, y = pointIn({ dimen = view.bar.capsule.next_rect })
+                local x, y = pointIn({ dimen = bottomBar(view).capsule.next_rect })
                 touch(x, y)
                 if page.loading_more then
-                    assert.is_false(view.bar.capsule.prev_enabled)
-                    assert.is_false(view.bar.capsule.next_enabled)
+                    assert.is_false(bottomBar(view).capsule.prev_enabled)
+                    assert.is_false(bottomBar(view).capsule.next_enabled)
                     assert.is_true(has(view, _("Loading more…")))
                 end
                 flush()
@@ -681,9 +708,9 @@ describe("书源 (OPDS as a remote shelf)", function()
             end
             assert.are.equal(1, #requestsTo(ROOT .. "/new?offset=40"))
             assert.is_nil(page.result.next)
-            assert.is_false(view.bar.capsule.next_enabled)
+            assert.is_false(bottomBar(view).capsule.next_enabled)
             view:paintTo(Screen.bb, 0, 0)
-            local x, y = pointIn({ dimen = view.bar.capsule.next_rect })
+            local x, y = pointIn({ dimen = bottomBar(view).capsule.next_rect })
             touch(x, y)
             assert.are.equal(page.pages, page.page_no)
             -- the pager says it is fetching ("fast"), then the batch repaints everything under the nav bar ("ui")
@@ -695,6 +722,42 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.is_not_nil(fetching)
             assert.is_not_nil(landed)
             assert.is_true(has(view, "42 books"))
+        end)
+
+        it("keeps the parent source list intact when returning while the next batch is loading", function()
+            writeSources{ nas(), nas{ title = "Another NAS" } }
+            tap(openFM(), "eink/compass")
+            local view = topWidget()
+            local source_list = texts(view)
+            tap(view, "NAS at home")
+            waitFor(function() return view:top().result.state == "ok" end, "the home feed")
+            local page = view:top()
+            for _turn = 1, 20 do
+                view:paintTo(Screen.bb, 0, 0)
+                local x, y = pointIn({ dimen = bottomBar(view).capsule.next_rect })
+                touch(x, y)
+                if page.loading_more then break end
+                flush()
+            end
+            assert.is_true(page.loading_more)
+            assert.is_true(has(view, _("Loading more…")))
+            view:paintTo(Screen.bb, 0, 0)
+            local x, y = pointIn(bottomBar(view).back)
+            touch(x, y)
+            assert.are.equal("manage", view:top().kind)
+            assert.are.same(source_list, texts(view))
+            view:paintTo(Screen.bb, 0, 0)
+            local row_x, row_y = pointIn(tappableAround(view, "Another NAS"))
+            local refreshes, restore = spyRefreshes()
+            finally(restore)
+            flush()
+            assert.is_nil(page.loading_more)
+            assert.are.equal(42, #page.result.books)
+            assert.are.equal("manage", view:top().kind)
+            assert.are.same(source_list, texts(view))
+            for _, refresh in ipairs(refreshes) do assert.are_not.equal(view, refresh.widget) end
+            touch(row_x, row_y)
+            assert.are.equal("Another NAS", view:top().title)
         end)
 
         it("asks once and says so once when the next batch fails", function()
@@ -827,12 +890,18 @@ describe("书源 (OPDS as a remote shelf)", function()
         it("downloads the preferred format on tap, names it, records it and marks the tile, opening nothing", function()
             local view = openSources(openFM())
             local refreshes, restore = spyRefreshes()
+            local shown = spy.on(UIManager, "show")
+            finally(function() shown:revert() end)
             tap(view, "Book 1")
             local toast = UIManager._window_stack[#UIManager._window_stack].widget
             assert.are.equal(require("ui/widget/toast"), getmetatable(toast).__index)
-            assert.are.equal(_("Download started. Tap the cover to cancel."), toast.text)
+            assert.are.equal(T(_("Download started: %1. Tap the cover to cancel."), "Book 1"), toast.text)
             tap(view, "Book 4") -- at the same time: the first to finish must not cut the other off
+            toast = UIManager._window_stack[#UIManager._window_stack].widget
+            assert.are.equal(T(_("Download started: %1. Tap the cover to cancel."), "Book 4"), toast.text)
             assert.is_not_nil(view.downloads["urn:uuid:book-1"])
+            assert.is_not_nil(view.downloads["urn:uuid:book-4"])
+            assert.is_false(marked(view, "Book 1"))
             waitFor(function() return next(view.downloads) == nil end, "both downloads")
             restore()
             local file = home .. "/Author 1 - Book 1.epub"
@@ -852,8 +921,16 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.are.equal("id.access", downloads[#downloads].headers["CF-Access-Client-Id"])
 
             -- downloaded: a gray check before the title, and a tap opens the file without a request
-            toast = UIManager._window_stack[#UIManager._window_stack].widget
-            assert.are.equal(_("Downloaded"), toast.text)
+            local completed = {}
+            for _, call in ipairs(shown.calls) do
+                local widget = call.vals[2]
+                if getmetatable(widget).__index == require("ui/widget/toast")
+                        and widget.text:match("^Downloaded:") then
+                    table.insert(completed, widget.text)
+                end
+            end
+            table.sort(completed)
+            assert.are.same({ T(_("Downloaded: %1"), "Book 1"), T(_("Downloaded: %1"), "Book 4") }, completed)
             assert.is_true(marked(view, "Book 1"))
             assert.is_false(marked(view, "Book 2"))
             os.remove(log_file)
@@ -873,6 +950,9 @@ describe("书源 (OPDS as a remote shelf)", function()
             writeSources{ nas{ downloaded = { ["urn:uuid:book-1"] = file } } }
             local view = openSources(openFM())
             assert.is_true(marked(view, "Book 1"))
+            local tile = tappableAround(view, "Book 1")
+            local tile_text = texts(tile)
+            assert.are.equal("Author 1", tile_text[#tile_text])
             view:paintTo(Screen.bb, 0, 0)
             local function findBadge(node, frame)
                 if node.bordersize then frame = node end
@@ -943,7 +1023,7 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.is_nil(lfs.attributes(dl.part, "mode"))
             local toast = UIManager._window_stack[#UIManager._window_stack].widget
             assert.are.equal(require("ui/widget/toast"), getmetatable(toast).__index)
-            assert.are.equal(_("Download canceled"), toast.text)
+            assert.are.equal(T(_("Download canceled: %1"), "Book 9"), toast.text)
             assert.is_false(has(view, _("Downloading…")))
             assert.are.same({}, opened)
         end)
