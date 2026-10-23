@@ -28,11 +28,11 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
 local ImportPage = require("apps/shelf/importpage")
-local InputDialog = require("ui/widget/inputdialog")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local Palette = require("ui/palette")
 local RightContainer = require("ui/widget/container/rightcontainer")
+local SearchPage = require("apps/shelf/searchpage")
 local SelectionBubble = require("ui/widget/selectionbubble")
 local Shelf = require("apps/shelf/shelf")
 local ShelfWidgets = require("apps/shelf/shelfwidgets")
@@ -271,7 +271,7 @@ end
 --- Rebuilds the view; `region` ("header", "title", "grid") is where the repaint starts, down to the bottom band.
 function ShelfView:update(region)
     local start = time.now()
-    self.shown, self.counts = Shelf.view(self.books, self.filter, self.sort, self.query)
+    self.shown, self.counts = Shelf.view(self.books, self.filter, self.sort)
     -- a selected book that is no longer shown (gone in a rescan) is no longer selected: the count is what can be seen,
     -- and the book comes back unselected
     if self.selected then
@@ -311,36 +311,24 @@ end
 function ShelfView:buildHeader()
     local field_w = self.width - 2 * GUTTER
     local border = Size.border.default
-    local query = self.query
     local inner_h = SEARCH_H - 2 * border
     local inner_w = field_w - dp(11) - 2 * border
-    local clear_w = query and dp(44) or 0
     local icon_size = dp(24)
     local field = HorizontalGroup:new{
         LeftContainer:new{
-            dimen = Geom:new{ w = inner_w - clear_w, h = inner_h },
+            dimen = Geom:new{ w = inner_w, h = inner_h },
             HorizontalGroup:new{
                 IconWidget:new{ icon = "eink/search", width = icon_size, height = icon_size, alpha = true },
                 HorizontalSpan:new{ width = dp(7) },
                 TextWidget:new{
-                    text = query or _("Search books"),
+                    text = _("Search books"),
                     face = Font:getFace("ui_body", 16),
-                    bold = query ~= nil,
-                    fgcolor = query and Palette.ink or Palette.ink_2,
-                    max_width = inner_w - clear_w - icon_size - dp(7) - dp(8),
+                    fgcolor = Palette.ink_2,
+                    max_width = inner_w - icon_size - dp(7) - dp(8),
                 },
             },
         },
     }
-    if query then
-        table.insert(field, ShelfWidgets.Tappable:new{
-            callback = function()
-                if not self.selected then self:setQuery(nil) end
-            end,
-            CenterContainer:new{ dimen = Geom:new{ w = clear_w, h = inner_h },
-                IconWidget:new{ icon = "close", width = dp(20), height = dp(20) } },
-        })
-    end
     return VerticalGroup:new{
         VerticalSpan:new{ width = SEARCH_TOP },
         HorizontalGroup:new{
@@ -633,35 +621,9 @@ function ShelfView:setSort(sort)
     self:update()
 end
 
-function ShelfView:setQuery(query)
-    self.query = query ~= "" and query or nil
-    self.page = 1
-    self:update("header")
-end
-
 function ShelfView:showSearch()
-    local dialog
-    dialog = InputDialog:new{
-        title = _("Search books"),
-        input = self.query,
-        buttons = {{
-            {
-                text = _("Cancel"),
-                id = "close",
-                callback = function() UIManager:close(dialog) end,
-            },
-            {
-                text = _("Search"),
-                is_enter_default = true,
-                callback = function()
-                    UIManager:close(dialog)
-                    self:setQuery(dialog:getInputText())
-                end,
-            },
-        }},
-    }
-    UIManager:show(dialog)
-    dialog:onShowKeyboard()
+    local page = SearchPage:new{ shelf = self }
+    UIManager:show(page, "ui", page.dimen)
 end
 
 function ShelfView:openBook(book)
