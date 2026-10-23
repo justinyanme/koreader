@@ -6,9 +6,12 @@ Each row is backed by items of the original menus, by id:
     id      row id, the target of the "ShowEinkSettings" event (as are group ids)
     items   original menu item ids; one item opens its own entries, several are listed together
     file    an element table the original menu embeds without an id (instead of items)
+    build   function returning a menu item of the new settings' own (instead of items)
+    open    function(settings) showing a page of the new settings' own over them (instead of items)
     toggle  the single item is a checkbox, shown as a toggle on the row
     choice  the entries up to the first separator are one single choice, shown with a check mark
     value   function(item) returning the row's current value; by default the "Name: value" text or checked radio entry
+            (no item with `open`)
     preview "tap_zones": the reader can draw its tap zones from the row's page
     events  { [item id] = { event = name, text = label } }: that item's entry, labelled `text`, sends the event
             to the UI instead of running its callback
@@ -22,11 +25,16 @@ local C_ = _.pgettext
 
 return {
     { id = "reading", text = C_("Settings group", "Reading"), rows = {
+        { id = "ui_font_size", text = _("Interface font size"),
+          open = function() require("apps/settings/uifontsize").show() end,
+          value = function() return require("apps/settings/uifontsize").currentName() end },
         { id = "tap_zones", text = _("Page turns and tap zones"), items = { "page_turns" }, preview = "tap_zones" },
         { id = "full_refresh", text = C_("Settings", "Full refresh rate"), choice = true,
           file = Device:hasEinkScreen() and "frontend/ui/elements/refresh_menu_table.lua" or nil },
         { id = "footer", text = C_("Settings", "Status bar"), items = { "status_bar" } },
         { id = "end_action", text = _("After finishing a book"), items = { "document_end_action" } },
+        { id = "highlight_style", text = C_("Settings", "Highlight style"), choice = true,
+          build = function() return require("apps/reader/modules/readerhighlightbubble").genDefaultStyleMenuItem() end },
     } },
     { id = "screen", text = C_("Settings group", "Screen"), rows = {
         { id = "refresh", text = _("Refresh and ghosting"), items = { "screen_eink_opt" } },
@@ -48,6 +56,10 @@ return {
             "autosuspend", "autoshutdown", "autostandby", "ignore_sleepcover", "ignore_open_sleepcover",
             "cover_events", "pageturn_power", "charging_led", "ignore_battery_optimizations",
         } },
+    } },
+    { id = "shelf", text = _("Shelf"), rows = {
+        { id = "shelf_sort", text = _("Sort by"), choice = true,
+          build = function() return require("apps/shelf/shelfview").sortMenuItem() end },
     } },
     { id = "advanced", text = C_("Settings group", "Advanced"), rows = {
         { id = "plugins", text = _("Plugins"), items = { "plugin_management" } },

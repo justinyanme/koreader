@@ -1,11 +1,13 @@
 --[[--
-Contents drawer of the e-ink redesign (see DESIGN.md, Navigation, and the prototype's openDrawer).
+The old contents drawer, now only its bookmarks and notes (the contents moved to the full-screen
+contents page, apps/reader/modules/readertocpage), kept as the way to them until the notes page
+replaces it.
 
-Opened by the reader toolbar's "Contents" (the "ShowToc" event): a left panel with the
-book's cover, title, author and progress over three tabs, contents, bookmarks and notes.
-Lists are paginated, never scrolled, and a group header never ends a page. Each tab is
-measured and paginated once per drawer (without rendering), and only the rows of the shown
-page are built, so long tables of contents stay cheap.
+Opened by "ShowNotes" (ReaderToolbar:onShowNotes): the toolbar's 笔记 on the notes tab, the contents
+page's 书签 on the bookmarks tab. A left panel with the book's cover, title, author and progress over
+two tabs, bookmarks and notes. Lists are paginated, never scrolled, and a group header never ends a
+page. Each tab is measured and paginated once per drawer (without rendering), and only the rows of the
+shown page are built.
 
 Opening, closing and switching tabs refresh the panel ("ui"), turning a list page only
 refreshes the list ("ui"). Jumps close the drawer without a refresh of its own and let
@@ -16,7 +18,6 @@ stack, for "Return to last position".
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local EinkControls = require("ui/widget/einkcontrols")
-local Event = require("ui/event")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
@@ -175,7 +176,7 @@ end
 
 local TocDrawer = InputContainer:extend{
     ui = nil,
-    tab = "toc", -- "toc", "bookmarks" or "notes"
+    tab = "bookmarks", -- "bookmarks" or "notes"
     on_close = nil, -- function, called once the drawer is closed
 }
 
@@ -219,7 +220,6 @@ function TocDrawer:init()
     if Device:hasKeys() then
         self.key_events.Close = { { Device.input.group.Back } }
     end
-    self.ui.toc:fillToc()
     self.bookmarks, self.notes = {}, {}
     for _, item in ipairs(self.ui.annotation.annotations) do
         table.insert(item.drawer and self.notes or self.bookmarks, item)
@@ -278,20 +278,8 @@ end
 function TocDrawer:getTab(list_h)
     local tab = self.cache[self.tab]
     if not tab then
-        local items, current
-        if self.tab == "bookmarks" then
-            items = self:bookmarkItems()
-        elseif self.tab == "notes" then
-            items = self:noteItems()
-        else
-            items, current = self:tocItems()
-        end
+        local items = self.tab == "notes" and self:noteItems() or self:bookmarkItems()
         tab = { items = items, pages = self.paginate(items, list_h), page = 1 }
-        for p, indexes in ipairs(tab.pages) do
-            for _, i in ipairs(indexes) do
-                if i == current then tab.page = p end
-            end
-        end
         self.cache[self.tab] = tab
     end
     return tab
@@ -350,7 +338,7 @@ function TocDrawer:buildHeader()
 end
 
 function TocDrawer:buildTabs()
-    local cell_w = math.floor(self.content_w / 3)
+    local cell_w = math.floor(self.content_w / 2)
     local function cell(tab, label)
         return TabCell:new{
             text = label, selected = tab == self.tab, width = cell_w, height = dp(44) - dp(1),
@@ -360,7 +348,6 @@ function TocDrawer:buildTabs()
     local nb, nn = #self.bookmarks, #self.notes
     return VerticalGroup:new{
         HorizontalGroup:new{
-            cell("toc", C_("Reader toolbar", "Contents")),
             cell("bookmarks", nb > 0 and T(_("Bookmarks %1"), nb) or _("Bookmarks")),
             cell("notes", nn > 0 and T(C_("Contents drawer", "Notes %1"), nn) or C_("Contents drawer", "Notes")),
         },
@@ -402,37 +389,6 @@ function TocDrawer:pageString(pn_or_xp)
     return self.ui.bookmark:getBookmarkPageString(pn_or_xp)
 end
 
---[[--
-Measured rows of each tab: plain tables with the row's height `h` (and `is_header`), and what
-buildRow() needs to build it. Heights come from text widths, so measuring renders nothing.
-]]
-function TocDrawer:tocItems()
-    local w = self.content_w
-    local toc = self.ui.toc
-    if #toc.toc == 0 then
-        return { { kind = "empty", h = 0, title = _("No table of contents") } }
-    end
-    local current = toc:getTocIndexByPage(self.ui.rolling and self.ui.document:getXPointer() or self.ui:getCurrentPage())
-    local tag_w = textSize(_("Reading"), "ui_micro").w + 2 * (dp(7) + dp(1)) + dp(8)
-    local line_h = lineHeight("ui_body")
-    local items = {}
-    for i, entry in ipairs(toc.toc) do
-        local is_current = i == current
-        local page = self:pageString(self.ui.rolling and entry.xpointer or entry.page)
-        local right_w = dp(12) + textSize(page, "ui_caption").w + (is_current and tag_w or 0)
-        local indent = math.min(dp(16) * math.max(0, (entry.depth or 1) - 1), math.floor(w / 3))
-        local title = toc:cleanUpTocTitle(entry.title, true)
-        local title_w = w - indent - right_w
-        local lines = lineCount(title, "ui_body", title_w, 2, is_current)
-        items[i] = {
-            kind = "toc", index = i, entry = entry, is_current = is_current, page = page,
-            indent = indent, title = title, title_w = title_w, lines = lines,
-            h = math.max(dp(50), lines * line_h + 2 * dp(8)),
-        }
-    end
-    return items, current
-end
-
 --- Text at the top of a bookmarked page, or nil.
 function TocDrawer:pageStartText(item)
     local doc = self.ui.document
@@ -458,6 +414,10 @@ local function date(item)
     return (item.datetime or ""):sub(1, 10)
 end
 
+--[[--
+Measured rows of each tab: plain tables with the row's height `h` (and `is_header`), and what
+buildRow() needs to build it. Heights come from text widths, so measuring renders nothing.
+]]
 function TocDrawer:bookmarkItems()
     if #self.bookmarks == 0 then
         return { { kind = "empty", h = 0, title = _("No bookmarks yet"),
@@ -600,35 +560,6 @@ function TocDrawer:buildRow(it)
         return self.emptyState(w, it)
     elseif it.kind == "header" then
         return self.groupHeader(w, it)
-    elseif it.kind == "toc" then
-        local right = HorizontalGroup:new{ align = "center" }
-        if it.is_current then
-            table.insert(right, HorizontalSpan:new{ width = dp(8) })
-            table.insert(right, FrameContainer:new{
-                bordersize = dp(1), color = Palette.ink, radius = dp(9), padding = 0,
-                padding_left = dp(7), padding_right = dp(7),
-                text(_("Reading"), "ui_micro", Palette.ink),
-            })
-        end
-        table.insert(right, HorizontalSpan:new{ width = dp(12) })
-        table.insert(right, text(it.page, "ui_caption", it.is_current and Palette.ink or Palette.ink_2))
-        local entry = it.entry
-        local r = row(w, it.h, HorizontalGroup:new{
-            align = "center",
-            HorizontalSpan:new{ width = it.indent },
-            textBox(it.title, "ui_body", it.title_w, it.lines, { bold = it.is_current }),
-            right,
-        }, function()
-            self:jump(function()
-                if entry.xpointer then
-                    self.ui:handleEvent(Event:new("GotoXPointer", entry.xpointer, entry.xpointer))
-                else
-                    self.ui:handleEvent(Event:new("GotoPage", entry.page))
-                end
-            end)
-        end)
-        r.toc_index, r.is_current = it.index, it.is_current
-        return r
     elseif it.kind == "bookmark" then
         return row(w, it.h, VerticalGroup:new{
             align = "left",

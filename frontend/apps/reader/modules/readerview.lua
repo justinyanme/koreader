@@ -18,6 +18,8 @@ local ReaderFooter = require("apps/reader/modules/readerfooter")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local dbg = require("dbg")
+local ffi = require("ffi")
+require("ffi/posix_h") -- free()
 local logger = require("logger")
 local optionsutil = require("ui/data/optionsutil")
 local Size = require("ui/size")
@@ -596,6 +598,7 @@ function ReaderView:drawPageSavedHighlight(bb, x, y)
 end
 
 function ReaderView:drawXPointerSavedHighlight(bb, x, y)
+    self.highlight.lines = {} -- fork: line highlights are drawn last, see ReaderView:drawLineHighlights()
     local do_cache = self.view_mode == "page"
     local colorful
     local page = self.document:getCurrentPage()
@@ -660,6 +663,7 @@ function ReaderView:drawXPointerSavedHighlight(bb, x, y)
             end
         end
     end
+    self:drawLineHighlights(bb, x, y)
     return colorful
 end
 
@@ -689,7 +693,100 @@ function ReaderView.paintWave(bb, x, mid_y, w, color)
     end
 end
 
-function ReaderView:drawHighlightRect(bb, _x, _y, rect, drawer, color, draw_note_mark)
+--- Fork: draws the line highlights (straight lines and waves) of reflowable text deferred by
+-- drawXPointerSavedHighlight(), each line of text under its glyphs (see ReaderView:underlineY()). They
+-- come last, so that no line is measured with a line highlight already drawn on it.
+function ReaderView:drawLineHighlights(bb, x, y)
+    local lines = self.highlight.lines
+    self.highlight.lines = nil
+    local by_line = {} -- the segments of one line of text share its box's y and h
+    for _, l in ipairs(lines) do
+        l.key = l.rect.y .. ":" .. l.rect.h
+        by_line[l.key] = by_line[l.key] or {}
+        table.insert(by_line[l.key], l.rect)
+    end
+    local line_ys = {}
+    for key, rects in pairs(by_line) do
+        line_ys[key] = self:underlineY(bb, rects)
+    end
+    for _, l in ipairs(lines) do
+        self:drawHighlightRect(bb, x, y, l.rect, l.drawer, l.color, l.draw_note_mark, line_ys[l.key])
+    end
+end
+
+--- Fork: the top of the line highlights on one line of reflowable text, given the screen rects of its
+-- highlighted segments (one line box): 3dp under the lowest glyphs of those segments, as in WeChat Read,
+-- rather than at the bottom of the line's leading (DESIGN.md, Highlights). crengine gives line boxes
+-- only, with no baseline nor glyph extents, so the glyphs are found in the page as painted:
+-- - Only the lower half of those segments is read, every other column: the highlighted lines, never
+--   the whole page, and only on pages with line highlights.
+-- - Ink is told from the paper of the line, the color of most of the box's bottom row (its leading):
+--   dark on light, or light on a dark page. Night mode inverts the screen buffer, which reads back
+--   uninverted, so it is dark on light too. When that row is not mostly one or the other (an image
+--   reaching it, say), the paper is unknown: bottom of the box.
+-- - crengine counts an inline image in the text segment around it. On the lowest row with ink, each run
+--   of ink columns is checked for an image; the columns of an image run are left out, and the search
+--   goes on above. The first run that is not an image is the glyphs' bottom.
+-- - Without glyphs in the lower half (line spacing so tight that glyphs fill the box), bottom of the box.
+function ReaderView:underlineY(bb, rects)
+    local box = rects[1]
+    local bottom = box.y + box.h - 1
+    local bb_w, bb_h = bb:getWidth(), bb:getHeight()
+    if bottom >= bb_h then return bottom end
+    local cols, seen = {}, {} -- of all the segments, which may overlap
+    for _, r in ipairs(rects) do
+        for col = math.max(r.x, 0), math.min(r.x + r.w, bb_w) - 1, 2 do
+            if not seen[col] then
+                seen[col] = true
+                table.insert(cols, col)
+            end
+        end
+    end
+    if #cols == 0 then return bottom end
+    table.sort(cols)
+    local function gray(col, row) return bb:getPixel(col, row):getColor8().a end
+    local light = 0
+    for _, col in ipairs(cols) do
+        if gray(col, bottom) >= 0x80 then light = light + 1 end
+    end
+    if light > #cols / 4 and light < #cols * 3 / 4 then return bottom end
+    local paper_light = light >= #cols * 3 / 4
+    local function isInk(col, row)
+        return (gray(col, row) >= 0x80) ~= paper_light
+    end
+    local cre = self.document._document
+    local function isImage(col, row)
+        local data = cre:getImageDataFromPosition(col, row)
+        if data then ffi.C.free(data) end
+        return data ~= nil
+    end
+    local skipped = {} -- columns of images
+    for row = bottom, math.max(box.y + math.floor(box.h / 2), 0), -1 do
+        local run_start -- index in cols of the first column of a run of ink
+        for i = 1, #cols + 1 do
+            local col = cols[i]
+            local ink = col and not skipped[col] and isInk(col, row)
+            if run_start and (not ink or col - cols[i - 1] > 2) then -- the run ends at cols[i - 1]
+                if not isImage(cols[math.floor((run_start + i - 1) / 2)], row) then
+                    return math.min(bottom, row + 1 + Screen:scaleBySize(3))
+                end
+                for k = run_start, i - 1 do skipped[cols[k]] = true end
+                run_start = nil
+            end
+            if ink and not run_start then
+                run_start = i
+            end
+        end
+    end
+    return bottom
+end
+
+-- line_top: the top of a straight line or wave (fork, see ReaderView:underlineY())
+function ReaderView:drawHighlightRect(bb, _x, _y, rect, drawer, color, draw_note_mark, line_top)
+    if self.highlight.lines and (drawer == "underscore" or drawer == "wave") then -- fork: drawn last
+        table.insert(self.highlight.lines, { rect = rect, drawer = drawer, color = color, draw_note_mark = draw_note_mark })
+        return
+    end
     local x, y, w, h = rect.x, rect.y, rect.w, rect.h
     if drawer == "lighten" or drawer == "invert" then
         local pct = G_reader_settings:readSetting("highlight_height_pct")
@@ -720,13 +817,16 @@ function ReaderView:drawHighlightRect(bb, _x, _y, rect, drawer, color, draw_note
             end
         end
     elseif drawer == "underscore" then
+        -- fork: an ink line 2dp thick, as in WeChat Read (DESIGN.md, Highlights)
         if is_gray then
-            color = Blitbuffer.COLOR_GRAY_4
+            color = Blitbuffer.COLOR_BLACK
         end
+        local line_h = Screen:scaleBySize(2)
+        line_top = line_top or y + h - 1
         if Blitbuffer.isColor8(color) then
-            bb:paintRect(x, y + h - 1, w, Size.line.thick, color)
+            bb:paintRect(x, line_top, w, line_h, color)
         else
-            bb:paintRectRGB32(x, y + h - 1, w, Size.line.thick, Screen.night_mode and color:invert() or color)
+            bb:paintRectRGB32(x, line_top, w, line_h, Screen.night_mode and color:invert() or color)
         end
     elseif drawer == "strikeout" then
         if is_gray then
@@ -747,7 +847,8 @@ function ReaderView:drawHighlightRect(bb, _x, _y, rect, drawer, color, draw_note
         elseif Screen.night_mode then
             color = color:invert()
         end
-        ReaderView.paintWave(bb, x, y + h - Screen:scaleBySize(1.5), w, color)
+        local amp = Screen:scaleBySize(1.5) -- ReaderView.paintWave()'s amplitude: its top at line_top
+        ReaderView.paintWave(bb, x, line_top and line_top + amp or y + h - amp, w, color)
     elseif drawer == "invert" then
         bb:invertRect(x, y, w, h)
     end

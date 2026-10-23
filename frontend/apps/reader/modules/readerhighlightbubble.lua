@@ -1,21 +1,30 @@
 --[[--
-Selection and highlight bubbles of the e-ink redesign (see DESIGN.md, Selection
-bubble and Highlights).
+Selection and highlight popovers of the e-ink redesign (see DESIGN.md, Selection
+popover and Highlights).
 
 Replaces ReaderHighlight (apps/replacements reader_highlight slot):
-- a long-press selects a word, dragging extends it, and releasing shows a black
-  bubble: copy, highlight, write note, look up, search;
-- tapping a highlight shows its styles (marker, line, wave) and write or edit
-  note, copy, look up, delete;
+- a long-press selects a word, dragging extends it, and releasing shows the
+  white selection popover: highlight, look up (查询, for CJK text) or translate
+  (翻译, for other text, such as English), write note, copy, each an icon over
+  its label;
+- a tap on a highlight, or a long-press on a word of it, shows the same four
+  actions with "Delete highlight" in the first place; after a long-press, the
+  look-up is for the word pressed;
+- copying closes the popover and confirms with a toast;
 - a note is written in a bottom sheet; highlights with a note get a small mark
   after their last character.
 
-The style last picked is used for new highlights in every book.
+New highlights are lines unless a default style was saved, in 设置 → 阅读 →
+划线样式 (genDefaultStyleMenuItem, which sends "DefaultHighlightStyleChanged" to the
+open book) or the original menu. Existing highlights keep their own style: markers
+and waves keep showing, and the popovers offer no restyling
+(doc/adr/0006-straight-line-default-highlight.md).
 
-Refreshes: the selection bubble shows and closes with "fast" on its own rect
-(it is black and white). The highlight bubble shows a gray marker swatch, so it
-uses "ui" on its rect. Saving, restyling or deleting a highlight refreshes its
-own lines with "ui"; nothing here refreshes the whole screen.
+Refreshes: both popovers and the toast are black and white, so they show and
+close with "fast" on their own rect, or "ui" where the page under them is gray
+(the toast is solid, so it always shows with "fast").
+Saving, restyling or deleting a highlight refreshes its own lines with "ui";
+nothing here refreshes the whole screen.
 ]]
 
 local BottomSheet = require("ui/widget/bottomsheet")
@@ -29,14 +38,12 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
 local InputText = require("ui/widget/inputtext")
-local Notification = require("ui/widget/notification")
 local Palette = require("ui/palette")
 local ReaderHighlight = require("apps/reader/modules/readerhighlight")
-local ReaderView = require("apps/reader/modules/readerview")
 local SelectionBubble = require("ui/widget/selectionbubble")
 local Size = require("ui/size")
 local TextBoxWidget = require("ui/widget/textboxwidget")
-local TextWidget = require("ui/widget/textwidget")
+local Toast = require("ui/widget/toast")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -47,40 +54,6 @@ local util = require("util")
 local Screen = Device.screen
 local _ = require("gettext")
 local C_ = _.pgettext
-
--- marker, line, wave (doc/adr/0003-wavy-highlight-style.md)
-local STYLES = { "lighten", "underscore", "wave" }
-
---- Style swatch on the bubble: a serif 文 drawn in the style, paper on ink.
-local StyleSwatch = Widget:extend{
-    drawer = nil,
-}
-
-function StyleSwatch:init()
-    self.glyph = TextWidget:new{ text = "文", face = Font:getFace("ui_excerpt"), fgcolor = Palette.paper }
-    local g = self.glyph:getSize()
-    self.pad = Screen:scaleBySize(3)
-    self.glyph_h = g.h
-    self.dimen = Geom:new{ w = g.w + 2 * self.pad, h = g.h + Screen:scaleBySize(6) }
-end
-
-function StyleSwatch:paintTo(bb, x, y)
-    local w = self.dimen.w
-    if self.drawer == "lighten" then
-        bb:paintRect(x, y, w, self.glyph_h, Palette.marker_on_ink)
-    end
-    self.glyph:paintTo(bb, x + self.pad, y)
-    local line_y = y + self.glyph_h + Screen:scaleBySize(2)
-    if self.drawer == "underscore" then
-        bb:paintRect(x, line_y, w, Screen:scaleBySize(2), Palette.paper)
-    elseif self.drawer == "wave" then
-        ReaderView.paintWave(bb, x, line_y, w, Palette.paper)
-    end
-end
-
-function StyleSwatch:onCloseWidget()
-    self.glyph:free()
-end
 
 --- Paints a note mark after the last visible box of every highlight with a note.
 local NoteMarks = Widget:extend{
@@ -144,6 +117,57 @@ end
 
 local ReaderHighlightBubble = ReaderHighlight:extend{}
 
+--- Styles for new highlights: line, marker, wave. The original menu's other styles (strikethrough, invert)
+-- stay available there.
+ReaderHighlightBubble.STYLES = {
+    { C_("Highlight style", "Underline"), "underscore" },
+    { C_("Highlight style", "Marker"), "lighten" },
+    { _("Wavy underline"), "wave" }, -- fork-only style, see doc/adr/0003-wavy-highlight-style.md
+}
+
+-- new highlights are lines until a default style is saved (doc/adr/0006-straight-line-default-highlight.md)
+local DEFAULT_DRAWER = "underscore"
+
+--- The style of new highlights: the saved default, else a line.
+function ReaderHighlightBubble.getDefaultDrawer()
+    return G_reader_settings:readSetting("highlight_drawing_style") or DEFAULT_DRAWER
+end
+
+--- The 划线样式 row of the reorganized settings (ui/elements/eink_settings_order.lua): line, marker or
+-- wave as one choice for new highlights; existing highlights keep their own style. A default saved in
+-- another style from the original menu (strikethrough, invert) is listed too, checked, so that it shows
+-- as the row's value.
+function ReaderHighlightBubble.genDefaultStyleMenuItem()
+    local styles = {}
+    local default, listed = ReaderHighlightBubble.getDefaultDrawer(), false
+    for _, style in ipairs(ReaderHighlightBubble.STYLES) do
+        table.insert(styles, style)
+        if style[2] == default then listed = true end
+    end
+    if not listed then
+        for _, style in ipairs(ReaderHighlight.getHighlightStyles()) do
+            if style[2] == default then table.insert(styles, style) end
+        end
+    end
+    local sub_item_table = {}
+    for _, style in ipairs(styles) do
+        local drawer = style[2]
+        table.insert(sub_item_table, {
+            text = style[1],
+            radio = true,
+            checked_func = function()
+                return ReaderHighlightBubble.getDefaultDrawer() == drawer
+            end,
+            callback = function()
+                G_reader_settings:saveSetting("highlight_drawing_style", drawer)
+                -- for the open book's next highlight
+                UIManager:broadcastEvent(Event:new("DefaultHighlightStyleChanged"))
+            end,
+        })
+    end
+    return { text = C_("Settings", "Highlight style"), sub_item_table = sub_item_table }
+end
+
 --- Registers the bubbles in their replacement slot.
 -- Touch devices only, like the toolbar: the bubbles have no key navigation.
 function ReaderHighlightBubble.register()
@@ -154,13 +178,32 @@ end
 
 function ReaderHighlightBubble:init()
     ReaderHighlight.init(self)
+    self._fallback_drawer = DEFAULT_DRAWER -- starred in the original menu while no default is saved
     self.view:registerViewModule("note_marks", NoteMarks:new{ highlight = self })
 end
 
 function ReaderHighlightBubble:onReadSettings(config)
+    self._book_drawer = config:readSetting("highlight_drawer")
     ReaderHighlight.onReadSettings(self, config)
-    -- the style last picked in any book wins over the one saved with this book
-    self.view.highlight.saved_drawer = G_reader_settings:readSetting("highlight_drawing_style") or self.view.highlight.saved_drawer
+    -- not the style saved with this book: upstream saves the current one on every close
+    self:onDefaultHighlightStyleChanged()
+end
+
+-- Upstream saves the current style with the book: keep the book's own instead, for upstream KOReader and
+-- devices without touch that open the same book settings.
+function ReaderHighlightBubble:onSaveSettings()
+    ReaderHighlight.onSaveSettings(self)
+    if self._book_drawer then
+        self.ui.doc_settings:saveSetting("highlight_drawer", self._book_drawer)
+    else
+        self.ui.doc_settings:delSetting("highlight_drawer")
+    end
+end
+
+--- New highlights take the default style (after it was changed in the settings).
+function ReaderHighlightBubble:onDefaultHighlightStyleChanged()
+    self.view.highlight.saved_drawer = ReaderHighlightBubble.getDefaultDrawer()
+    self:setSelectionColor()
 end
 
 --- Screen rects of boxes; on fixed-layout pages boxes are in page coordinates (item gives the page).
@@ -253,9 +296,10 @@ function ReaderHighlightBubble:clear(clear_id, fast)
     return true
 end
 
+-- The popover's corners and the strip beside its arrow show the page: "fast" only where it is black and white.
 function ReaderHighlightBubble:showBubble(bubble)
     self:closeBubble()
-    bubble.close_refresh_type = bubble.refresh_type == "ui" and "ui" or self:refreshTypeOver(bubble:getRefreshRegion())
+    bubble.refresh_type = self:refreshTypeOver(bubble:getRefreshRegion())
     self.highlight_dialog = bubble
     UIManager:show(bubble, bubble.refresh_type, bubble:getRefreshRegion())
 end
@@ -268,7 +312,7 @@ function ReaderHighlightBubble:closeBubble()
         return UIManager:close(bubble)
     end
     local region = bubble:getRefreshRegion()
-    UIManager:close(bubble, bubble.close_refresh_type, region)
+    UIManager:close(bubble, bubble.refresh_type, region)
 end
 
 --- Closes the selection bubble and clears the selection, both "fast" where possible.
@@ -293,14 +337,84 @@ function ReaderHighlightBubble:onHoldRelease()
     if self.clear_id or self.select_mode or not self.hold_pos or not self.selected_text then
         return ReaderHighlight.onHoldRelease(self)
     end
-    -- a single word gets the bubble too, not the dictionary straight away
     self:_resetHoldTimer(true)
+    -- a long-press on a word of a highlight (no drag) shows that highlight's popover, as a tap does
+    local highlights = self.is_word_selection and self:highlightsAt(self.hold_pos) or {}
     self.is_word_selection = false
+    if #highlights > 0 then
+        local word = self.selected_text
+        self:clear(nil, true)
+        if #highlights == 1 then
+            self:showHighlightBubble(highlights[1], nil, word)
+        else
+            self:showChooseHighlightDialog(highlights) -- overlapping highlights: upstream's list
+        end
+        return true
+    end
+    -- a single word gets the bubble too, not the dictionary straight away
     self:onShowHighlightMenu()
     return true
 end
 
---- Selection bubble: copy, highlight, write note, look up, search.
+--- Indexes of the highlights shown at a page position, as ReaderHighlight:onTap() finds them.
+function ReaderHighlightBubble:highlightsAt(pos)
+    local indexes, seen = {}, {}
+    for _, box in ipairs(self.view.highlight.visible_boxes or {}) do
+        local r = box.rect
+        if not seen[box.index] and (not box.page or box.page == pos.page)
+                and pos.x >= r.x and pos.x <= r.x + r.w and pos.y >= r.y and pos.y <= r.y + r.h then
+            seen[box.index] = true
+            table.insert(indexes, box.index)
+        end
+    end
+    return indexes
+end
+
+-- languages whose text is looked up (查询) rather than translated: book metadata and OCR codes
+local CJK_LANGUAGES = { "^zh", "^ja", "^ko", "^chi", "^jpn", "^kor" }
+
+--- Whether text is looked up (查询, as CJK text) rather than translated (翻译, other text such as English),
+-- as WeChat Read names them. Without text (a selection on a scanned page), the book's language decides:
+-- its metadata, or an OCR language other than the default; CJK when unknown.
+function ReaderHighlightBubble:isLookedUp(text)
+    if text:find("%S") then
+        for c in text:gmatch(util.UTF8_CHAR_PATTERN) do
+            if util.isCJKWordChar(c) then return true end
+        end
+        return false
+    end
+    local lang = self.ui.doc_props and self.ui.doc_props.language
+    if not lang or lang == "" then
+        local ocr_lang = self.ui.document.configurable and self.ui.document.configurable.doc_language
+        if ocr_lang ~= G_defaults:readSetting("DKOPTREADER_CONFIG_DOC_DEFAULT_LANG_CODE") then
+            lang = ocr_lang
+        end
+    end
+    if not lang or lang == "" then return true end
+    lang = lang:lower()
+    for _, pattern in ipairs(CJK_LANGUAGES) do
+        if lang:find(pattern) then return true end
+    end
+    return false
+end
+
+--- The look-up cell for some text (see isLookedUp). Both actions open the dictionary sheet.
+function ReaderHighlightBubble:lookupCell(text, callback)
+    if self:isLookedUp(text) then
+        return { icon = "eink/search", text = C_("Highlight bubble", "Look up"), callback = callback }
+    end
+    return { icon = "eink/translate", text = _("Translate"), callback = callback }
+end
+
+--- Copies text to the clipboard, and says so in a toast over the lower part of the page.
+function ReaderHighlightBubble:copyText(text)
+    Device.input.setClipboardText(text)
+    local toast = Toast:new{ text = C_("Highlight bubble", "Copied") }
+    toast.close_refresh_type = self:refreshTypeOver(toast.dimen)
+    UIManager:show(toast)
+end
+
+--- Selection popover: highlight, look up or translate, write note, copy.
 function ReaderHighlightBubble:onShowHighlightMenu(index)
     if not self.selected_text then return end
     local rects = self:selectionRects()
@@ -310,12 +424,7 @@ function ReaderHighlightBubble:onShowHighlightMenu(index)
     local text = util.cleanupSelectedText(self.selected_text.text)
     local bubble = SelectionBubble:new{
         rows = { {
-            { text = C_("Text", "Copy"), callback = function()
-                Device.input.setClipboardText(text)
-                self:dismiss()
-                UIManager:show(Notification:new{ text = _("Selection copied to clipboard.") })
-            end },
-            { text = C_("Highlight bubble", "Highlight"), callback = function()
+            { icon = "eink/highlight", text = C_("Highlight bubble", "Highlight"), callback = function()
                 -- a selection across pages turns back to its first page when cleared: wait for the repaint
                 local turns_back = self.restore_page_mode_func ~= nil
                 local index = self:saveSelection()
@@ -326,11 +435,7 @@ function ReaderHighlightBubble:onShowHighlightMenu(index)
                     self:showHighlightBubble(index, rects)
                 end
             end },
-            { text = C_("Highlight bubble", "Write note"), callback = function()
-                local index = self:saveSelection()
-                if index then self:showNoteSheet(index, true) end
-            end },
-            { text = C_("Highlight bubble", "Look up"), callback = function()
+            self:lookupCell(text, function()
                 self:closeBubble()
                 -- the dictionary popup clears the selection
                 if self.selected_text.text == "" and self.selected_text.sboxes then
@@ -338,21 +443,23 @@ function ReaderHighlightBubble:onShowHighlightMenu(index)
                 else
                     self:lookupDict()
                 end
+            end),
+            { icon = "eink/thought", text = C_("Highlight bubble", "Write note"), callback = function()
+                local index = self:saveSelection()
+                if index then self:showNoteSheet(index, true) end
             end },
-            { text = _("Search"), callback = function()
+            { icon = "eink/copy", text = C_("Text", "Copy"), callback = function()
                 self:dismiss()
-                self.ui.search:searchCallback(nil, text) -- all results, paginated
+                self:copyText(text)
             end },
         } },
         anchor_rects = rects,
-        rule_color = Palette.paper, -- the bubble is black and white, so "fast" renders it right
         tap_close_callback = function() self:dismiss() end,
     }
-    bubble.refresh_type = "fast"
     self:showBubble(bubble)
 end
 
---- Saves the selection as a highlight in the last picked style; returns its index.
+--- Saves the selection as a highlight in the default style; returns its index.
 function ReaderHighlightBubble:saveSelection()
     self:closeBubble()
     local index = self:saveHighlight()
@@ -365,72 +472,41 @@ function ReaderHighlightBubble:showHighlightNoteOrDialog(index)
     self:showHighlightBubble(index)
 end
 
---- Highlight bubble: styles, then write or edit note, copy, look up, delete.
+--- Highlight popover: the selection popover's actions, with "Delete highlight" in the first place.
 -- rects: screen rects of the highlight when it has not been painted yet
-function ReaderHighlightBubble:showHighlightBubble(index, rects)
+-- word: the selection of a word long-pressed in it, which the look-up is for instead of the whole highlight
+function ReaderHighlightBubble:showHighlightBubble(index, rects, word)
     local item = self.ui.annotation.annotations[index]
     rects = rects or self:highlightRects(index)
     if #rects == 0 then
         return ReaderHighlight.showHighlightNoteOrDialog(self, index)
     end
-    local styles = {}
-    for i, drawer in ipairs(STYLES) do
-        styles[i] = {
-            widget = StyleSwatch:new{ drawer = drawer },
-            selected = item.drawer == drawer,
-            callback = function()
-                self:setHighlightStyle(index, drawer, rects)
-                self:showHighlightBubble(index, rects)
-            end,
-        }
-    end
     local bubble = SelectionBubble:new{
-        rows = {
-            styles,
-            {
-                { text = item.note and C_("Highlight bubble", "Edit note") or C_("Highlight bubble", "Write note"),
-                  callback = function()
-                    self:closeBubble()
-                    self:showNoteSheet(index)
-                end },
-                { text = C_("Text", "Copy"), callback = function()
-                    Device.input.setClipboardText(item.text)
-                    self:closeBubble()
-                    UIManager:show(Notification:new{ text = _("Selection copied to clipboard.") })
-                end },
-                { text = C_("Highlight bubble", "Look up"), callback = function()
-                    self:closeBubble()
-                    self.selected_text = util.tableDeepCopy(item)
-                    self:lookupDict(index)
-                end },
-                { text = _("Delete"), callback = function()
-                    self:closeBubble()
-                    self:deleteHighlight(index)
-                end },
-            },
-        },
+        rows = { {
+            { icon = "eink/highlight-off", text = C_("Highlight bubble", "Delete highlight"), callback = function()
+                self:closeBubble()
+                self:deleteHighlight(index)
+            end },
+            self:lookupCell((word or item).text, function()
+                self:closeBubble()
+                self.selected_text = util.tableDeepCopy(word or item)
+                self:lookupDict(not word and index or nil)
+            end),
+            { icon = "eink/thought",
+              text = item.note and C_("Highlight bubble", "Edit note") or C_("Highlight bubble", "Write note"),
+              callback = function()
+                self:closeBubble()
+                self:showNoteSheet(index)
+              end },
+            { icon = "eink/copy", text = C_("Text", "Copy"), callback = function()
+                self:closeBubble()
+                self:copyText(item.text)
+            end },
+        } },
         anchor_rects = rects,
         tap_close_callback = function() self:closeBubble() end,
     }
-    bubble.refresh_type = "ui" -- the marker swatch is gray
     self:showBubble(bubble)
-end
-
-function ReaderHighlightBubble:setHighlightStyle(index, drawer, rects)
-    local item = self.ui.annotation.annotations[index]
-    -- as ReaderHighlight:editHighlightStyle()
-    self:writePdfAnnotation("delete", item)
-    item.drawer = drawer
-    if self.ui.paging then
-        self:writePdfAnnotation("save", item)
-        if item.note then
-            self:writePdfAnnotation("content", item, item.note)
-        end
-    end
-    self.view.highlight.saved_drawer = drawer
-    G_reader_settings:saveSetting("highlight_drawing_style", drawer)
-    self.ui:handleEvent(Event:new("AnnotationsModified", { item }))
-    UIManager:setDirty(self.dialog, "ui", self:linesRegion(rects or self:highlightRects(index)))
 end
 
 function ReaderHighlightBubble:deleteHighlight(index)

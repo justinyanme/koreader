@@ -5,15 +5,16 @@ They take plain data so they can move to ui/widget once the other redesign
 screens need them:
 
     Chip{ text, count, selected, callback }
-    Pager{ page, pages, on_change } -- page is 1-based
-    TabBar{ width, tabs = { { id, icon, text } }, current, on_change }
+    TabBar{ tabs = { { id, icon } }, current, height, on_change } -- the tab icons of the bottom band
     BottomSheet{ title, header, rows = { { text, callback, checked } } } -- shown with BottomSheet:show()
 
-and the cover grid shared by 书架 and 书源:
+and the cover grids of 书架 and 书源:
 
-    gridGeometry(width, grid_h) -- { cols, rows, cover_w, cover_h, col_gap }
+    shelfGrid(width, grid_h) -- 书架: { cols, rows, cover_w, cover_h, gutter, col_gap, title_gap, cell_h, row_gap, peek }
+    gridGeometry(width, grid_h) -- 书源: { cols, rows, cover_w, cover_h, col_gap }
     cover(book, w, h, image_bb, keep_image) -- the image cropped to fill (freed with the widget unless keep_image),
                                             -- or the typographic cover from book.title/authors
+    finishedBadge() -- the 读完 tag at a finished book's top right corner
 ]]
 
 local BottomContainer = require("ui/widget/container/bottomcontainer")
@@ -37,9 +38,10 @@ local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local util = require("util")
 local Screen = Device.screen
-local T = require("ffi/util").template
 local _ = require("gettext")
+local C_ = _.pgettext
 
 local function dp(n) return Screen:scaleBySize(n) end
 
@@ -48,11 +50,50 @@ local TEXT_H = dp(60) -- title (2 lines) and status under each cover
 local ROW_GAP = dp(18)
 local COL_GAP = dp(20) -- minimum; columns are spread with space-between
 
---- Cover grid layout for a region `width` wide (24dp gutters) and `grid_h` tall.
-local function gridGeometry(width, grid_h)
-    -- Columns follow the physical panel width: 6" -> 3, 7" -> 4, 10.3" -> 5.
+-- Columns follow the physical panel width: 6" -> 3, 7" -> 4, 10.3" -> 5.
+local function columnCount()
     local inches = Screen:getWidth() / Screen:getDPI()
-    local cols = inches < 3.9 and 3 or inches < 5.2 and 4 or 5
+    return inches < 3.9 and 3 or inches < 5.2 and 4 or 5
+end
+
+-- 书架, after the Leaf5 reference (DESIGN.md, Layout): 22dp gutters and gaps, covers about 123 × 178dp,
+-- one bold title line whose glyphs start 12dp under the cover, and 24dp from them to the next row.
+local SHELF_GUTTER = dp(22)
+local SHELF_COL_GAP = dp(22)
+local COVER_RATIO = 1.45
+local TITLE_GAP = dp(9) -- to the title's line box, whose CJK glyphs start about 3dp lower
+local SHELF_ROW_GAP = dp(20)
+local MIN_PEEK = dp(40)
+
+--- 书架's cover grid for a region `width` wide and `grid_h` tall. `rows` full rows fit; when at least
+-- MIN_PEEK is left under them, `peek` is that height: the next page's first row shows there, cut off.
+local function shelfGrid(width, grid_h)
+    local cols = columnCount()
+    local inner_w = width - 2 * SHELF_GUTTER
+    local cover_w = math.floor((inner_w - SHELF_COL_GAP * (cols - 1)) / cols)
+    local cover_h = math.floor(cover_w * COVER_RATIO + 0.5)
+    local line_h = math.ceil(Font:getFace("ui_label").ftsize:getHeightAndAscender())
+    local cell_h = cover_h + TITLE_GAP + line_h
+    local pitch = cell_h + SHELF_ROW_GAP
+    local rows = math.max(1, math.floor((grid_h + SHELF_ROW_GAP) / pitch))
+    local left = grid_h - rows * pitch
+    return {
+        cols = cols,
+        rows = rows,
+        cover_w = cover_w,
+        cover_h = cover_h,
+        col_gap = cols > 1 and math.floor((inner_w - cols * cover_w) / (cols - 1)) or 0,
+        gutter = SHELF_GUTTER,
+        title_gap = TITLE_GAP,
+        cell_h = cell_h,
+        row_gap = SHELF_ROW_GAP,
+        peek = left >= MIN_PEEK and left or nil,
+    }
+end
+
+--- 书源's cover grid for a region `width` wide (24dp gutters) and `grid_h` tall.
+local function gridGeometry(width, grid_h)
+    local cols = columnCount()
     local inner_w = width - 2 * GUTTER
     local cover_w = math.floor((inner_w - COL_GAP * (cols - 1)) / cols)
     local rows = math.floor((grid_h + ROW_GAP) / (math.floor(cover_w * 4 / 3) + TEXT_H + ROW_GAP))
@@ -97,10 +138,11 @@ local function cover(book, w, h, image_bb, keep_image)
     local title_size = math.max(9, math.floor(w * 0.12 / px_per_dp))
     local author_size = math.max(8, math.floor(w * 0.065 / px_per_dp))
     local text_w = frame_w - 2 * dp(6)
+    -- the cover's own lettering: the roles' font files, which the interface font size leaves alone
     local content = VerticalGroup:new{
         TextBoxWidget:new{
             text = book.title,
-            face = Font:getFace("ui_headword", title_size),
+            face = Font:getFace(Font.fontmap.ui_headword, title_size),
             bold = true,
             alignment = "center",
             width = text_w,
@@ -114,7 +156,7 @@ local function cover(book, w, h, image_bb, keep_image)
         table.insert(content, VerticalSpan:new{ width = math.floor(w * 0.08) })
         table.insert(content, TextWidget:new{
             text = book.authors,
-            face = Font:getFace("ui_micro", author_size),
+            face = Font:getFace(Font.fontmap.ui_micro, author_size),
             max_width = text_w,
         })
     end
@@ -138,14 +180,50 @@ local function cover(book, w, h, image_bb, keep_image)
     }
 end
 
---- A region that calls `callback` on tap and `hold_callback` on long-press.
+--- The 读完 tag of a finished book, set in the cover's top right corner: about 31 × 17dp of paper with a 1dp gray
+-- frame and 12dp ink text (the reference's glyphs are smaller than DESIGN.md's 13dp).
+local function finishedBadge()
+    local face = Font:getFace("ui_caption")
+    local text = C_("Status of single book", "Finished")
+    local label
+    local chars = util.splitToChars(text)
+    if #chars == 2 and util.isCJKChar(chars[1]) and util.isCJKChar(chars[2]) then
+        -- 读 完, spaced as in the reference
+        label = HorizontalGroup:new{
+            TextWidget:new{ text = chars[1], face = face, fgcolor = Palette.ink, padding = 0 },
+            HorizontalSpan:new{ width = dp(2) },
+            TextWidget:new{ text = chars[2], face = face, fgcolor = Palette.ink, padding = 0 },
+        }
+    else
+        label = TextWidget:new{ text = text, face = face, fgcolor = Palette.ink, padding = 0 }
+    end
+    local border = Size.border.default
+    local size = label:getSize()
+    return FrameContainer:new{
+        bordersize = border,
+        color = Palette.confirm_rule, -- DESIGN.md's rule gray
+        background = Palette.paper,
+        padding = 0,
+        CenterContainer:new{
+            dimen = Geom:new{ w = math.max(dp(29), size.w + 2 * dp(2)), h = dp(15) },
+            label,
+        },
+    }
+end
+
+--- A region that calls `callback` on tap and `hold_callback` on long-press. With `clip` (a screen rect),
+-- it only takes the gestures inside it, as when it is painted partly under something else.
 local Tappable = InputContainer:extend{
     callback = nil,
     hold_callback = nil,
+    clip = nil,
 }
 
 function Tappable:init()
-    local range = function() return self.dimen end
+    local range = function()
+        if self.clip and self.dimen then return self.dimen:intersect(self.clip) end
+        return self.dimen
+    end
     self.ges_events = {
         Tap = { GestureRange:new{ ges = "tap", range = range } },
     }
@@ -215,60 +293,29 @@ function Chip:init()
         self.selected and Palette.ink or Palette.paper)
 end
 
-local Pager = HorizontalGroup:extend{
-    page = 1,
-    pages = 1,
-    on_change = nil,
-}
-
-function Pager:init()
-    local function button(icon, enabled, to_page)
-        return Tappable:new{
-            callback = enabled and function() self.on_change(to_page) end or nil,
-            pill(IconWidget:new{ icon = icon, width = dp(18), height = dp(18), dim = not enabled or nil },
-                dp(44), dp(32), Size.border.default, enabled and Palette.ink or Palette.rule),
-        }
-    end
-    local count = TextWidget:new{
-        text = T("%1 / %2", self.page, self.pages),
-        face = Font:getFace("ui_label"),
-    }
-    table.insert(self, button("chevron.left", self.page > 1, self.page - 1))
-    table.insert(self, HorizontalSpan:new{ width = dp(14) })
-    table.insert(self, CenterContainer:new{ dimen = Geom:new{ w = math.max(dp(54), count:getSize().w), h = dp(32) }, count })
-    table.insert(self, HorizontalSpan:new{ width = dp(14) })
-    table.insert(self, button("chevron.right", self.page < self.pages, self.page + 1))
-end
-
-local TabBar = VerticalGroup:extend{
-    width = nil,
+--- The tab icons at the left of the bottom band (DESIGN.md, Tab bar): 28dp icons with no labels, 91dp apart
+-- from a 32dp inset, each tappable over its 91dp cell and the band's height. The current tab's icon is the
+-- filled "eink/<icon>.bold", the others "eink/<icon>".
+local TabBar = HorizontalGroup:extend{
     tabs = nil,
     current = nil,
+    height = nil,
     on_change = nil,
 }
-TabBar.height = dp(56)
+TabBar.cell_w = dp(91)
 
 function TabBar:init()
-    local tab_w = math.floor(self.width / #self.tabs)
-    local row = HorizontalGroup:new{}
+    local size = dp(28)
     for _, tab in ipairs(self.tabs) do
-        local current = tab.id == self.current
-        table.insert(row, Tappable:new{
+        table.insert(self, Tappable:new{
             callback = function() self.on_change(tab.id) end,
             CenterContainer:new{
-                dimen = Geom:new{ w = tab_w, h = TabBar.height - Size.border.default },
-                VerticalGroup:new{
-                    IconWidget:new{ icon = "eink/" .. tab.icon .. (current and ".bold" or ""),
-                        width = dp(24), height = dp(24), dim = not current or nil },
-                    VerticalSpan:new{ width = dp(2) },
-                    TextWidget:new{ text = tab.text, face = Font:getFace("ui_micro"), bold = current,
-                        fgcolor = current and Palette.ink or Palette.ink_2, padding = 0 },
-                },
+                dimen = Geom:new{ w = TabBar.cell_w, h = self.height },
+                IconWidget:new{ icon = "eink/" .. tab.icon .. (tab.id == self.current and ".bold" or ""),
+                    width = size, height = size, alpha = true },
             },
         })
     end
-    table.insert(self, LineWidget:new{ background = Palette.ink, dimen = Geom:new{ w = self.width, h = Size.border.default } })
-    table.insert(self, row)
 end
 
 --- Sheet frame with 16dp top corners; it bleeds past the bottom and side edges of the screen.
@@ -372,12 +419,13 @@ end
 return {
     Tappable = Tappable,
     Chip = Chip,
-    Pager = Pager,
     TabBar = TabBar,
     BottomSheet = BottomSheet,
     pill = pill,
+    shelfGrid = shelfGrid,
     gridGeometry = gridGeometry,
     cover = cover,
+    finishedBadge = finishedBadge,
     TEXT_H = TEXT_H,
     ROW_GAP = ROW_GAP,
 }

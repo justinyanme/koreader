@@ -1,7 +1,8 @@
 --[[--
 Small controls of the e-ink redesign (see DESIGN.md, Components): a pill
-button, a tick stepper, a toggle and a list pager. They only use @{ui.palette} colors and
-the ui_* font roles, and leave refreshing to their owner.
+button, a tick stepper, a track, a toggle, a list pager, and the bottom bar of a
+full-screen page with its page capsule. They only use @{ui.palette} colors and the ui_* font roles, and
+leave refreshing to their owner.
 
 @usage
     local EinkControls = require("ui/widget/einkcontrols")
@@ -17,9 +18,11 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local LineWidget = require("ui/widget/linewidget")
 local Palette = require("ui/palette")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
+local VerticalGroup = require("ui/widget/verticalgroup")
 local Screen = require("device").screen
 local _ = require("gettext")
 
@@ -165,6 +168,170 @@ function TickStepper:init()
         callback = function() step(1) end,
     }
 end
+
+--- Track: a 33dp pill between a − and a + circle button (33dp, 1dp ink outline), on a 44dp row. The pill is marker
+-- gray, and ink up to the knob, with a 1dp paper rule at each passed stop when `ticks` is set. `low` and `high` label
+-- its ends inside it, and the knob, a paper disc with a 1.5dp ink outline, shows `label` if any; it widens to a pill
+-- for a longer label. A `caption` sits above the knob, in a band above the row.
+-- `position` goes from 1 to `count`, and falls between two stops for a value that is not on one; a value past an end
+-- is drawn at that end. With `clear_ends`, the end stops leave the end labels clear of the knob (the typeset panel);
+-- without, the stops run to the ends of the pill and the knob covers the end label at an end stop (the interface
+-- font size page). The buttons take taps over 44dp at the row's ends (`minus_rect`, `plus_rect`), and are rule gray
+-- and ignore them when there is no stop left their way; the pill between (`track_rect`) picks the stop nearest to a tap.
+local Track = InputContainer:extend{
+    count = 2,
+    position = 1,
+    label = nil,
+    caption = nil,
+    low = "",
+    high = "",
+    ticks = true,
+    clear_ends = true,
+    width = nil,
+    on_change = nil, -- function(stop), for a tap on the pill
+    on_step = nil, -- function(direction), for − (-1) and + (+1)
+}
+Track.height = Screen:scaleBySize(44) -- of the row
+
+function Track:init()
+    self.button_d = Screen:scaleBySize(33)
+    self.pill_h = Screen:scaleBySize(33)
+    self.pill_x = self.button_d + Screen:scaleBySize(9)
+    self.pill_w = self.width - 2 * self.pill_x
+    self.end_pad = Screen:scaleBySize(12)
+    local function caption(str, color, max_width)
+        return TextWidget:new{ text = str, face = Font:getFace("ui_caption"), bold = true, fgcolor = color, max_width = max_width }
+    end
+    -- a long translation is cut short rather than squeeze the stops
+    local max_width = math.floor(self.pill_w / 5)
+    -- the low label is on ink, or under the knob at the first of edge-to-edge stops
+    self.low_text = caption(self.low, (self.clear_ends or self.position > 1) and Palette.paper or Palette.ink, max_width)
+    self.high_text = caption(self.high, Palette.ink, max_width)
+    self.knob_text = self.label and caption(self.label, Palette.ink, max_width)
+    self.knob_w = math.max(self.pill_h, self.knob_text and self.knob_text:getSize().w + 2 * Screen:scaleBySize(6) or 0)
+    self.inset = math.floor(self.knob_w / 2)
+    if self.clear_ends then
+        local ends = self.end_pad + math.max(self.low_text:getSize().w, self.high_text:getSize().w) + Screen:scaleBySize(6)
+        self.inset = self.inset + math.max(self.pill_h, ends)
+    end
+    -- the caption's center is 35dp above the row's
+    self.caption_text = self.caption and caption(self.caption, Palette.ink, self.width)
+    self.row_y = self.caption_text and Screen:scaleBySize(35) - math.floor(Track.height / 2)
+        + math.ceil(self.caption_text:getSize().h / 2) or 0
+    self.dimen = Geom:new{ w = self.width, h = self.row_y + Track.height }
+    self.can_step = { [-1] = self.position > 1, [1] = self.position < self.count }
+    local icon_size = Screen:scaleBySize(22)
+    self.icons = {}
+    for direction, icon in pairs{ [-1] = "eink/minus", [1] = "eink/plus" } do
+        self.icons[direction] = IconWidget:new{
+            icon = icon, width = icon_size, height = icon_size, alpha = true, dim = not self.can_step[direction] or nil,
+        }
+    end
+    local touch = Screen:scaleBySize(44)
+    self.minus_rect = Geom:new{ w = touch, h = Track.height }
+    self.plus_rect = Geom:new{ w = touch, h = Track.height }
+    self.track_rect = Geom:new{ w = self.width - 2 * touch, h = Track.height }
+    self.ges_events = {
+        TapMinus = { GestureRange:new{ ges = "tap", range = self.minus_rect } },
+        TapPlus = { GestureRange:new{ ges = "tap", range = self.plus_rect } },
+        TapTrack = { GestureRange:new{ ges = "tap", range = self.track_rect } },
+    }
+end
+
+--- The x of a position (a stop, or between two), from the row's left edge.
+function Track:stopX(position)
+    if self.count < 2 then return self.pill_x + math.floor(self.pill_w / 2) end
+    return self.pill_x + self.inset + math.floor((self.pill_w - 2 * self.inset) * (position - 1) / (self.count - 1) + 0.5)
+end
+
+function Track:paintTo(bb, x, y)
+    self.dimen.x, self.dimen.y = x, y
+    local row_y = y + self.row_y
+    self.minus_rect.x, self.minus_rect.y = x, row_y
+    self.track_rect.x, self.track_rect.y = x + self.minus_rect.w, row_y
+    self.plus_rect.x, self.plus_rect.y = x + self.width - self.plus_rect.w, row_y
+    local mid = row_y + math.floor(Track.height / 2)
+    local bw = Size.border.default
+    local anti_alias = G_reader_settings:nilOrTrue("anti_alias_ui")
+    local function disc(dx, w, h, fill, outline, outline_w)
+        local r = math.floor(h / 2)
+        local dy = mid - r
+        bb:paintRoundedRect(dx, dy, w, h, fill, r)
+        if outline then
+            bb:paintBorder(dx, dy, w, h, outline_w or bw, outline, r, anti_alias)
+        end
+    end
+    local function centered(widget, cx, cy)
+        local size = widget:getSize()
+        widget:paintTo(bb, cx - math.floor(size.w / 2), (cy or mid) - math.floor(size.h / 2))
+    end
+    -- the − and + buttons
+    local d = self.button_d
+    for direction, bx in pairs{ [-1] = x, [1] = x + self.width - d } do
+        disc(bx, d, d, Palette.paper, self.can_step[direction] and Palette.ink or Palette.rule)
+        centered(self.icons[direction], bx + math.floor(d / 2))
+    end
+    -- the pill, ink up to the knob
+    local h = self.pill_h
+    local px, py = x + self.pill_x, mid - math.floor(h / 2)
+    local position = math.max(1, math.min(self.count, self.position))
+    local kx = x + self:stopX(position)
+    disc(px, self.pill_w, h, Palette.mark)
+    if self.clear_ends or position > 1 then
+        disc(px, math.max(h, kx - px), h, Palette.ink) -- its round right end goes under the knob
+    end
+    if self.ticks then
+        for i = 1, math.ceil(position) - 1 do
+            bb:paintRect(x + self:stopX(i), py, bw, h, Palette.paper)
+        end
+    end
+    local low, high = self.low_text:getSize(), self.high_text:getSize()
+    self.low_text:paintTo(bb, px + self.end_pad, mid - math.floor(low.h / 2))
+    self.high_text:paintTo(bb, px + self.pill_w - self.end_pad - high.w, mid - math.floor(high.h / 2))
+    disc(kx - math.floor(self.knob_w / 2), self.knob_w, h, Palette.paper, Palette.ink, Size.border.button)
+    if self.knob_text then
+        centered(self.knob_text, kx)
+    end
+    if self.caption_text then
+        local w = self.caption_text:getSize().w
+        local cx = math.max(x + math.floor(w / 2), math.min(kx, x + self.width - math.ceil(w / 2)))
+        centered(self.caption_text, cx, mid - Screen:scaleBySize(35))
+    end
+end
+
+function Track:step(direction)
+    if self.can_step[direction] and self.on_step then
+        self.on_step(direction)
+    end
+    return true
+end
+
+function Track:onTapMinus() return self:step(-1) end
+function Track:onTapPlus() return self:step(1) end
+
+function Track:onTapTrack(_, ges)
+    local tx = ges.pos.x - self.dimen.x
+    local best, best_d
+    for i = 1, self.count do
+        local dist = math.abs(tx - self:stopX(i))
+        if not best_d or dist < best_d then best, best_d = i, dist end
+    end
+    if best ~= self.position and self.on_change then
+        self.on_change(best)
+    end
+    return true
+end
+
+-- The labels and icons are painted by hand, not children: free them on rebuild and on close.
+function Track:free()
+    for __, widget in ipairs{ self.low_text, self.high_text, self.icons[-1], self.icons[1] } do
+        widget:free()
+    end
+    if self.knob_text then self.knob_text:free() end
+    if self.caption_text then self.caption_text:free() end
+end
+
+Track.onCloseWidget = Track.free
 
 --- Toggle: 42 × 26dp pill. Off: ink outline and ink knob. On: ink fill and paper knob.
 local Toggle = InputContainer:extend{
@@ -320,11 +487,168 @@ function Pager:init()
     }
 end
 
+--- Page capsule: a 132 × 42dp pill split by a 1dp rule into an up half (previous page) and a down half (next page),
+-- each with its own 1.5dp outline. A half that can't turn has a rule-gray outline and a dimmed chevron, and ignores
+-- taps; with one page the whole capsule is gray. Each half takes taps over `touch_h`, centered on the capsule.
+local PageCapsule = InputContainer:extend{
+    page = 1,
+    pages = 1,
+    on_change = nil, -- function(new_page)
+    width = Screen:scaleBySize(132),
+    height = Screen:scaleBySize(42),
+    touch_h = nil, -- at least 44dp
+}
+
+function PageCapsule:init()
+    self.dimen = Geom:new{ w = self.width, h = self.height }
+    self.half_w = math.floor(self.width / 2)
+    self.prev_enabled = self.page > 1
+    self.next_enabled = self.page < self.pages
+    local size = Screen:scaleBySize(24)
+    self.prev_icon = IconWidget:new{ icon = "eink/chev.up", width = size, height = size, alpha = true,
+        dim = not self.prev_enabled or nil }
+    self.next_icon = IconWidget:new{ icon = "eink/chev.up", width = size, height = size, alpha = true,
+        rotation_angle = 180, dim = not self.next_enabled or nil }
+    local touch_h = math.max(self.touch_h or 0, Screen:scaleBySize(44))
+    self.prev_rect = Geom:new{ w = self.half_w, h = touch_h }
+    self.next_rect = Geom:new{ w = self.width - self.half_w, h = touch_h }
+    self.ges_events = {
+        TapPrev = { GestureRange:new{ ges = "tap", range = self.prev_rect } },
+        TapNext = { GestureRange:new{ ges = "tap", range = self.next_rect } },
+    }
+end
+
+function PageCapsule:paintTo(bb, x, y)
+    self.dimen.x, self.dimen.y = x, y
+    local w, h, half = self.width, self.height, self.half_w
+    local touch_y = y - math.floor((self.prev_rect.h - h) / 2)
+    self.prev_rect.x, self.prev_rect.y = x, touch_y
+    self.next_rect.x, self.next_rect.y = x + half, touch_y
+    local r = math.floor(h / 2)
+    local bw = Size.border.button
+    local anti_alias = G_reader_settings:nilOrTrue("anti_alias_ui")
+    bb:paintRoundedRect(x, y, w, h, Palette.paper, r)
+    -- A half's outline: a full ring at its round end with the inner side wiped, then its straight top and bottom.
+    local function outline(enabled, end_x, wipe_x, line_x, line_w)
+        local color = enabled and Palette.ink or Palette.rule
+        bb:paintBorder(end_x, y, h, h, bw, color, r, anti_alias)
+        bb:paintRect(wipe_x, y + bw, h - r, h - 2 * bw, Palette.paper)
+        bb:paintRect(line_x, y, line_w, bw, color)
+        bb:paintRect(line_x, y + h - bw, line_w, bw, color)
+    end
+    outline(self.prev_enabled, x, x + r, x + r, half - r)
+    outline(self.next_enabled, x + w - h, x + w - h, x + half, w - half - r)
+    local any = self.prev_enabled or self.next_enabled
+    bb:paintRect(x + half, y, Size.border.default, h, any and Palette.ink or Palette.rule)
+    local size = self.prev_icon:getSize()
+    local icon_y = y + math.floor((h - size.h) / 2)
+    self.prev_icon:paintTo(bb, x + math.floor((half - size.w) / 2), icon_y)
+    self.next_icon:paintTo(bb, x + half + math.floor((w - half - size.w) / 2), icon_y)
+end
+
+function PageCapsule:onTapPrev()
+    if self.prev_enabled and self.on_change then
+        self.on_change(self.page - 1)
+    end
+    return true
+end
+
+function PageCapsule:onTapNext()
+    if self.next_enabled and self.on_change then
+        self.on_change(self.page + 1)
+    end
+    return true
+end
+
+-- The icons are painted by hand, not children: free them on rebuild and on close.
+function PageCapsule:free()
+    self.prev_icon:free()
+    self.next_icon:free()
+end
+
+PageCapsule.onCloseWidget = PageCapsule.free
+
+--- The ← back arrow at the start of a bottom bar: a 24dp icon after the 24dp gutter, tappable over its whole cell.
+local BackArrow = InputContainer:extend{
+    width = Screen:scaleBySize(72),
+    height = nil,
+    callback = nil,
+}
+
+function BackArrow:init()
+    self.dimen = Geom:new{ w = self.width, h = self.height }
+    local size = Screen:scaleBySize(24)
+    local gutter = Screen:scaleBySize(24)
+    self[1] = HorizontalGroup:new{
+        HorizontalSpan:new{ width = gutter },
+        CenterContainer:new{
+            dimen = Geom:new{ w = size, h = self.height },
+            IconWidget:new{ icon = "eink/arrow.left", width = size, height = size, alpha = true },
+        },
+    }
+    self.ges_events = tapEvents(self.dimen)
+end
+
+function BackArrow:onTapSelect()
+    if self.callback then
+        self.callback()
+    end
+    return true
+end
+
+--- Bottom bar of a full-screen page: 58dp under a 1dp rule-gray rule, the back arrow on the left and the page
+-- capsule on the right, 8dp from the edge. `left` replaces the back arrow (the shelf's tabs); `actions` are
+-- widgets set just left of the capsule (a pill button such as 书签). `back` and `capsule` are its parts.
+local BottomBar = InputContainer:extend{
+    width = nil,
+    page = 1,
+    pages = 1,
+    on_change = nil, -- function(new_page)
+    on_back = nil, -- function(), for the back arrow
+    left = nil,
+    actions = nil,
+}
+BottomBar.height = Screen:scaleBySize(58)
+
+function BottomBar:init()
+    local rule_h = Size.border.default
+    local row_h = BottomBar.height - rule_h
+    self.dimen = Geom:new{ w = self.width, h = BottomBar.height }
+    if not self.left then
+        self.back = BackArrow:new{ height = row_h, callback = self.on_back }
+    end
+    self.capsule = PageCapsule:new{ page = self.page, pages = self.pages, on_change = self.on_change, touch_h = row_h }
+    local right = HorizontalGroup:new{ align = "center" }
+    for _, action in ipairs(self.actions or {}) do
+        table.insert(right, action)
+        table.insert(right, HorizontalSpan:new{ width = Screen:scaleBySize(16) })
+    end
+    table.insert(right, self.capsule)
+    table.insert(right, HorizontalSpan:new{ width = Screen:scaleBySize(8) })
+    local left = self.left or self.back
+    self[1] = VerticalGroup:new{
+        LineWidget:new{ background = Palette.rule, dimen = Geom:new{ w = self.width, h = rule_h } },
+        CenterContainer:new{
+            dimen = Geom:new{ w = self.width, h = row_h },
+            HorizontalGroup:new{
+                align = "center",
+                left,
+                HorizontalSpan:new{ width = self.width - left:getSize().w - right:getSize().w },
+                right,
+            },
+        },
+    }
+end
+
 return {
+    BackArrow = BackArrow,
+    BottomBar = BottomBar,
+    PageCapsule = PageCapsule,
     Pager = Pager,
     PillButton = PillButton,
     TickTrack = TickTrack,
     TickStepper = TickStepper,
     Toggle = Toggle,
+    Track = Track,
     Segmented = Segmented,
 }

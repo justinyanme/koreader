@@ -1,5 +1,5 @@
 describe("ReaderTypesetPanel module", function()
-    local Blitbuffer, DocumentRegistry, DocSettings, ReaderUI, ReaderTypesetPanel, Replacements, UIManager, Event, Geom, Screen
+    local Blitbuffer, DocumentRegistry, DocSettings, Panel, ReaderUI, ReaderTypesetPanel, Replacements, UIManager, Event, Geom, Screen
     local _
     local sample_epub = "spec/front/unit/data/juliet.epub"
     local sample_pdf = "spec/front/unit/data/sample.pdf"
@@ -10,6 +10,7 @@ describe("ReaderTypesetPanel module", function()
         Blitbuffer = require("ffi/blitbuffer")
         DocumentRegistry = require("document/documentregistry")
         DocSettings = require("docsettings")
+        Panel = require("ui/widget/panel")
         ReaderUI = require("apps/reader/readerui")
         ReaderTypesetPanel = require("apps/reader/modules/readertypesetpanel")
         Replacements = require("apps/replacements")
@@ -114,18 +115,85 @@ describe("ReaderTypesetPanel module", function()
         return find(widget, function(c) return c.text == text end) ~= nil
     end
 
-    local function segmented(sheet, first_label)
-        return find(sheet, function(w) return getmetatable(w) and w.labels and w.labels[1] == first_label end)
+    -- The tracks of the panel, top to bottom: font size, weight, line spacing, margins.
+    local function tracks(panel)
+        local found, seen = {}, {}
+        local function walk(widget)
+            if type(widget) ~= "table" or seen[widget] then return end
+            seen[widget] = true
+            if widget.on_step and widget.stopX then
+                table.insert(found, widget)
+                return
+            end
+            for _, child in ipairs(widget) do walk(child) end
+            if rawget(widget, "content") then walk(widget.content) end
+        end
+        walk(panel)
+        return found
     end
 
-    local function fontCard(sheet, name)
-        return find(sheet, function(w) return w.name == name and w.callback end)
+    local function trackOf(ui, i)
+        return tracks(ui.config.panel)[i]
+    end
+
+    local function tapTrack(track, x)
+        tap(track.dimen.x + x, track.dimen.y + math.floor(track.dimen.h / 2))
+        UIManager:forceRePaint()
+    end
+
+    -- the painted gray level at (x, y): 0 is ink, 255 is paper
+    local function gray(x, y)
+        return Screen.bb:getPixel(x, y):getColor8().a
+    end
+
+    -- What a track shows: the text painted in its knob, and the color its − (-1) or + (+1) button is outlined in.
+    local function knobText(track)
+        local size = track.knob_text:getSize()
+        local cx = track.dimen.x + track:stopX(math.max(1, math.min(track.count, track.position)))
+        local mid = track.minus_rect.y + math.floor(track.minus_rect.h / 2)
+        for x = cx - math.floor(size.w / 2), cx + math.floor(size.w / 2) do
+            for y = mid - math.floor(size.h / 4), mid + math.floor(size.h / 4) do
+                if gray(x, y) < 0x80 then return track.knob_text.text end -- inked
+            end
+        end
+    end
+    local function buttonOutline(track, direction)
+        local x = direction < 0 and track.dimen.x or track.dimen.x + track.dimen.w - Screen:scaleBySize(33)
+        return gray(x, track.minus_rect.y + math.floor(track.minus_rect.h / 2)) -- its outer edge
+    end
+    local INK, RULE = require("ui/palette").ink:getColor8().a, require("ui/palette").rule:getColor8().a
+
+    -- The − and + buttons at the ends of a track, and its stops.
+    local function tapMinus(track) tapTrack(track, Screen:scaleBySize(10)) end
+    local function tapPlus(track) tapTrack(track, track.dimen.w - Screen:scaleBySize(10)) end
+    local function tapStop(track, i) tapTrack(track, track:stopX(i)) end
+
+    local function fontCard(panel, name)
+        return find(panel, function(w) return w.name == name and w.callback end)
     end
 
     local function openPanel(ui)
         ui:handleEvent(Event:new("ShowConfigMenu"))
         UIManager:forceRePaint()
-        return ui.config.sheet
+        return ui.config.panel
+    end
+
+    -- Taps the pill of the panel's title row: the more layout options.
+    local function openLayoutOptions(panel)
+        tapWidget(find(panel, function(w) return w.callback and hasText(w, _("More layout options")) end))
+        UIManager:forceRePaint()
+    end
+
+    -- the back arrow of the bottom bar under a nested panel
+    local function backArrow(bars)
+        return find(bars.bottom, function(w)
+            return w.callback and w.dimen and find(w, function(c) return c.icon == "eink/arrow.left" end) ~= nil
+        end)
+    end
+
+    local function back()
+        UIManager:sendEvent(Event:new("KeyPress", require("device/key"):new("Back", {})))
+        UIManager:forceRePaint()
     end
 
     describe("with an EPUB", function()
@@ -133,81 +201,135 @@ describe("ReaderTypesetPanel module", function()
         setup(function() ui = openReader(sample_epub) end)
         teardown(function() closeReader(ui) end)
 
-        it("should open and close the panel with ui refreshes of its rect only", function()
-            local sheet
+        it("should open above the bottom bar, without the top bar, and close with it, refreshing only their rects", function()
+            local panel
             local refreshes = refreshesOf(function()
                 ui:handleEvent(Event:new("ShowConfigMenu"))
-                sheet = ui.config.sheet
+                panel = ui.config.panel
             end)
-            assert.is_truthy(sheet)
-            assert.are.equal(sheet, topWidget())
-            assert.are.same({ { mode = "ui", region = sheet:getRefreshRegion() } }, refreshes)
+            local bars = ui.menu.bars
+            assert.is_truthy(panel)
+            assert.are.equal(panel, ui.menu.panel)
+            assert.are.equal("font", ui.menu.panel_name)
+            assert.are.equal(bars, topWidget())
+            assert.is_false(bars.show_top) -- as in WeChat Read: the page shows up to the panel
+            local band = panel:getRefreshRegion():combine(bars.bottom_rect)
+            assert.are.same({ { mode = "ui", region = band } }, refreshes)
+            assert.are.equal(bars.bottom_rect.y, panel:getRefreshRegion().y + panel:getRefreshRegion().h)
+            assert.is_nil(find(panel, function(w) return w.icon == "eink/close" end))
 
-            refreshes = refreshesOf(function() sheet:onClose() end)
-            assert.is_nil(ui.config.sheet)
+            -- a tap on the page, where the top bar would be, closes the panel and the bottom bar
+            refreshes = refreshesOf(function() tap(Screen:getWidth() / 2, 10) end)
+            assert.is_nil(ui.config.panel)
+            assert.is_nil(ui.menu.bars)
             assert.are.equal(ui, topWidget())
-            assert.are.same({ { mode = "ui", region = sheet:getRefreshRegion() } }, refreshes)
+            assert.are.same({ { mode = "ui", region = band } }, refreshes)
         end)
 
-        it("should open from the toolbar's Font entry", function()
+        it("should open from the toolbar's Font entry, under its title row, and switch to another panel in place", function()
             tap(Screen:getWidth() / 2, Screen:getHeight() / 2)
             UIManager:forceRePaint()
             local bars = ui.menu.bars
-            local font = find(bars, function(w) return w.callback and w.text == _("Font") end)
-            local refreshes = refreshesOf(function() tapWidget(font) end)
-            local sheet = ui.config.sheet
-            assert.is_truthy(sheet)
-            assert.are.equal(sheet, topWidget())
-            assert.is_true(hasText(sheet, _("Font & layout")))
-            -- the bottom bar's rect lies inside the sheet's: UIManager merges them into the sheet's refresh
-            local allowed = { bars.top_rect, bars.bottom_rect, sheet:getRefreshRegion() }
-            for _, r in ipairs(refreshes) do
-                assert.are.equal("ui", r.mode)
-                assert.is_true(r.region == allowed[1] or r.region == allowed[2] or r.region == allowed[3])
+            -- the entries are icons without labels
+            local function entry(icon)
+                return find(bars.bottom, function(w)
+                    return w.callback and find(w, function(c) return c.icon == icon or c.icon == icon .. ".bold" end) ~= nil
+                end)
             end
-            assert.is_true(refreshes[#refreshes].region == sheet:getRefreshRegion())
-            sheet:onClose()
+            local page = ui:getCurrentPage()
+            -- the top bar hides over the typeset panel: it and the band of the panel and the bottom bar refresh
+            local refreshes = refreshesOf(function() tapWidget(entry("eink/font")) end)
+            local panel = ui.config.panel
+            assert.is_truthy(panel)
+            assert.are.equal(bars, ui.menu.bars)
+            assert.are.equal(bars, topWidget())
+            assert.is_false(bars.show_top)
+            assert.is_true(hasText(panel, _("Font settings")))
+            assert.is_truthy(find(bars.bottom, function(w) return w.icon == "eink/font.bold" end))
+            local font_band = panel:getRefreshRegion():combine(bars.bottom_rect)
+            assert.are.same({
+                { mode = "ui", region = bars.top_rect },
+                { mode = "ui", region = font_band },
+            }, refreshes)
+
+            -- the progress panel brings the top bar back
+            refreshes = refreshesOf(function() tapWidget(entry("eink/progress")) end)
+            assert.is_nil(ui.config.panel)
+            assert.are.equal("progress", ui.menu.panel_name)
+            assert.are.equal(bars, topWidget())
+            assert.is_true(bars.show_top)
+            local progress_band = ui.menu.panel:getRefreshRegion():combine(bars.bottom_rect)
+            assert.are.same({
+                { mode = "ui", region = bars.top_rect },
+                { mode = "ui", region = font_band:combine(progress_band) },
+            }, refreshes)
+
+            tapWidget(entry("eink/font"))
+            UIManager:forceRePaint()
+            assert.are.equal(ui.config.panel, ui.menu.panel)
+            font_band = ui.config.panel:getRefreshRegion():combine(bars.bottom_rect)
+            -- the open entry closes its panel; the bars stay, the top bar with them
+            refreshes = refreshesOf(function() tapWidget(entry("eink/font")) end)
+            assert.is_nil(ui.config.panel)
+            assert.is_nil(ui.menu.panel)
+            assert.are.equal(bars, topWidget())
+            assert.is_true(bars.show_top)
+            assert.are.same({
+                { mode = "ui", region = bars.top_rect },
+                { mode = "ui", region = font_band },
+            }, refreshes)
+            assert.are.equal(page, ui:getCurrentPage())
+            ui.menu:hideToolbar()
+            UIManager:forceRePaint()
         end)
 
-        it("should apply font size, line spacing and margins at once and keep the panel open", function()
+        it("should apply font size, weight, line spacing and margins at once and keep the panel open", function()
             -- a text page: landing on a page with images flashes on its own ("refresh_on_pages_with_images")
             ui:handleEvent(Event:new("GotoPage", 20))
             UIManager:forceRePaint()
-            local sheet = openPanel(ui)
+            local panel = openPanel(ui)
+            local bars = ui.menu.bars
             local size = ui.document.configurable.font_size
-            local plus = find(sheet, function(w) return w.icon == "eink/plus" and w.callback end)
+            local xpointer = ui.document:getXPointer()
             UIManager.refresh_count = 0
             local refreshes = refreshesOf(function()
-                tapWidget(plus)
+                tapPlus(trackOf(ui, 1))
                 runTasks() -- the re-render follows BatchedUpdateDone
             end)
             assert.is_true(ui.document.configurable.font_size > size)
-            assert.are.equal(sheet, topWidget())
+            assert.are.equal(panel, ui.config.panel)
+            assert.are.equal(bars, topWidget())
             local modes = {}
             for _, r in ipairs(refreshes) do
                 modes[r.mode] = true
                 if r.mode == "ui" then
-                    assert.are.same(sheet:getRefreshRegion(), r.region)
+                    assert.are.same(panel:getRefreshRegion(), r.region)
                 end
             end
             assert.is_nil(modes.full)
             assert.is_true(modes.partial) -- the re-laid out page, as for a page turn
-            assert.is_true(modes.ui) -- the sheet
+            assert.is_true(modes.ui) -- the panel
+            -- the page re-laid out around the same text
+            assert.are.equal(ui.document:getCurrentPage(), ui.document:getPageFromXPointer(xpointer))
 
-            tapWidget(segmented(sheet, _.pgettext("Line spacing", "Compact")), 5/6)
-            UIManager:forceRePaint()
+            tapPlus(trackOf(ui, 2))
+            assert.are.equal(0.5, ui.document.configurable.font_base_weight)
+            tapStop(trackOf(ui, 3), 7)
             assert.are.equal(145, ui.document.configurable.line_spacing)
-            tapWidget(segmented(sheet, _.pgettext("Margins", "Narrow")), 1/6)
-            UIManager:forceRePaint()
+            tapStop(trackOf(ui, 4), 3)
+            runTasks()
             assert.are.same({ 18, 18 }, ui.document.configurable.h_page_margins)
             assert.are.equal(Screen:scaleBySize(18), ui.document:getPageMargins().left)
-            assert.are.equal(sheet, topWidget())
+            assert.are.equal(panel, ui.config.panel)
+            assert.are.equal(bars, topWidget())
 
             ui:saveSettings()
             assert.are.equal(ui.document.configurable.font_size, ui.doc_settings:readSetting("copt_font_size"))
+            assert.are.equal(0.5, ui.doc_settings:readSetting("copt_font_base_weight"))
             assert.are.equal(145, ui.doc_settings:readSetting("copt_line_spacing"))
             assert.are.same({ 18, 18 }, ui.doc_settings:readSetting("copt_h_page_margins"))
-            sheet:onClose()
+            assert.are.equal(18, ui.doc_settings:readSetting("typeset_margin"))
+            ui.menu:hideToolbar()
         end)
 
         it("should keep the new values after reopening the book", function()
@@ -215,37 +337,57 @@ describe("ReaderTypesetPanel module", function()
             closeReader(ui)
             ui = openReader(sample_epub, nil, true)
             assert.are.equal(size, ui.document.configurable.font_size)
+            assert.are.equal(0.5, ui.document.configurable.font_base_weight)
             assert.are.equal(145, ui.document.configurable.line_spacing)
             assert.are.same({ 18, 18 }, ui.document.configurable.h_page_margins)
             assert.are.equal(Screen:scaleBySize(18), ui.document:getPageMargins().left)
-            local sheet = openPanel(ui)
-            assert.are.equal(3, segmented(sheet, _.pgettext("Line spacing", "Compact")).value)
-            assert.are.equal(1, segmented(sheet, _.pgettext("Margins", "Narrow")).value)
-            sheet:onClose()
+            openPanel(ui)
+            assert.are.equal(string.format("%g", size), knobText(trackOf(ui, 1)))
+            assert.are.equal("4", knobText(trackOf(ui, 2)))
+            assert.are.equal(7, trackOf(ui, 3).position)
+            assert.are.equal(3, trackOf(ui, 4).position)
+            ui.menu:hideToolbar()
         end)
 
         it("should use the Latin faces for an English book", function()
-            local sheet = openPanel(ui)
-            tapWidget(fontCard(sheet, _("Source Han Sans")))
+            local panel = openPanel(ui)
+            tapWidget(fontCard(panel, _("Source Han Sans")))
             UIManager:forceRePaint()
             assert.are.equal("Noto Sans", ui.font.font_face)
-            tapWidget(fontCard(sheet, _("Source Han Serif")))
+            tapWidget(fontCard(panel, _("Source Han Serif")))
             UIManager:forceRePaint()
             assert.are.equal("Noto Serif", ui.font.font_face)
-            assert.are.equal(sheet, topWidget()) -- no prompt
-            sheet:onClose()
+            assert.are.equal(ui.menu.bars, topWidget()) -- no prompt
+            ui.menu:hideToolbar()
         end)
 
-        it("should page to the more layout options and back", function()
-            local sheet = openPanel(ui)
-            tapWidget(find(sheet, function(w) return w.callback and hasText(w, _("More layout options: weight, hyphenation, indent, style tweaks")) end))
-            UIManager:forceRePaint()
+        it("should open the more layout options from its title row's pill, with only a back arrow below", function()
+            local main = openPanel(ui)
+            local bars = ui.menu.bars
+            local main_band = main:getRefreshRegion():combine(bars.bottom_rect)
+            local refreshes = refreshesOf(function() openLayoutOptions(main) end)
+            local more = ui.config.panel
             assert.are.equal("more", ui.config.page)
-            assert.is_true(hasText(sheet, _("Render Mode")))
-            sheet.on_back()
+            assert.are.equal(more, ui.menu.panel)
+            assert.is_true(hasText(more, _("Render Mode")))
+            assert.is_false(hasText(more, _("Font Weight"))) -- on the panel's own track now
+            -- the top bar stays hidden, the bottom bar holds only a back arrow
+            assert.are.equal(bars, topWidget())
+            assert.is_false(bars.show_top)
+            assert.is_truthy(backArrow(bars))
+            assert.are.equal(0, backArrow(bars).dimen.x) -- at the bottom left, as on full-screen pages
+            assert.is_nil(find(bars.bottom, function(w) return w.icon == "eink/progress" end))
+            assert.are.same({
+                { mode = "ui", region = main_band:combine(more:getRefreshRegion():combine(bars.bottom_rect)) },
+            }, refreshes)
+
+            tapWidget(backArrow(bars))
             UIManager:forceRePaint()
             assert.are.equal("main", ui.config.page)
-            sheet:onClose()
+            assert.are.equal(ui.config.panel, ui.menu.panel)
+            assert.is_false(bars.show_top)
+            assert.is_truthy(find(bars.bottom, function(w) return w.icon == "eink/font.bold" end))
+            ui.menu:hideToolbar()
         end)
 
         it("should open the existing menus from its links", function()
@@ -256,16 +398,16 @@ describe("ReaderTypesetPanel module", function()
                 { "more", _("Paragraph spacing") },
                 { "more", _("Style tweaks") },
             } do
-                local sheet = openPanel(ui)
+                local main = openPanel(ui)
                 if case[1] == "more" then
-                    ui.config:showPage("more")
-                    UIManager:forceRePaint()
+                    openLayoutOptions(main)
                 end
-                local link = find(sheet, function(w) return w.callback and w.dimen and (w.name == case[2] or (w.label and w.label.text == case[2])) end)
+                local link = find(ui.config.panel, function(w) return w.callback and w.dimen and (w.name == case[2] or (w.label and w.label.text == case[2])) end)
                 assert.is_truthy(link, case[2])
                 tapWidget(link)
                 UIManager:forceRePaint()
-                assert.is_nil(ui.config.sheet)
+                assert.is_nil(ui.config.panel)
+                assert.is_nil(ui.menu.bars)
                 local menu = topWidget()[1]
                 assert.is_truthy(menu and menu.tab_item_table and #menu.tab_item_table[1] > 0, case[2])
                 menu:closeMenu()
@@ -278,6 +420,17 @@ describe("ReaderTypesetPanel module", function()
             ui:handleEvent(Event:new("ShowOriginalConfigMenu"))
             UIManager:forceRePaint()
             assert.is_truthy(ui.config.config_dialog)
+            assert.are.equal(ui.config.config_dialog, topWidget())
+            ui.config.config_dialog:closeDialog()
+            UIManager:forceRePaint()
+        end)
+
+        it("should leave the original bottom bar's link with the panel and the bars closed", function()
+            openLayoutOptions(openPanel(ui))
+            tapWidget(find(ui.config.panel, function(w) return w.callback and w.label and w.label.text == _("All layout options (original)") end))
+            UIManager:forceRePaint()
+            assert.is_nil(ui.config.panel)
+            assert.is_nil(ui.menu.bars)
             assert.are.equal(ui.config.config_dialog, topWidget())
             ui.config.config_dialog:closeDialog()
             UIManager:forceRePaint()
@@ -320,31 +473,88 @@ describe("ReaderTypesetPanel module", function()
             runTasks()
         end)
 
-        it("should step the font size from an off-scale size to the next size below or above", function()
-            ui.config:apply("font_size", 23, "SetFontSize")
-            local sheet = openPanel(ui)
-            tapWidget(find(sheet, function(w) return w.icon == "eink/minus" and w.callback end))
-            assert.are.equal(22, ui.document.configurable.font_size)
-            ui.config:apply("font_size", 23, "SetFontSize")
-            ui.config:refreshSheet()
-            UIManager:forceRePaint()
-            tapWidget(find(sheet, function(w) return w.icon == "eink/plus" and w.callback end))
-            assert.are.equal(24, ui.document.configurable.font_size)
+        it("should draw the chapter header as WeChat Read: a circled ‹ and the title in ink, centered in the top margin", function()
+            local header = ui.view.view_modules.chapter_header
+            ui:handleEvent(Event:new("SetPageTopMargin", 44))
             runTasks()
-            sheet:onClose()
+            UIManager:forceRePaint()
+            local margins = ui.document:getPageMargins()
+            local w = Screen:getWidth()
+            local bb = Screen.bb
+            local x0, x1, y0, y1, darkest = w, -1, margins.top, -1, 0xFF
+            for y = 0, margins.top - 1 do
+                for x = 0, w - 1 do
+                    local v = bb:getPixel(x, y):getColor8().a
+                    if v ~= 0xFF then
+                        x0, x1, y0, y1 = math.min(x0, x), math.max(x1, x), math.min(y0, y), math.max(y1, y)
+                        darkest = math.min(darkest, v)
+                    end
+                end
+            end
+            -- ink, not the pencil gray (0x55) it used to be, from the text's left edge
+            assert.is_true(darkest < 0x20, darkest)
+            assert.is_true(x0 >= margins.left and x0 <= margins.left + 1, x0 .. " vs " .. margins.left)
+            assert.is_true(x1 < w - margins.right)
+            -- centered in the top margin, give or take the glyphs' own extents
+            assert.is_true(math.abs((y0 + y1) / 2 - margins.top / 2) <= Screen:scaleBySize(3), y0 .. "-" .. y1)
+            -- the circled ‹ comes first: a column of ink one icon wide, then a gap before the title
+            local icon = Screen:scaleBySize(header.ICON)
+            local function columnInked(x)
+                for y = y0, y1 do
+                    if bb:getPixel(x, y):getColor8().a ~= 0xFF then return true end
+                end
+                return false
+            end
+            assert.is_true(columnInked(x0 + math.floor(icon / 2)))
+            assert.is_false(columnInked(x0 + icon + 1))
         end)
 
-        it("should go back to the first page on Back from more layout options", function()
-            local sheet = openPanel(ui)
-            ui.config:showPage("more")
+        it("should step the font size from an off-scale size to the next size below or above", function()
+            ui.config:apply("font_size", 23, "SetFontSize")
+            openPanel(ui)
+            tapMinus(trackOf(ui, 1))
+            assert.are.equal(22, ui.document.configurable.font_size)
+            ui.config:apply("font_size", 23, "SetFontSize")
+            ui.config:refreshPanel()
             UIManager:forceRePaint()
-            sheet:onBackKey()
+            tapPlus(trackOf(ui, 1))
+            assert.are.equal(24, ui.document.configurable.font_size)
+            runTasks()
+            ui.menu:hideToolbar()
+        end)
+
+        it("should go back one layer at a time on Back: more layout options, the panel, the bars", function()
+            runTasks() -- a re-render left by the last font size change
             UIManager:forceRePaint()
+            local page = ui:getCurrentPage()
+            local main = openPanel(ui)
+            local bars = ui.menu.bars
+            openLayoutOptions(main)
+            assert.are.equal("more", ui.config.page)
+            back()
             assert.are.equal("main", ui.config.page)
-            assert.are.equal(sheet, topWidget())
-            sheet:onBackKey()
+            assert.are.equal(ui.config.panel, ui.menu.panel)
+            assert.is_false(bars.show_top)
+            assert.are.equal(bars, topWidget())
+            back()
+            assert.is_nil(ui.config.panel)
+            assert.are.equal(bars, topWidget())
+            assert.is_true(bars.show_top) -- the toolbar, as before the panel
+            back()
+            assert.is_nil(ui.menu.bars)
+            assert.are.equal(ui, topWidget())
+            assert.are.equal(page, ui:getCurrentPage())
+        end)
+
+        it("should close only the panel on CloseConfigMenu", function()
+            openPanel(ui)
+            local bars = ui.menu.bars
+            ui:handleEvent(Event:new("CloseConfigMenu"))
             UIManager:forceRePaint()
-            assert.is_nil(ui.config.sheet)
+            assert.is_nil(ui.config.panel)
+            assert.are.equal(bars, topWidget())
+            ui.menu:hideToolbar()
+            UIManager:forceRePaint()
         end)
 
         it("should find the paragraph style tweaks by id, and fall back to all of them", function()
@@ -366,33 +576,33 @@ describe("ReaderTypesetPanel module", function()
             assert.are.equal(ui, topWidget())
         end)
 
-        it("should keep the chosen margin step across rotation, widened only to cap the line length", function()
+        it("should keep the chosen margin across rotation, widened only to cap the line length", function()
             ui.config:setFontSize(15)
             runTasks()
-            local sheet = openPanel(ui)
-            tapWidget(segmented(sheet, _.pgettext("Margins", "Narrow")), 1/6)
+            openPanel(ui)
+            tapStop(trackOf(ui, 4), 3)
             runTasks()
             assert.are.same({ 18, 18 }, ui.document.configurable.h_page_margins)
-            sheet:onClose()
+            ui.menu:hideToolbar()
 
             ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_CLOCKWISE))
             runTasks()
-            local narrow = ui.config:marginsFor(1)
+            local narrow = ui.config:marginsFor(18)
             assert.is_true(narrow > 18) -- a landscape line would hold more than 38 characters
             assert.are.same({ narrow, narrow }, ui.document.configurable.h_page_margins)
-            sheet = openPanel(ui)
-            assert.are.equal(1, segmented(sheet, _.pgettext("Margins", "Narrow")).value)
-            tapWidget(segmented(sheet, _.pgettext("Margins", "Narrow")), 5/6)
+            openPanel(ui)
+            assert.are.equal(3, trackOf(ui, 4).position)
+            tapStop(trackOf(ui, 4), 7)
             runTasks()
-            assert.are.equal(3, ui.doc_settings:readSetting("typeset_margin_step"))
-            local wide = ui.config:marginsFor(3)
+            assert.are.equal(44, ui.doc_settings:readSetting("typeset_margin"))
+            local wide = ui.config:marginsFor(44)
             assert.are.same({ wide, wide }, ui.document.configurable.h_page_margins)
             UIManager:forceRePaint()
-            tapWidget(segmented(sheet, _.pgettext("Margins", "Narrow")), 3/6)
+            tapStop(trackOf(ui, 4), 5)
             runTasks()
-            -- 窄 and 标准 may widen to the same margins: the step stays what was chosen
-            assert.are.equal(2, segmented(ui.config.sheet, _.pgettext("Margins", "Narrow")).value)
-            ui.config.sheet:onClose()
+            -- 28 and 44dp may widen to the same margins: the knob stays at the margin chosen
+            assert.are.equal(5, trackOf(ui, 4).position)
+            ui.menu:hideToolbar()
 
             ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_UPRIGHT))
             runTasks()
@@ -401,7 +611,220 @@ describe("ReaderTypesetPanel module", function()
             -- margins set elsewhere are the user's own
             ui:handleEvent(Event:new("SetPageHorizMargins", { 15, 15 }))
             runTasks()
+            assert.is_nil(ui.doc_settings:readSetting("typeset_margin"))
+        end)
+    end)
+
+    describe("tracks", function()
+        local C_ = function(...) return _.pgettext(...) end
+        local DESIGN_VALUES = { copt_font_size = 19, copt_font_base_weight = 0, copt_line_spacing = 125, copt_h_page_margins = { 28, 28 } }
+        local ui
+        before_each(function()
+            ui = openReader(sample_epub, DESIGN_VALUES)
+            ui:handleEvent(Event:new("GotoPage", 20))
+            UIManager:forceRePaint()
+        end)
+        after_each(function()
+            if ui.menu.bars then ui.menu:hideToolbar(true) end
+            runTasks()
+            closeReader(ui)
+        end)
+
+        it("should show font size, weight, line spacing and margins in order, the knobs reading the real values", function()
+            local panel = openPanel(ui)
+            local t = tracks(panel)
+            assert.are.equal(4, #t)
+            assert.is_true(hasText(panel, _("Font settings")))
+            -- the title row, as tall as the pill at its right
+            local title = find(panel, function(w) return w.callback and hasText(w, _("More layout options")) end)
+            for i, case in ipairs{
+                { C_("Typeset track", "Small"), C_("Typeset track", "Large"), "19", 5 },
+                { C_("Typeset track", "Light"), C_("Typeset track", "Bold"), "3", 3 }, -- the engine's 0 ("Regular")
+                { C_("Typeset track", "Tight"), C_("Typeset track", "Loose"), C_("Typeset panel", "Line spacing"), 5 },
+                { C_("Typeset track", "Small"), C_("Typeset track", "Large"), _("Margins"), 5 },
+            } do
+                assert.are.same(case, { t[i].low_text.text, t[i].high_text.text, knobText(t[i]), t[i].position })
+                assert.are.same({ INK, INK }, { buttonOutline(t[i], -1), buttonOutline(t[i], 1) })
+                assert.are.equal(Panel.getContentWidth(), t[i].dimen.w)
+                -- rows 44dp apart under the title row
+                local above = i == 1 and title.dimen or t[i - 1].dimen
+                assert.are.equal(above.y + above.h, t[i].dimen.y)
+                assert.are.equal(Screen:scaleBySize(44), t[i].dimen.h)
+            end
+            -- opening the panel changes nothing
+            assert.are.equal(19, ui.document.configurable.font_size)
+            assert.are.same({ 28, 28 }, ui.document.configurable.h_page_margins)
+            assert.is_nil(ui.doc_settings:readSetting("typeset_margin"))
+        end)
+
+        it("should step each track with − and + to the engine's next value, around the same text", function()
+            openPanel(ui)
+            for _, case in ipairs{
+                { 1, "font_size", 20, 18, "20" },
+                { 2, "font_base_weight", 0.5, -0.5, "4" },
+                { 3, "line_spacing", 135, 115 },
+                { 4, "h_page_margins", { 36, 36 }, { 23, 23 } },
+            } do
+                local i, name, up, down = case[1], case[2], case[3], case[4]
+                local xpointer = ui.document:getXPointer()
+                tapPlus(trackOf(ui, i))
+                runTasks()
+                assert.are.same(up, ui.document.configurable[name])
+                if case[5] then assert.are.equal(case[5], knobText(trackOf(ui, i))) end
+                assert.are.equal(ui.document:getCurrentPage(), ui.document:getPageFromXPointer(xpointer), name)
+                tapMinus(trackOf(ui, i))
+                tapMinus(trackOf(ui, i))
+                runTasks()
+                assert.are.same(down, ui.document.configurable[name])
+                assert.are.equal(ui.document:getCurrentPage(), ui.document:getPageFromXPointer(xpointer), name)
+            end
+            runTasks()
+            assert.are.equal(23, ui.doc_settings:readSetting("typeset_margin"))
+            assert.are.equal(Screen:scaleBySize(23), ui.document:getPageMargins().left)
+            assert.is_truthy(ui.config.panel)
+        end)
+
+        it("should stop at the ends of a track, with the button there disabled", function()
+            openPanel(ui)
+            -- at the last stop, + is outlined in rule gray with a dimmed glyph, and does nothing
+            tapStop(trackOf(ui, 4), 9)
+            assert.are.same({ 70, 70 }, ui.document.configurable.h_page_margins)
+            assert.are.same({ INK, RULE }, { buttonOutline(trackOf(ui, 4), -1), buttonOutline(trackOf(ui, 4), 1) })
+            assert.is_true(trackOf(ui, 4).icons[1].dim)
+            tapPlus(trackOf(ui, 4))
+            assert.are.same({ 70, 70 }, ui.document.configurable.h_page_margins)
+            tapStop(trackOf(ui, 3), 1)
+            assert.are.equal(85, ui.document.configurable.line_spacing)
+            assert.are.same({ RULE, INK }, { buttonOutline(trackOf(ui, 3), -1), buttonOutline(trackOf(ui, 3), 1) })
+            assert.is_true(trackOf(ui, 3).icons[-1].dim)
+            tapStop(trackOf(ui, 1), 10)
+            assert.are.equal(28, ui.document.configurable.font_size)
+            assert.are.equal("28", knobText(trackOf(ui, 1)))
+            assert.are.equal(RULE, buttonOutline(trackOf(ui, 1), 1))
+            tapPlus(trackOf(ui, 1))
+            assert.are.equal(28, ui.document.configurable.font_size)
+            tapStop(trackOf(ui, 1), 1)
+            assert.are.equal(15, ui.document.configurable.font_size)
+            tapMinus(trackOf(ui, 1))
+            assert.are.equal(15, ui.document.configurable.font_size)
+            assert.are.same({ RULE, INK }, { buttonOutline(trackOf(ui, 1), -1), buttonOutline(trackOf(ui, 1), 1) })
+            assert.is_nil(trackOf(ui, 1).icons[1].dim)
+        end)
+
+        it("should read back values past a track's ends there, with their own number, and go back onto it", function()
+            ui:handleEvent(Event:new("ConfigChange", "font_size", 32))
+            ui:handleEvent(Event:new("SetFontSize", 32))
+            ui:handleEvent(Event:new("ConfigChange", "line_spacing", 70))
+            ui:handleEvent(Event:new("SetLineSpace", 70))
+            runTasks()
+            openPanel(ui)
+            assert.are.equal("32", knobText(trackOf(ui, 1)))
+            assert.is_true(trackOf(ui, 1).position > 10)
+            assert.is_true(trackOf(ui, 3).position < 1)
+            -- the button leading further away is gray and does nothing
+            assert.are.same({ INK, RULE }, { buttonOutline(trackOf(ui, 1), -1), buttonOutline(trackOf(ui, 1), 1) })
+            assert.are.same({ RULE, INK }, { buttonOutline(trackOf(ui, 3), -1), buttonOutline(trackOf(ui, 3), 1) })
+            tapPlus(trackOf(ui, 1))
+            tapMinus(trackOf(ui, 3))
+            assert.are.equal(32, ui.document.configurable.font_size)
+            assert.are.equal(70, ui.document.configurable.line_spacing)
+            -- the other goes back onto the track, to its end stop
+            tapMinus(trackOf(ui, 1))
+            assert.are.equal(28, ui.document.configurable.font_size)
+            tapPlus(trackOf(ui, 3))
+            assert.are.equal(85, ui.document.configurable.line_spacing)
+            -- and so does a tap on the end stop, where the knob shows
+            ui.config:apply("font_size", 32, "SetFontSize")
+            ui.config:apply("line_spacing", 70, "SetLineSpace")
+            ui.config:refreshPanel()
+            UIManager:forceRePaint()
+            tapStop(trackOf(ui, 1), 10)
+            assert.are.equal(28, ui.document.configurable.font_size)
+            tapStop(trackOf(ui, 3), 1)
+            assert.are.equal(85, ui.document.configurable.line_spacing)
+        end)
+
+        it("should show fine values set elsewhere between two stops, without snapping them, and step from them", function()
+            ui:handleEvent(Event:new("ConfigChange", "font_size", 19.5))
+            ui:handleEvent(Event:new("SetFontSize", 19.5))
+            ui:handleEvent(Event:new("ConfigChange", "font_base_weight", 0.25))
+            ui:handleEvent(Event:new("SetFontBaseWeight", 0.25))
+            ui:handleEvent(Event:new("ConfigChange", "line_spacing", 100))
+            ui:handleEvent(Event:new("SetLineSpace", 100))
+            ui:handleEvent(Event:new("ConfigChange", "h_page_margins", { 20, 20 }))
+            ui:handleEvent(Event:new("SetPageHorizMargins", { 20, 20 }))
+            runTasks()
+            openPanel(ui)
+            local t = tracks(ui.config.panel)
+            assert.are.same({ "19.5", 5.5 }, { knobText(t[1]), t[1].position })
+            assert.are.same({ _("Font Weight"), 3.5 }, { knobText(t[2]), t[2].position })
+            assert.are.equal(2.5, t[3].position)
+            assert.is_near(3.4, t[4].position, 1e-9)
+            assert.are.equal(19.5, ui.document.configurable.font_size)
+            assert.are.equal(0.25, ui.document.configurable.font_base_weight)
+            assert.are.equal(100, ui.document.configurable.line_spacing)
+            assert.are.same({ 20, 20 }, ui.document.configurable.h_page_margins)
+
+            tapPlus(trackOf(ui, 1))
+            assert.are.equal(20, ui.document.configurable.font_size)
+            tapPlus(trackOf(ui, 2))
+            assert.are.equal(0.5, ui.document.configurable.font_base_weight)
+            tapMinus(trackOf(ui, 3))
+            assert.are.equal(95, ui.document.configurable.line_spacing)
+            tapMinus(trackOf(ui, 4))
+            assert.are.same({ 18, 18 }, ui.document.configurable.h_page_margins)
+        end)
+
+        it("should leave margins set elsewhere alone when the font size changes, in landscape too", function()
+            -- as the original bottom bar sets them; {10, 10} is also upstream's default
+            ui:handleEvent(Event:new("ConfigChange", "h_page_margins", { 10, 10 }))
+            ui:handleEvent(Event:new("SetPageHorizMargins", { 10, 10 }))
+            ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_CLOCKWISE))
+            finally(function()
+                ui:handleEvent(Event:new("SetRotationMode", Screen.DEVICE_ROTATED_UPRIGHT))
+                runTasks()
+            end)
+            runTasks()
+            assert.is_true(ui.config:marginsFor(10) > 10) -- the panel's own 10dp would widen here
+            openPanel(ui)
+            assert.are.equal(1, trackOf(ui, 4).position) -- the knob still shows where they are
+            tapPlus(trackOf(ui, 1))
+            runTasks()
+            assert.are.equal(20, ui.document.configurable.font_size)
+            assert.are.same({ 10, 10 }, ui.document.configurable.h_page_margins)
+            assert.are.equal(Screen:scaleBySize(10), ui.document:getPageMargins().left)
+            assert.is_nil(ui.doc_settings:readSetting("typeset_margin"))
+        end)
+
+        it("should read a margin step saved by the first round as its margin", function()
+            closeReader(ui)
+            ui = openReader(sample_epub, { typeset_margin_step = 3 })
+            assert.are.same({ 44, 44 }, ui.document.configurable.h_page_margins)
+            assert.are.equal(44, ui.doc_settings:readSetting("typeset_margin"))
             assert.is_nil(ui.doc_settings:readSetting("typeset_margin_step"))
+            openPanel(ui)
+            assert.are.equal(7, trackOf(ui, 4).position)
+        end)
+    end)
+
+    describe("closing the book with the panel open", function()
+        it("should leave no bars or panel behind", function()
+            local ui = openReader(sample_epub)
+            local panel = openPanel(ui)
+            local bars = ui.menu.bars
+            assert.are.equal(panel, ui.menu.panel)
+            local ok, err = pcall(function()
+                ui:onClose()
+                UIManager:forceRePaint()
+            end)
+            assert(ok, err)
+            assert.is_nil(ui.menu.bars)
+            assert.is_nil(ui.menu.panel)
+            assert.is_nil(ui.config.panel)
+            for _, window in ipairs(UIManager._window_stack) do
+                assert.are_not.equal(bars, window.widget)
+                assert.are_not.equal(ui, window.widget)
+            end
         end)
     end)
 
@@ -479,17 +902,17 @@ describe("ReaderTypesetPanel module", function()
         end)
 
         it("should prompt and keep Source Han Sans when the serif card is tapped", function()
-            local sheet = openPanel(ui)
-            local serif = fontCard(sheet, require("ffi/util").template(_("%1 · not installed"), _("Source Han Serif")))
+            local panel = openPanel(ui)
+            local serif = fontCard(panel, require("ffi/util").template(_("%1 · not installed"), _("Source Han Serif")))
             assert.is_truthy(serif)
             tapWidget(serif)
             UIManager:forceRePaint()
             local prompt = topWidget()
-            assert.are_not.equal(sheet, prompt)
+            assert.are_not.equal(panel, prompt)
             assert.is_truthy(prompt.text and prompt.text:find("Source Han Serif", 1, true))
             assert.are.equal("Noto Sans CJK SC", ui.font.font_face)
             UIManager:close(prompt)
-            ui.config:closeSheet(true)
+            ui.menu:hideToolbar(true)
             UIManager:forceRePaint()
         end)
     end)
@@ -502,7 +925,7 @@ describe("ReaderTypesetPanel module", function()
         it("should open the original bottom bar", function()
             ui:handleEvent(Event:new("ShowConfigMenu"))
             UIManager:forceRePaint()
-            assert.is_nil(ui.config.sheet)
+            assert.is_nil(ui.config.panel)
             assert.is_truthy(ui.config.config_dialog)
             assert.are.equal(ui.config.config_dialog, topWidget())
             ui.config.config_dialog:closeDialog()
