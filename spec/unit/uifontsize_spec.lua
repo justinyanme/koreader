@@ -179,7 +179,7 @@ describe("Interface font size", function()
 
     -- the shelf's bottom band tab drawn with the icon `icon`
     local function tab(fm, icon)
-        return tappable(fm, function(w) return w.icon == "eink/" .. icon or w.icon == "eink/" .. icon .. ".bold" end)
+        return tappable(fm.layout_group[2], function(w) return w.icon == "eink/" .. icon or w.icon == "eink/" .. icon .. ".bold" end)
     end
 
     -- The way a reader gets there: 我 → 设置 on the shelf, 更多 → 全部设置 in the reader.
@@ -497,20 +497,50 @@ describe("Interface font size", function()
         end)
 
         it("is saved, and used again at the next start", function()
-            local page = openFontSize(openSettings(fm))
+            local settings = openSettings(fm)
+            local page = openFontSize(settings)
             tapSize(page, 4)
+            tap(page.bar.back.dimen)
+            tap(settings.bar.back.dimen)
             assert.are.equal(1.2, G_reader_settings:readSetting("ui_font_scale"))
             -- a fresh start reads it before any face is made; other fonts keep their sizes
             local font_path = package.searchpath("ui/font", package.path)
             local fresh = dofile(font_path)
             assert.are.equal(1.2, fresh:getUIScale())
             assert.is_near(roleSize("ui_body", 1.2), fresh:getFace("ui_body").orig_size, 1e-9)
-            assert.are.equal(Font.sizemap.cfont, fresh.sizemap.cfont)
-            assert.are.equal(Font.sizemap.infofont, fresh.sizemap.infofont)
-            -- an unusable saved value means the default size
-            for __, bad in ipairs{ "large", -1, 0 } do
+            for __, name in ipairs{ "cfont", "infofont", "smallinfofont" } do
+                assert.are.equal(Screen:scaleBySize(fresh.sizemap[name]), fresh:getFace(name).size)
+            end
+            -- a value that is not one of the five sizes means the default size, at start and when set
+            for __, bad in ipairs{ "large", -1, 0, 3, 1.05, 1.3 } do
                 G_reader_settings:saveSetting("ui_font_scale", bad)
-                assert.are.equal(1, dofile(font_path):getUIScale())
+                fresh = dofile(font_path)
+                assert.are.equal(1, fresh:getUIScale())
+                assert.are.equal(Screen:scaleBySize(Font.sizemap.ui_body), fresh:getFace("ui_body").size)
+            end
+            Font:setUIScale(3)
+            assert.are.equal(1, Font:getUIScale())
+            assert.are.equal(1, G_reader_settings:readSetting("ui_font_scale"))
+            -- so the row reads 默认, and − goes to 小
+            settings = openSettings(fm)
+            assert.are.equal(_("Default"), row(settings, _("Interface font size")).value)
+            page = openFontSize(settings)
+            tap(page.control.minus_rect)
+            assert.are.equal(0.9, Font:getUIScale())
+        end)
+
+        it("lays the 文件 tab out at 较大 and 特大", function()
+            for __, step in ipairs{ 4, 5 } do
+                local settings = openSettings(fm)
+                local page = openFontSize(settings)
+                tapSize(page, step)
+                tap(page.bar.back.dimen)
+                tap(settings.bar.back.dimen)
+                tap(tab(fm, "folder").dimen)
+                assert.are.equal(fm.files_ui, fm.content[1])
+                local title = findText(fm.files_ui, _("Files"))
+                assert.is_near(roleSize("ui_headline", Font.ui_scales[step]), title.face.orig_size, 1e-9)
+                assertFits(fm.files_ui)
             end
         end)
     end)
@@ -556,7 +586,6 @@ describe("Interface font size", function()
             local page_no, page_count = ui:getCurrentPage(), ui.document:getPageCount()
             local xpointer = ui.rolling:getBookLocation()
             local dpi, dp100 = Screen:getDPI(), Screen:scaleBySize(100)
-            local footer_face = ui.view.footer.footer_text and ui.view.footer.footer_text.face
             setLargestFromReader(ui)
             assert.are.equal(1.35, Font:getUIScale())
             assert.are.equal(font_size, ui.document.configurable.font_size)
@@ -565,8 +594,12 @@ describe("Interface font size", function()
             assert.are.equal(xpointer, ui.rolling:getBookLocation())
             assert.are.equal(dpi, Screen:getDPI())
             assert.are.equal(dp100, Screen:scaleBySize(100))
-            if footer_face then
-                assert.are.equal(footer_face.size, ui.view.footer.footer_text.face.size)
+            -- KOReader's own fonts keep their sizes: the footer, built again now, and the original menus and dialogs
+            local footer = ui.view.footer
+            footer:updateFooterFont()
+            assert.are.equal(Screen:scaleBySize(footer.settings.text_font_size), footer.footer_text.face.size)
+            for __, name in ipairs{ "smallinfofont", "x_smallinfofont", "ffont", "cfont", "tfont", "infofont" } do
+                assert.are.equal(Screen:scaleBySize(Font.sizemap[name]), Font:getFace(name).size)
             end
             -- what the new UI builds next uses the new size, and fits: the settings, the contents page
             local settings = openSettings(ui)
@@ -574,8 +607,9 @@ describe("Interface font size", function()
             assert.is_near(roleSize("ui_body", 1.35), findText(settings, _("Interface font size")).face.orig_size, 1e-9)
             assertFits(settings)
             settings:closeMenu(true)
-            -- the toolbar's panels: more, progress, brightness and the typeset panel
+            -- the toolbar's labels, and its panels: more, progress, brightness and the typeset panel
             tap(Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() })
+            assert.are.equal(Screen:scaleBySize(roleSize("ui_caption", 1.35)), findText(ui.menu.bars, _("Progress")).face.size)
             for __, icon in ipairs{ "eink/more", "eink/progress", "eink/light", "eink/font" } do
                 local entry = findWidget(ui.menu.bars, function(w) return w.icon == icon and w.callback ~= nil end)
                 tap(entry.dimen)

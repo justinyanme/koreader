@@ -45,7 +45,7 @@ local TOUCH = dp(44)
 local TRACK_Y = dp(42) -- the track's center, above the bottom bar
 local LABEL_Y = dp(35) -- the size's name's center, above the track's center
 
-local SCALES = { 0.9, 1, 1.1, 1.2, 1.35 }
+local SCALES = Font.ui_scales
 
 local function sizeNames()
     return {

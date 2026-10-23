@@ -171,12 +171,25 @@ for name in pairs(Font.fontmap) do
     end
 end
 
-local saved_ui_scale = G_reader_settings and G_reader_settings:readSetting("ui_font_scale")
-Font.ui_scale = type(saved_ui_scale) == "number" and saved_ui_scale > 0 and saved_ui_scale or 1
+-- The interface font sizes: 小, 默认, 大, 较大, 特大.
+Font.ui_scales = { 0.9, 1, 1.1, 1.2, 1.35 }
 
---- Sets and saves the interface font size: `scale` multiplies the ui_* roles' sizes (1 is the default).
--- Widgets built before keep their faces until they are rebuilt.
+-- `scale` if it is one of the sizes, the default otherwise (a value edited into the settings).
+local function knownUIScale(scale)
+    for _, s in ipairs(Font.ui_scales) do
+        if scale == s then
+            return s
+        end
+    end
+    return 1
+end
+
+Font.ui_scale = knownUIScale(G_reader_settings and G_reader_settings:readSetting("ui_font_scale"))
+
+--- Sets and saves the interface font size: `scale`, one of Font.ui_scales, multiplies the ui_* roles' sizes
+-- (any other value means the default, 1). Widgets built before keep their faces until they are rebuilt.
 function Font:setUIScale(scale)
+    scale = knownUIScale(scale)
     G_reader_settings:saveSetting("ui_font_scale", scale)
     self.ui_scale = scale
 end
