@@ -1138,7 +1138,7 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.are.same({}, requestsTo(ROOT .. "/new"))
             assert.is_true(has(view, _("Search this source")))
             assert.has_error(function() tap(view, _("Search this source")) end) -- shown, but nothing to tap
-            -- its glyph is disabled, as light as the field's rule-gray outline (no darker than rule gray)
+            -- its glyph is disabled, in the rule gray of the field's outline
             local function searchGlyph(node)
                 if type(node) ~= "table" then return end
                 if node.icon == "eink/search" then return node end
@@ -1157,7 +1157,7 @@ describe("书源 (OPDS as a remote shelf)", function()
                     darkest = math.min(darkest, Screen.bb:getPixel(x, y):getColor8().a)
                 end
             end
-            assert.is_true(darkest >= require("ui/palette").rule:getColor8().a and darkest < 0xFF)
+            assert.are.equal(require("ui/palette").rule:getColor8().a, darkest)
         end)
 
         it("keeps the feed and turns search off when the search description is refused", function()

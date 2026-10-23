@@ -9,6 +9,7 @@ leave refreshing to their owner.
     local button = EinkControls.PillButton:new{ text = _("Next chapter"), callback = ... }
 ]]
 
+local Blitbuffer = require("ffi/blitbuffer")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local CenterContainer = require("ui/widget/container/centercontainer")
@@ -30,17 +31,25 @@ local function tapEvents(dimen)
     return { TapSelect = { GestureRange:new{ ges = "tap", range = dimen } } }
 end
 
---- An icon that turns rule gray unless `enabled`, like a disabled outline (IconWidget's `dim` stops at half gray).
+--- An icon that turns rule gray unless `enabled`, like a disabled outline. Only its ink changes, whatever the ground
+-- (IconWidget's `dim` lightens its whole rect, ground included, and stops at half gray).
 local Glyph = IconWidget:extend{
     enabled = true,
 }
 
 function Glyph:paintTo(bb, x, y)
-    IconWidget.paintTo(self, bb, x, y)
-    if not self.enabled then
-        local size = self:getSize()
-        bb:lightenRect(x, y, size.w, size.h, Palette.rule.a / 0xFF)
+    if self.enabled then
+        return IconWidget.paintTo(self, bb, x, y)
     end
+    -- the icon drawn on paper and inverted is how much ink each pixel has: the mask rule gray goes through
+    local size = self:getSize()
+    local mask = Blitbuffer.new(size.w, size.h, Blitbuffer.TYPE_BB8)
+    mask:fill(Blitbuffer.COLOR_WHITE)
+    IconWidget.paintTo(self, mask, 0, 0)
+    mask:invertRect(0, 0, size.w, size.h)
+    self.dimen.x, self.dimen.y = x, y
+    bb:colorblitFrom(mask, x, y, 0, 0, size.w, size.h, Palette.rule)
+    mask:free()
 end
 
 --- Pill button: 1.5dp ink outline, or ink fill when `solid`. Shows `text` or an `icon` from resources/icons.
