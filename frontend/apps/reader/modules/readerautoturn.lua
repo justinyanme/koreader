@@ -21,6 +21,24 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Screen = require("device").screen
 local _ = require("gettext")
 
+-- Keep the reference's small capsules, with at least a 44dp touch target around them.
+local QuickButton = EinkControls.PillButton:extend{}
+
+function QuickButton:init()
+    EinkControls.PillButton.init(self)
+    self.touch_dimen = Geom:new{
+        w = math.max(self.dimen.w, Screen:scaleBySize(44)),
+        h = math.max(self.dimen.h, Screen:scaleBySize(44)),
+    }
+    self.ges_events.TapSelect[1].range = self.touch_dimen
+end
+
+function QuickButton:paintTo(bb, x, y)
+    self.touch_dimen.x = x - math.floor((self.touch_dimen.w - self.dimen.w) / 2)
+    self.touch_dimen.y = y - math.floor((self.touch_dimen.h - self.dimen.h) / 2)
+    InputContainer.paintTo(self, bb, x, y)
+end
+
 local Pill = InputContainer:extend{ autoturn = nil, paints_over_footer = true }
 
 function Pill:init()
@@ -36,6 +54,9 @@ function Pill:init()
     local h = Screen:scaleBySize(35)
     local w = math.min(Screen:getWidth() - Screen:scaleBySize(44), label:getSize().w + Screen:scaleBySize(28))
     self.dimen = Geom:new{ x = Screen:scaleBySize(27), y = Screen:getHeight() - Screen:scaleBySize(56), w = w, h = h }
+    self.touch_dimen = self.dimen:copy()
+    self.touch_dimen.h = Screen:scaleBySize(44)
+    self.touch_dimen.y = self.dimen.y - math.floor((self.touch_dimen.h - h) / 2)
     local border = Size.border.default
     self[1] = FrameContainer:new{
         bordersize = border, color = Palette.confirm_rule, background = Palette.paper,
@@ -63,7 +84,7 @@ function SpeedScale:init()
     self.ges_events = { TapSpeed = { GestureRange:new{ ges = "tap", range = self.dimen } } }
     local diameter = math.floor(Screen:scaleBySize(34) * Font:getUIScale())
     for i, speed in ipairs(speeds) do
-        self[i] = EinkControls.PillButton:new{
+        self[i] = QuickButton:new{
             text = string.format("%.1f", speed), face = Font:getFace("ui_body", 16),
             width = diameter, height = diameter, bordersize = 0,
             callback = function() self:select(i) end,
@@ -162,7 +183,7 @@ function Settings:init()
                 UIManager:setDirty(self, "ui", self.panel:getRefreshRegion())
             end },
             VerticalSpan:new{ width = Screen:scaleBySize(13) },
-            EinkControls.PillButton:new{
+            QuickButton:new{
                 text = _("Stop autoturn"), width = w, height = Screen:scaleBySize(35), bordersize = Size.border.default,
                 face = Font:getFace("ui_label"), callback = function() self:close(); autoturn:stop() end,
             },
@@ -201,4 +222,4 @@ function Settings:onCloseWidget()
     self:free()
 end
 
-return { Pill = Pill, Settings = Settings }
+return { Button = QuickButton, Pill = Pill, Settings = Settings }

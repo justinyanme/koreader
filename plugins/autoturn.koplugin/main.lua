@@ -129,7 +129,7 @@ function AutoTurn:onReaderReady()
         screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
         overrides = { "readermenu_tap", "tap_forward", "tap_backward", "readerfooter_tap", "tap_link", "readerhighlight_tap" },
         handler = function(ges)
-            if self:_enabled() and not self.suspended and self.pill.dimen:contains(ges.pos) then
+            if self:_enabled() and not self.suspended and self.pill.touch_dimen:contains(ges.pos) then
                 self:showSettings()
                 return true
             end
