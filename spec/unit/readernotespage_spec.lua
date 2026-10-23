@@ -230,6 +230,38 @@ describe("ReaderNotesPage module", function()
         return T(N_("Read to %1% · 1 note", "Read to %1% · %2 notes", n), percent, n)
     end
 
+    -- Whether `action` is waiting in UIManager's task queue.
+    local function scheduled(action)
+        for _, task in ipairs(UIManager._task_queue) do
+            if task.action == action then return true end
+        end
+        return false
+    end
+
+    -- How many texts of `widget` are exactly `str`.
+    local function countText(widget, str)
+        if type(widget) ~= "table" then return 0 end
+        local n = widget.text == str and 1 or 0
+        for _, child in ipairs(widget) do
+            n = n + countText(child, str)
+        end
+        for _, key in ipairs{ "frame", "content" } do
+            if rawget(widget, key) then n = n + countText(widget[key], str) end
+        end
+        return n
+    end
+
+    -- Jumps to the first card of the notes page, made of one highlight on page 12, from page 2.
+    local function jumpToHighlight(ui)
+        ui.rolling:onGotoPage(12)
+        UIManager:forceRePaint()
+        highlight(ui, Geom:new{ x = 260, y = 70 }, Geom:new{ x = 260, y = 100 })
+        ui.rolling:onGotoPage(2)
+        UIManager:forceRePaint()
+        tapWidget(openFromToolbar(ui).cards[1])
+        return ui.view.view_modules.notes_jump_focus
+    end
+
     -- Lets `seconds` pass for the scheduled tasks.
     local function wait(seconds)
         UIManager:shiftScheduledTasksBy(-time.s(seconds))
@@ -500,6 +532,44 @@ describe("ReaderNotesPage module", function()
             assert.is_true(focus == nil or #focus:rects() == 0)
         end)
 
+        it("should drop the gray mark and its timer when the page turns before it goes", function()
+            local focus = jumpToHighlight(ui)
+            local clear = focus.clear
+            assert.is_true(#focus:rects() > 0)
+            assert.is_true(scheduled(clear))
+            local shown = ui:getCurrentPage()
+            -- a tap on the right of the page turns it
+            tap(Screen:getWidth() - 10, math.floor(Screen:getHeight() / 2))
+            UIManager:forceRePaint()
+            assert.are.equal(shown + 1, ui:getCurrentPage())
+            assert.is_nil(focus.item)
+            assert.is_false(scheduled(clear))
+            assert.are.same({}, refreshesOf(function() wait(2) end))
+        end)
+
+        it("should read a bookmark's page text once, however often the notes change", function()
+            for _, p in ipairs{ 20, 22 } do
+                ui.rolling:onGotoPage(p)
+                UIManager:forceRePaint()
+                bookmarkPage(ui)
+            end
+            local page = openFromToolbar(ui)
+            assert.are.equal(2, #page.cards)
+            local reads = 0
+            local orig = ui.document.getTextFromXPointers
+            ui.document.getTextFromXPointers = function(...) reads = reads + 1 return orig(...) end
+            local ok, err = pcall(function()
+                ui.rolling:onGotoPage(24)
+                ui:handleEvent(Event:new("ToggleBookmark")) -- the page follows: all three cards again
+                UIManager:forceRePaint()
+            end)
+            ui.document.getTextFromXPointers = orig
+            assert(ok, err)
+            assert.are.equal(3, #page.cards)
+            assert.are.equal(1, reads) -- the new bookmark's page only
+            back(page)
+        end)
+
         it("should follow notes added and removed: the cards, the count and 仅显示书签", function()
             highlight(ui, Geom:new{ x = 260, y = 70 }, Geom:new{ x = 260, y = 100 })
             local page = openFromToolbar(ui)
@@ -554,6 +624,14 @@ describe("ReaderNotesPage module", function()
             assert.is_false(UIManager:isWidgetShown(ui))
             assert.is_nil(ui.menu.drawer)
         end)
+
+        it("should take the gray mark's timer along", function()
+            local ui = openReader(sample_epub)
+            local clear = jumpToHighlight(ui).clear
+            assert.is_true(scheduled(clear))
+            closeReader(ui)
+            assert.is_false(scheduled(clear))
+        end)
     end)
 
     describe("with a PDF", function()
@@ -585,6 +663,35 @@ describe("ReaderNotesPage module", function()
                 tapWidget(page.cards[1])
                 assert.are.equal(5, ui:getCurrentPage())
                 assert.are.equal(ui, topWidget())
+            end)
+            closeReader(ui)
+            assert(ok, err)
+        end)
+
+        it("should file the notes of a book without contents under its title", function()
+            local ui = openReader(sample_pdf) -- no outline
+            local ok, err = pcall(function()
+                ui:handleEvent(Event:new("SetScrollMode", false))
+                ui.paging:onGotoPage(10)
+                UIManager:forceRePaint()
+                highlight(ui, Geom:new{ x = 260, y = 70 }, Geom:new{ x = 260, y = 150 })
+                assert.are.equal("", ui.annotation.annotations[1].chapter) -- as ReaderHighlight stores it without contents
+                ui.paging:onGotoPage(5)
+                UIManager:forceRePaint()
+                bookmarkPage(ui)
+                -- a bookmark of an old sidecar has "" too (ReaderAnnotation), here on a page without a text layer
+                local bookmark = ui.annotation.annotations[1]
+                assert.is_nil(bookmark.drawer)
+                bookmark.chapter = ""
+                ui.document.getPageTextBoxes = function() end
+
+                local page = openFromToolbar(ui)
+                local title = ui.doc_props.display_title
+                assert.are.equal(2, #page.cards)
+                -- no empty heading, no blank card: the title heads both, and stands in for the bookmark's text
+                assert.is_nil(find(page, function(w) return w.text == "" end))
+                assert.is_true(hasText(page.cards[1], title))
+                assert.are.equal(3, countText(page, title)) -- the overview card, the heading, the bookmark card
             end)
             closeReader(ui)
             assert(ok, err)

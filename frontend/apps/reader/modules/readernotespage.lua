@@ -101,6 +101,15 @@ local function icon(name, size)
     return IconWidget:new{ icon = name, width = size, height = size, alpha = true }
 end
 
+-- The chapter a note is filed under, or the book's title: a book without contents stores "" (ReaderHighlight, and
+-- ReaderAnnotation for old bookmarks), others nothing.
+local function chapterOf(item, ui)
+    if item.chapter == nil or item.chapter == "" then
+        return ui.doc_props.display_title
+    end
+    return item.chapter
+end
+
 -- First characters of a string, whitespace collapsed: enough for the lines a card shows.
 local function snippet(str, max_chars)
     str = util.trim(((str or ""):gsub("%s+", " ")))
@@ -168,7 +177,9 @@ TypeDisc.onCloseWidget = TypeDisc.free
 
 --[[--
 The jump focus: the text of the note jumped to, marked in marker gray for a moment. A view module, drawn with the
-page (so the jump's repaint shows it) and only where the text is on the screen; nothing is saved.
+page (so the jump's repaint shows it) and only where the text is on the screen; nothing is saved. It is also a
+module of the reader, for its events: a page turn drops the mark (the turn repaints the page without it), and so
+does the reader closing, whose timer goes with it.
 ]]
 local JumpFocus = Widget:extend{
     item = nil, -- the highlight marked, while it is
@@ -180,10 +191,9 @@ function JumpFocus.show(ui, item)
     if not focus then
         focus = JumpFocus:new{}
         ui.view:registerViewModule("notes_jump_focus", focus)
+        ui:registerModule(nil, focus)
     end
-    if focus.clear then
-        UIManager:unschedule(focus.clear)
-    end
+    focus:stop()
     focus.item = item
     focus.clear = function() focus:finish() end
     UIManager:scheduleIn(FOCUS_SECONDS, focus.clear)
@@ -227,13 +237,23 @@ function JumpFocus:paintTo(bb, x, y)
     end
 end
 
---- The mark goes, repainting what it covered (nothing when the reader moved on, or closed).
+--- Drops the mark and its timer, without a repaint of its own. (Returns nothing: the reader's other modules get
+-- the event too.)
+function JumpFocus:stop()
+    if self.clear then
+        UIManager:unschedule(self.clear)
+        self.clear = nil
+    end
+    self.item = nil
+end
+
+JumpFocus.onPageUpdate = JumpFocus.stop
+JumpFocus.onPosUpdate = JumpFocus.stop -- scroll mode
+JumpFocus.onCloseWidget = JumpFocus.stop
+
+--- The mark goes, repainting what it covered (nothing when the text is no longer on the screen).
 function JumpFocus:finish()
     self.clear = nil
-    if not self.ui.document then
-        self.item = nil
-        return
-    end
     local region
     for _, rect in ipairs(self:rects()) do
         region = region and region:combine(rect) or rect
@@ -264,7 +284,7 @@ function NotesPage:init()
     self.text_line_h = math.floor((1 + TEXT_LINE) * self.text_face.size + 0.5) -- as TextBoxWidget does
     self.inner_w = self.column_w - 2 * CARD_BORDER - 2 * CARD_PAD_X -- inside a card's outline and side padding
     self.text_w = self.inner_w - DISC - DISC_GAP
-    self.page_texts = {} -- bookmark => the text its page starts with
+    self.page_texts = setmetatable({}, { __mode = "k" }) -- bookmark => the text its page starts with, kept by refresh()
     self:collect()
     local left = positions[self.ui.document]
     if left and left.filter == self.filter then
@@ -293,7 +313,7 @@ function NotesPage:collect()
     local chapter
     for _, item in ipairs(annotations) do
         if self.filter ~= "bookmarks" or not item.drawer then
-            local item_chapter = item.chapter or self.ui.doc_props.display_title
+            local item_chapter = chapterOf(item, self.ui)
             if item_chapter ~= chapter then
                 chapter = item_chapter
                 table.insert(entries, { kind = "heading", title = chapter })
@@ -389,7 +409,7 @@ function NotesPage:cardTexts(item)
         if page_text == nil then
             page_text = snippet(self:pageStartText(item), 200)
             if page_text == "" then
-                page_text = item.chapter or self.ui.doc_props.display_title
+                page_text = chapterOf(item, self.ui)
             end
             self.page_texts[item] = page_text
         end
