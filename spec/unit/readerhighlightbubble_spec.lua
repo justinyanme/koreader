@@ -366,43 +366,6 @@ describe("ReaderHighlightBubble module", function()
             G_reader_settings:delSetting("highlight_drawing_style")
         end)
 
-        it("should draw a line right under the glyphs, not at the bottom of the line's leading", function()
-            G_reader_settings:delSetting("highlight_drawing_style")
-            -- more leading than the default, as in the reference book
-            ui:handleEvent(Event:new("SetLineSpace", 150))
-            UIManager:forceRePaint()
-            select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
-            tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
-            ui.highlight:closeBubble()
-            UIManager:forceRePaint()
-            assert.are.equal("underscore", ui.annotation.annotations[1].drawer)
-            assert.is_true(#ui.view.highlight.visible_boxes > 1)
-            for _, box in ipairs(ui.view.highlight.visible_boxes) do
-                local r = ui.highlight:boxToScreen(box)
-                -- the line: the first row of the box's lower half with no paper left in it (in the highlight
-                -- color: the emulator's screen is a color one)
-                local line_row
-                for row = r.y + math.floor(r.h / 2), r.y + r.h - 1 do
-                    local full = true
-                    for x = r.x, r.x + r.w - 1 do
-                        if gray(x, row) >= 0xF0 then full = false break end
-                    end
-                    if full then line_row = row break end
-                end
-                assert.is_truthy(line_row)
-                -- 3dp under the lowest ink of the line's glyphs (all of the line's, so that every highlight on
-                -- it gets the same line), well above the bottom of the leading
-                local ink_row
-                for row = line_row - 1, r.y, -1 do
-                    if inked(0, row, Screen:getWidth() - 1, row) then ink_row = row break end
-                end
-                assert.is_truthy(ink_row)
-                assert.are.equal(Screen:scaleBySize(3), line_row - ink_row - 1)
-                assert.is_true(line_row < r.y + r.h - 1 - Screen:scaleBySize(3))
-            end
-            ui:handleEvent(Event:new("SetLineSpace", 100))
-        end)
-
         it("should keep drawing old marker and wave highlights", function()
             select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 })
             tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
@@ -434,7 +397,7 @@ describe("ReaderHighlightBubble module", function()
             end
             assert.is_true(paperShare(ui.highlight:boxToScreen(drawn.lighten)) < 0.1)
             assert.is_true(paperShare(ui.highlight:boxToScreen(drawn.wave)) > 0.5) -- unlike text without it
-            -- the wave runs along the bottom of its box without a gap, even between words (it dips below it)
+            -- the wave runs under the glyphs without a gap, even between words
             local w = ui.highlight:boxToScreen(drawn.wave)
             -- (in the highlight color: the emulator's screen is a color one)
             local function marked(x, y0, y1)
@@ -444,7 +407,7 @@ describe("ReaderHighlightBubble module", function()
                 return false
             end
             for x = w.x, w.x + w.w - 1 do
-                assert.is_true(marked(x, w.y + w.h - Screen:scaleBySize(4), w.y + w.h + Screen:scaleBySize(3)), x)
+                assert.is_true(marked(x, w.y + math.floor(w.h / 2), w.y + w.h + Screen:scaleBySize(4)), x)
             end
         end)
 
@@ -664,6 +627,294 @@ describe("ReaderHighlightBubble module", function()
                 assert.are.equal(ui, topWidget())
             end)
             ui.highlight:onSetHighlightAction(1, true) -- "ask"
+            assert(ok, err)
+        end)
+    end)
+
+    describe("line highlights under the glyphs", function()
+        local ffiUtil, lfs
+        setup(function()
+            ffiUtil = require("ffi/util")
+            lfs = require("libs/libkoreader-lfs")
+        end)
+        after_each(function()
+            G_reader_settings:delSetting("highlight_drawing_style")
+            G_reader_settings:delSetting("highlight_color")
+        end)
+
+        local function writeFile(path, content)
+            local f = assert(io.open(path, "w"))
+            f:write(content)
+            f:close()
+        end
+
+        -- A book of one HTML page with `body`, and `files` beside it, open on its first page; with a cleanup.
+        local function openHtml(name, body, files)
+            local dir = require("datastorage"):getDataDir() .. "/" .. name
+            lfs.mkdir(dir)
+            for file, content in pairs(files or {}) do writeFile(dir .. "/" .. file, content) end
+            local path = dir .. "/book.html"
+            writeFile(path, "<html><body>" .. body .. "</body></html>")
+            local ui = openReader(path, true)
+            UIManager:forceRePaint()
+            return ui, function()
+                closeReader(ui)
+                DocSettings:open(path):purge()
+                ffiUtil.purgeDir(dir)
+            end
+        end
+
+        local GREEK = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho "
+            .. "sigma tau upsilon phi chi psi omega "
+
+        -- The screen boxes, one per line, from the start of the first match of `from` on the page to the end
+        -- of the first match of `to` after it.
+        local function boxesOf(ui, from, to)
+            local function match(pattern, after)
+                local found = ui.document:findText(pattern, 0, 0, false, ui.document:getCurrentPage(), false, 50)
+                ui.document:clearSelection()
+                for _, m in ipairs(found or {}) do
+                    if not after or ui.document:compareXPointers(after, m.start) >= 0 then return m end
+                end
+                error("no " .. pattern)
+            end
+            local a = match(from)
+            return ui.document:getScreenBoxesFromPositions(a.start, match(to or from, a.start)["end"], true)
+        end
+
+        -- Highlights those boxes' text with a long-press and a drag, in the default style.
+        local function highlight(ui, boxes)
+            local first, last = boxes[1], boxes[#boxes]
+            select(ui, Geom:new{ x = first.x + 2, y = first.y + math.floor(first.h / 2) },
+                Geom:new{ x = last.x + last.w - 2, y = last.y + math.floor(last.h / 2) })
+            tapWidget(cell(ui.highlight.highlight_dialog, "Highlight"))
+            ui.highlight:closeBubble()
+            UIManager:forceRePaint()
+        end
+
+        -- With paper light (dark ink) or not: whether a pixel is paper, and whether it is ink.
+        local function isPaper(x, y, dark) local g = gray(x, y) if dark then return g < 0x10 end return g >= 0xF0 end
+        local function isInk(x, y, dark) return (gray(x, y) >= 0x80) == (dark or false) end
+
+        -- The lowest row of ink in the lower half of the segments of one line (box), skipping columns.
+        local function glyphBottom(rects, dark, skip)
+            local box = rects[1]
+            for row = box.y + box.h - 1, box.y + math.floor(box.h / 2), -1 do
+                for _, r in ipairs(rects) do
+                    for x = r.x, r.x + r.w - 1 do
+                        if not (skip and skip(x)) and isInk(x, row, dark) then return row end
+                    end
+                end
+            end
+        end
+
+        -- The line highlight of segments rects whose glyphs end at row g: paper for 3dp, then a 2dp band
+        -- with no paper left (pure ink when ink is given), then paper again.
+        local function assertLineUnder(rects, g, dark, ink)
+            local gap, line_h = Screen:scaleBySize(3), Screen:scaleBySize(2)
+            local function every(row, pred)
+                for _, r in ipairs(rects) do
+                    for x = r.x, r.x + r.w - 1 do
+                        if not pred(x, row) then return false end
+                    end
+                end
+                return true
+            end
+            for row = g + 1, g + gap do
+                assert.is_true(every(row, function(x, y) return isPaper(x, y, dark) end), "gap row " .. row)
+            end
+            for row = g + gap + 1, g + gap + line_h do
+                assert.is_true(every(row, function(x, y)
+                    if ink then return gray(x, y) < 0x20 end
+                    return not isPaper(x, y, dark)
+                end), "line row " .. row)
+            end
+            assert.is_false(every(g + gap + line_h + 1, function(x, y) return not isPaper(x, y, dark) end))
+            assert.is_true(g + gap + line_h < rects[1].y + rects[1].h - 1) -- well above the bottom of the box
+        end
+
+        it("should draw a line in ink, 2dp thick, 3dp under the glyphs rather than at the bottom of the leading", function()
+            G_reader_settings:saveSetting("highlight_color", "gray") -- as on a black and white screen
+            local ui, cleanup = openHtml("lines_ink", "<p style='line-height: 2'>" .. string.rep(GREEK, 4) .. "</p>")
+            local ok, err = pcall(function()
+                local boxes = boxesOf(ui, "gamma", "theta")
+                local g = glyphBottom({ boxes[1] })
+                highlight(ui, boxes)
+                assert.are.equal("underscore", ui.annotation.annotations[1].drawer)
+                assertLineUnder({ boxes[1] }, g, false, true)
+            end)
+            cleanup()
+            assert(ok, err)
+        end)
+
+        it("should put a wave where a line would be", function()
+            G_reader_settings:saveSetting("highlight_drawing_style", "wave")
+            G_reader_settings:saveSetting("highlight_color", "gray")
+            local ui, cleanup = openHtml("lines_wave", "<p style='line-height: 2'>" .. string.rep(GREEK, 4) .. "</p>")
+            local ok, err = pcall(function()
+                local boxes = boxesOf(ui, "gamma", "theta")
+                local r = boxes[1]
+                local g = glyphBottom({ r })
+                highlight(ui, boxes)
+                assert.are.equal("wave", ui.annotation.annotations[1].drawer)
+                local top = g + Screen:scaleBySize(3) + 1
+                for x = r.x, r.x + r.w - 1 do
+                    for row = g + 1, top - 1 do
+                        assert.is_true(isPaper(x, row), "gap row " .. row)
+                    end
+                    local marked = false
+                    for row = top, top + Screen:scaleBySize(5) do
+                        if not isPaper(x, row) then marked = true end
+                    end
+                    assert.is_true(marked, x)
+                end
+            end)
+            cleanup()
+            assert(ok, err)
+        end)
+
+        it("should find the glyphs in night mode, the screen inverted", function()
+            G_reader_settings:saveSetting("highlight_color", "gray")
+            local ui, cleanup = openHtml("lines_night", "<p style='line-height: 2'>" .. string.rep(GREEK, 4) .. "</p>")
+            local night = G_reader_settings:readSetting("night_mode")
+            local ok, err = pcall(function()
+                local boxes = boxesOf(ui, "gamma", "theta")
+                local g = glyphBottom({ boxes[1] })
+                ui:handleEvent(Event:new("ToggleNightMode"))
+                UIManager:forceRePaint()
+                -- the glyphs are light on the screen, though they read back dark
+                assert.are.equal(1, Screen.bb:getInverse())
+                local r = boxes[1]
+                local glyph_x
+                for x = r.x, r.x + r.w - 1 do
+                    if isInk(x, g) then glyph_x = x break end
+                end
+                assert.is_true(Screen.bb:getPixelP(glyph_x, g)[0]:getColor8().a >= 0x80)
+                highlight(ui, boxes)
+                assertLineUnder({ r }, g, false, true)
+            end)
+            if Screen.bb:getInverse() == 1 then ui:handleEvent(Event:new("ToggleNightMode")) end
+            G_reader_settings:saveSetting("night_mode", night)
+            cleanup()
+            assert(ok, err)
+        end)
+
+        it("should find light glyphs on a dark page", function()
+            G_reader_settings:saveSetting("highlight_color", "yellow") -- a light line, to be seen on the page
+            local ui, cleanup = openHtml("lines_dark",
+                "<div style='background-color: #000000; color: #ffffff'><p style='line-height: 2'>"
+                .. string.rep(GREEK, 4) .. "</p></div>")
+            local ok, err = pcall(function()
+                local boxes = boxesOf(ui, "gamma", "theta")
+                local r = boxes[1]
+                assert.is_true(isPaper(r.x, r.y + r.h - 1, true)) -- the page is dark
+                local g = glyphBottom({ r }, true)
+                highlight(ui, boxes)
+                assertLineUnder({ r }, g, true)
+            end)
+            cleanup()
+            assert(ok, err)
+        end)
+
+        it("should leave out an inline image reaching lower than the glyphs", function()
+            G_reader_settings:saveSetting("highlight_color", "gray")
+            local ui, cleanup = openHtml("lines_image",
+                "<p style='line-height: 2'>alpha beta <img src='black.svg' style='height: 2.5em; vertical-align: bottom'/> "
+                .. "gamma " .. string.rep(GREEK, 3) .. "</p>",
+                { ["black.svg"] = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="40">'
+                    .. '<rect width="20" height="40" fill="#000"/></svg>' })
+            local ok, err = pcall(function()
+                local boxes = boxesOf(ui, "beta", "gamma")
+                local r = boxes[1]
+                -- crengine counts the image in the segment, and it reaches the bottom of the box
+                local image = {}
+                for x = r.x, r.x + r.w - 1 do
+                    if isInk(x, r.y + r.h - 1) then image[x] = true end
+                end
+                assert.is_truthy(next(image))
+                local function skip(x) return image[x] or image[x - 1] or image[x + 1] end
+                local g = glyphBottom({ r }, false, skip)
+                assert.is_true(g < r.y + r.h - 1 - Screen:scaleBySize(6))
+                highlight(ui, boxes)
+                -- the line runs under the image's bottom too: check it beside the image
+                local text_rects = {}
+                local run
+                for x = r.x, r.x + r.w - 1 do
+                    if skip(x) then run = nil
+                    elseif run then run.w = run.w + 1
+                    else
+                        run = Geom:new{ x = x, y = r.y, w = 1, h = r.h }
+                        table.insert(text_rects, run)
+                    end
+                end
+                assertLineUnder(text_rects, g, false, true)
+            end)
+            cleanup()
+            assert(ok, err)
+        end)
+
+        it("should put the highlights of one line on one line, and each line of a long one under its own glyphs", function()
+            G_reader_settings:saveSetting("highlight_color", "gray")
+            local ui, cleanup = openHtml("lines_many", "<p style='line-height: 2'>" .. string.rep(GREEK, 6) .. "</p>")
+            local ok, err = pcall(function()
+                -- two highlights on the first line, and one overlapping the second one there
+                local a = boxesOf(ui, "alpha")
+                local e = boxesOf(ui, "epsilon", "zeta")
+                local z = boxesOf(ui, "zeta", "theta")
+                assert.are.equal(a[1].y, e[1].y)
+                assert.are.equal(a[1].y, z[1].y)
+                local first_line = { a[1], e[1], z[1] }
+                local g1 = glyphBottom(first_line)
+                -- a long one, over three lines
+                local long = boxesOf(ui, "sigma", "rho")
+                assert.is_true(#long >= 3)
+                local gs = {}
+                for i, box in ipairs(long) do gs[i] = glyphBottom({ box }) end
+                highlight(ui, a)
+                highlight(ui, e)
+                highlight(ui, z)
+                highlight(ui, long)
+                assert.are.equal(4, #ui.annotation.annotations)
+                -- one line under all three, 2dp thick even where two overlap
+                assertLineUnder(first_line, g1, false, true)
+                for i, box in ipairs(long) do
+                    assertLineUnder({ box }, gs[i], false, true)
+                end
+            end)
+            cleanup()
+            assert(ok, err)
+        end)
+
+        it("should read only the highlighted lines, and nothing on pages without line highlights", function()
+            local ui, cleanup = openHtml("lines_reads", string.rep("<p>" .. string.rep(GREEK, 3) .. "</p>", 12))
+            local ok, err = pcall(function()
+                highlight(ui, boxesOf(ui, "beta", "rho"))
+                local calls = {}
+                local underlineY = ui.view.underlineY
+                ui.view.underlineY = function(view, bb, rects)
+                    table.insert(calls, rects)
+                    return underlineY(view, bb, rects)
+                end
+                ui.rolling:onGotoPage(2)
+                UIManager:forceRePaint()
+                assert.are.same({}, calls)
+                ui.rolling:onGotoPage(1)
+                UIManager:forceRePaint()
+                -- once per line of the highlight, with that line's segment only
+                local lines = {}
+                for _, box in ipairs(ui.view.highlight.visible_boxes) do
+                    lines[box.rect.y] = box.rect
+                end
+                local n = 0
+                for __ in pairs(lines) do n = n + 1 end
+                assert.are.equal(n, #calls)
+                for _, rects in ipairs(calls) do
+                    assert.are.equal(1, #rects)
+                    assert.are.same(lines[rects[1].y], rects[1])
+                end
+                ui.view.underlineY = nil
+            end)
+            cleanup()
             assert(ok, err)
         end)
     end)
