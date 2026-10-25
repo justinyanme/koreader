@@ -533,4 +533,84 @@ describe("Shelf home, 导入 and 文件", function()
         tap(row.dimen)
         assert.are.equal(home .. "/sub", fm.file_chooser.path)
     end)
+
+    describe("where the home folder is the app's sandbox (iOS)", function()
+        local BookImport, Device, FakeBridge
+        local device_keys = { "hasSandboxedHome", "getTransferInstructions", "importFile", "bridge", "sweepImports" }
+        local saved_device = {}
+        local transfer = "In the Files app, put books in On My iPhone › Just Reader."
+
+        before_each(function()
+            BookImport = require("apps/shelf/bookimport")
+            Device = require("device")
+            FakeBridge = require("iosbridge")
+            for __, key in ipairs(device_keys) do saved_device[key] = rawget(Device, key) end
+            Device.hasSandboxedHome = function() return true end
+            Device.getTransferInstructions = function() return transfer end
+            Device.importFile = function(folder) BookImport.pick(folder) end
+            BookImport.poll_interval = 0
+        end)
+
+        after_each(function()
+            for __, key in ipairs(device_keys) do rawset(Device, key, saved_device[key]) end
+            BookImport.poll_interval = 0.2
+        end)
+
+        -- a copy the system made for the app, outside the home folder
+        local function systemCopy(name)
+            local path = tmp .. "/Inbox/" .. name
+            lfs.mkdir(tmp .. "/Inbox")
+            ffiUtil.copyFile("spec/front/unit/data/juliet.epub", path)
+            table.insert(cleanup_files, home .. "/" .. name)
+            return path
+        end
+
+        local function shelfHas(view, path)
+            for __, book in ipairs(view.shown) do
+                if book.file == path then return true end
+            end
+            return false
+        end
+
+        it("offers the system's file picker and the Files and Finder way, without USB or the home folder's path", function()
+            local fm, view = openShelf()
+            local page = openImport(fm)
+            local shown = texts(page)
+            for __, str in ipairs{ _("Import from Files"), _("Choose files"), _("Transfer from a computer"), transfer } do
+                assert.is_true(contains(shown, str), str)
+            end
+            for __, str in ipairs{ _("Browse device files"), T(_("Home folder: %1"), home) } do
+                assert.is_false(contains(shown, str), str)
+            end
+            for __, str in ipairs(shown) do
+                assert.is_falsy(str:find("USB", 1, true), str)
+            end
+            -- the picker's copy goes into the home folder, and the shelf lists it once 导入 closes
+            local picked = systemCopy("picked.epub")
+            Device.bridge = FakeBridge.new{ picks = { { { state = "pending" }, { state = "picked", paths = { picked } } } } }
+            tap(find(page, _("Choose files")).dimen)
+            fastforward_ui_events()
+            assert.are.equal("file", lfs.attributes(home .. "/picked.epub", "mode"))
+            assert.is_nil(lfs.attributes(picked, "mode"))
+            tap(page.close_button.dimen)
+            fastforward_ui_events()
+            assert.is_true(shelfHas(view, home .. "/picked.epub"))
+            os.remove(home .. "/picked.epub")
+        end)
+
+        it("lists books put in through the Files app or left in the inboxes when it comes back to the foreground", function()
+            local fm, view = openShelf()
+            local inbox_copy = systemCopy("opened.epub")
+            Device.sweepImports = function() return BookImport.sweep({ tmp .. "/Inbox" }, home) end
+            local via_files = addFile("via-files.epub", "juliet.epub")
+            UIManager:broadcastEvent(Event:new("Resume"))
+            fastforward_ui_events()
+            assert.is_true(shelfHas(view, via_files))
+            assert.is_true(shelfHas(view, home .. "/opened.epub"))
+            assert.is_nil(lfs.attributes(inbox_copy, "mode"))
+            assert.are.equal(fm, FileManager.instance)
+            os.remove(via_files)
+            os.remove(home .. "/opened.epub")
+        end)
+    end)
 end)

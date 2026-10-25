@@ -44,6 +44,16 @@ brightnessSet(number) -> true | nil, error
 keyboardConnected() -> boolean | nil, error
     Whether an external hardware keyboard is connected (SDL_HasKeyboard).
     Query after SDL input waits; the on-screen keyboard does not count.
+
+pickFilesStart{extensions} -> true | nil, error
+    Presents the system document picker over SDL's view controller: multiple selection, as copies
+    (asCopy), of files with one of the extensions (no dot; "fb2.zip" counts as its last part).
+    One picker at a time: "busy" while one shows.
+pickFilesPoll() -> snapshot | nil, error
+    snapshot = {state, paths, errors, error}. state is "idle", "pending", "picked", "cancelled" or
+    "failed"; a final state is returned once, then "idle". paths are the system's copies, which Lua
+    moves or removes. errors maps a file name to why it could not be copied (not downloaded from
+    its cloud, say); error explains "failed".
 --]]
 
 local Bridge = {}
@@ -66,6 +76,8 @@ function Bridge.new()
         brightnessGet = unsupported,
         brightnessSet = unsupported,
         keyboardConnected = unsupported,
+        pickFilesStart = unsupported,
+        pickFilesPoll = unsupported,
     }
 end
 

@@ -57,6 +57,20 @@
 - [ ] 稳定版补验：进程内查询、Keychain、VoiceOver 五个流程、外接键盘；记录内存与性能变化。
 - [ ] 仓库 spec 与全量回归由编排者在提交 TestFlight 前按 Q46 批量运行；本清单不授权逐票运行 spec 或做 Leaf5 实机验收。
 
+### B3 存储与导入（#91）
+
+依据 Q10、Q30、Q33、Q43。两台模拟器各执行一遍；`<data>` 为 `xcrun simctl get_app_container <UDID> me.justinyan.justreader data`。
+
+- [ ] 布局：书在 `<data>/Documents`；设置、笔记、`docsettings/` 在 `<data>/Library/Application Support/koreader`；`<data>/Library/Application Support/koreader/cache` 是指向 `<data>/Library/Caches/koreader` 的软链。Files 的"我的 iPhone/Just Reader"里只有书，没有 `.sdr`、`Inbox` 或 KOReader 自己的文件夹。
+- [ ] Files 放入：在 Files 里把 EPUB 放进"我的 iPhone/Just Reader"，回到 App 后书出现在书架（回前台由 B5 广播 `Resume`；B5 合入前以重启或关掉导入页代替，注明是哪种）。
+- [ ] 缓存清理：删除 `<data>/Library/Caches` 下的全部内容后重启，书、进度、笔记都在，缓存目录自动重建。
+- [ ] 文件选择器：导入页"从“文件”导入"→"选择文件"，选 iCloud Drive 和"我的 iPhone"里的书各一本（可多选）；书被复制进 Documents 并上架，`tmp/*-Inbox` 不留副本，源文件不变。取消不提示；未下载到本机的云盘文件给出原因。
+- [ ] 用 Just Reader 打开：分别在 App 运行中和未运行时，从 Safari 下载和邮件附件"用 Just Reader 打开"EPUB；书进入 Documents、`Documents/Inbox` 不残留。运行中会打开这本书；冷启动时 SDL 的 drop 事件早于初始化、会丢，书由启动时的清扫导入并上架，记录实际表现。
+- [ ] 重名：再次导入同一本书，提示"已在这里"并保留原书；导入内容不同但同名的书，存为"X (2).epub"并明确提示，原书不变。
+- [ ] "文件"页：根为 Documents，面包屑从主目录开始，在主目录按返回离开"文件"，没有"上一级"。导入页"从电脑传书"写 Files 路径和 Finder 文件共享，不出现 USB、Android 路径或沙盒绝对路径；iPad 上写"我的 iPad"。
+- [ ] 容器路径变化：读一本书并划线后，`xcrun simctl uninstall` 前先把 `<data>` 整体复制出来，重新安装（容器 UUID 会变）、把旧数据复制回新容器后启动：进度、划线、历史、收藏、书架封面都在（迁移见 `frontend/device/sdl/iosstorage.lua`）。或直接用 `simctl install` 覆盖升级，若 UUID 变化同样核对。
+- [ ] 备份（Q33）：数据目录不做备份排除，没有设置 `isExcludedFromBackup`。凭据（书源密码、KOSync）首版以明文随 iCloud/Finder 备份；iCloud 备份由 Apple 加密，Finder 备份是否加密取决于用户在 Finder 里的设置，不能假定。
+
 ## 真机复核
 
 由 owner 在需要体验时执行，建议 B1–B8 完成后首轮、C6 再做完整一轮。模拟器的速度、宿主进程 RSS 与供电状态不能替代真机结果。
@@ -73,6 +87,8 @@
 - [ ] iPhone 17 Pro Max 与 iPad Pro 11 英寸（M5）：重新执行上面的三项性能目标与至少 30 分钟连续阅读。记录温度、内存峰值、异常终止和具体操作。
 - [ ] 后台、锁屏、来电打断、系统真实内存回收、升级安装后，进度与划线不丢；不要用手动强退等同于系统回收，记录实际终止方式。
 - [ ] 真实屏幕亮度、中文输入、系统文件选择器、分享、Files/Finder 文件共享与 iCloud 未下载文件。
+- [ ] Finder 文件共享（B3）：Mac 连接设备，在 Finder 的设备窗口"文件"标签里把书拖到 Just Reader 上，书出现在书架；反向从 Just Reader 拖出书也可。Files 的"我的 iPhone/我的 iPad › Just Reader"同样核对。
+- [ ] TestFlight/开发包升级安装后，数据容器路径如有变化，进度、划线、历史、收藏都在（B3 的启动迁移）。
 - [ ] 在可比较的亮度、网络和阅读时长下记录耗电；模拟器不提供电池门禁数值。
 - [ ] VoiceOver 实际朗读与操作五个核心流程；外接键盘按最终支持范围验收。
 - [ ] KOPT 重排：用真实的扫描书和文字 PDF 重做上面的 C5 项。确认真机上 `ffi.load("pthread")` 能解析（翻页模式后台预重排生效，日志无报错），记录长页重排位图的内存峰值；#150 合并前后各记一次滚动模式翻页耗时。

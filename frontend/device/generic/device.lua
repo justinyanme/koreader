@@ -125,6 +125,7 @@ local Device = {
     hasColorScreen = no,
     hasBGRFrameBuffer = no,
     canImportFiles = no,
+    hasSandboxedHome = no, -- books come in only as the system's copies (iOS): see apps/shelf/bookimport
     canShareText = no,
     hasGSensor = no,
     isGSensorLocked = no,
