@@ -28,6 +28,7 @@ local function origin(u)
     if not parsed or not parsed.scheme or not parsed.host or parsed.host == "" then return end
     local scheme = parsed.scheme:lower()
     if not default_ports[scheme] then return end
+    if parsed.port == "" then parsed.port = nil end
     local port = parsed.port and tonumber(parsed.port) or default_ports[scheme]
     if parsed.port and not parsed.port:match("^%d+$") then return end
     if not port or port < 1 or port > 65535 then return end
@@ -45,7 +46,8 @@ function OPDSClient.isSameOrigin(left_url, right_url)
 end
 
 local function isHttpsDowngrade(from_url, to_url)
-    return url.parse(from_url).scheme == "https" and url.parse(to_url).scheme == "http"
+    return (url.parse(from_url).scheme or ""):lower() == "https"
+        and (url.parse(to_url).scheme or ""):lower() == "http"
 end
 
 function OPDSClient:new(options)

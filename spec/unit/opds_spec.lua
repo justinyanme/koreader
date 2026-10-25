@@ -444,6 +444,8 @@ describe("OPDS module", function()
             { "https://example.test", "https://example.test:443" },
             { "https://example.test:443", "https://example.test" },
             { "http://example.test", "http://example.test:80" },
+            { "http://example.test:", "http://example.test" },
+            { "http://example.test", "http://example.test:" },
             { "HTTPS://EXAMPLE.TEST", "https://example.test" },
         } do
             it("keeps credentials from " .. origins[1] .. " to " .. origins[2], function()
@@ -493,14 +495,17 @@ describe("OPDS module", function()
             assertNoCredentials(requests[2])
         end)
 
-        it("refuses an HTTPS downgrade without requesting the insecure URL", function()
-            responses = { { 302, { location = "http://example.test/book.epub" } } }
-            local code, headers, status = client:request(request)
-            assert.are.equal(302, code)
-            assert.are.equal("http://example.test/book.epub", headers.location)
-            assert.are.equal("HTTP 302", status)
-            assert.are.equal(1, #requests)
-        end)
+        for _, scheme in ipairs{ "http", "HTTP" } do
+            it("refuses an HTTPS downgrade to " .. scheme .. " without requesting the insecure URL", function()
+                local destination = scheme .. "://example.test/book.epub"
+                responses = { { 302, { location = destination } } }
+                local code, headers, status = client:request(request)
+                assert.are.equal(302, code)
+                assert.are.equal(destination, headers.location)
+                assert.are.equal("HTTP 302", status)
+                assert.are.equal(1, #requests)
+            end)
+        end
 
         it("fails after five requests in a redirect loop", function()
             for _ = 1, 5 do
