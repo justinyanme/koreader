@@ -177,8 +177,9 @@ iOS 的下载走 URLSession，会校验 TLS 证书；luasec 那条路径（墨�
   模拟器须同时执行 `xcrun simctl keychain <UDID> reset`。
 - [ ] 数据目录照常备份，没有备份排除。验收时记录 Finder 的“加密本地备份”设置，
   **Finder 备份是否加密取决于用户设置**，不能假定已加密。
-- [ ] C2 合并前 rebase 到含 B5（#93）的 master，确认 `.old` 净化使用其原子 flush；
-  仓库 spec 和共享 Lua 的 Leaf5 回归由编排者按 Q46 在 TestFlight 前批量执行。
+- [x] C2 已 rebase 到含 B5（#93）与 B4（#92）的 master，`.old` 通过无轮转的原子 flush 净化，
+  启动清理已有 `.old.old`；模拟器已补做陈旧备份与保存失败分支冒烟，见 keychain.md。
+- [ ] 仓库 spec 和共享 Lua 的 Leaf5 回归由编排者按 Q46 在 TestFlight 前批量执行。
 
 ### 每次复核记录模板
 

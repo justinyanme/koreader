@@ -66,6 +66,40 @@ describe("Credential migration through the device bridge", function()
         absent(settings.file .. ".old", { "basic-canary", "id-canary", "secret-canary" })
     end)
 
+    it("scrubs aged plaintext primary and backup files without ever rotating .old into .old.old", function()
+        local fs = require("libs/libkoreader-lfs")
+        local previous = os.time() - 120
+        assert(util.writeToFile(util.readFromFile(settings.file), settings.file .. ".old"))
+        assert(fs.touch(settings.file, previous, previous))
+        assert(fs.touch(settings.file .. ".old", previous, previous))
+        assert.is_true(Store.migrateSettings(settings, "opds"))
+        assert.is_nil(fs.attributes(settings.file .. ".old.old"))
+        absent(settings.file .. ".old", { "basic-canary", "id-canary", "secret-canary" })
+    end)
+
+    it("removes an existing .old.old plaintext residue even after the primary has been migrated", function()
+        local original = util.readFromFile(settings.file)
+        assert.is_true(Store.migrateSettings(settings, "opds"))
+        assert(util.writeToFile(original, settings.file .. ".old.old"))
+        assert.is_true(Store.migrateSettings(settings, "opds"))
+        assert.is_nil(require("libs/libkoreader-lfs").attributes(settings.file .. ".old.old"))
+    end)
+
+    it("passes lifecycle context through backup failures after the primary has committed", function()
+        local rename = os.rename
+        local failed = stub(os, "rename", function(from, to)
+            if from == settings.file .. ".old.tmp" then return nil, "backup unavailable" end
+            return rename(from, to)
+        end)
+        finally(function() failed:revert() end)
+        local context = { complete = true, recordFailure = function(self) self.complete = false end }
+        local ok, __err, primary_committed = Store.migrateSettings(settings, "opds", context)
+        assert.is_nil(ok)
+        assert.is_true(primary_committed)
+        assert.is_false(context.complete)
+        assert.are.equal("basic-canary", Store.source(LuaSettings:open(settings.file):readSetting("servers")[1]).password)
+    end)
+
     it("recovers plaintext in a mixed record even if its previous Keychain reference is missing", function()
         settings.data.servers[1].credential_ref = "missing-old-ref"
         assert.is_true(Store.migrateSettings(settings, "opds"))
@@ -105,6 +139,27 @@ describe("Credential migration through the device bridge", function()
         Store.migrate()
         assert.are.equal(previous, fs.attributes(global.file, "modification"))
         assert.is_nil(fs.attributes(global.file .. ".old"))
+    end)
+
+    it("cleans global backup residues without rewriting an already clean primary", function()
+        local original_settings = G_reader_settings
+        local global = LuaSettings:wrap{ unrelated = "preserved" }
+        global.file = dir .. "/global-clean.lua"
+        assert(global:flush())
+        local residue = 'return {kosync={userkey="legacy-digest"}}'
+        assert(util.writeToFile(residue, global.file .. ".old"))
+        assert(util.writeToFile(residue, global.file .. ".old.old"))
+        local fs = require("libs/libkoreader-lfs")
+        local previous = os.time() - 120
+        assert(fs.touch(global.file, previous, previous))
+        G_reader_settings = global
+        finally(function() G_reader_settings = original_settings end)
+        local paths = stub(require("datastorage"), "getSettingsDir", function() return dir end)
+        finally(function() paths:revert() end)
+        Store.migrate()
+        assert.are.equal(previous, fs.attributes(global.file, "modification"))
+        assert.is_nil(fs.attributes(global.file .. ".old.old"))
+        absent(global.file .. ".old", { "legacy-digest" })
     end)
 
     it("removes newly allocated migration items when the primary cannot commit", function()

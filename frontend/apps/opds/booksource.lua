@@ -82,7 +82,9 @@ end
 function BookSource.save(opds)
     opds.settings:saveSetting("servers", opds.servers)
     if CredentialStore.available() then
-        return CredentialStore.migrateSettings(opds.settings, "opds")
+        local saved, err, primary_committed = CredentialStore.migrateSettings(opds.settings, "opds")
+        opds.updated = not saved or nil
+        return saved, err, primary_committed
     end
     opds.settings:flush()
     opds.updated = nil

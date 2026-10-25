@@ -1983,7 +1983,32 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.are.equal("Committed", savedSources()[1].title)
             assert.are.equal(source.credential_ref, savedSources()[1].credential_ref)
             assert.are.equal("saved-password", BookSource.authorize(source, { url = ROOT }).password)
+            assert.is_true(fm.opds.updated)
             assert.are.equal(_("Could not save or clean up credentials. Please try again."), topWidget().text)
+            failed:revert()
+            fm.opds:onFlushSettings()
+            assert.is_nil(fm.opds.updated)
+        end)
+
+        it("keeps pending OPDS settings and reports lifecycle failure until backup cleanup succeeds", function()
+            local fm = openFM()
+            openSources(fm)
+            fm.opds.updated = true
+            local rename = os.rename
+            local failed = stub(os, "rename", function(from, to)
+                if from == settings_file .. ".old.tmp" then return nil, "backup unavailable" end
+                return rename(from, to)
+            end)
+            finally(function() failed:revert() end)
+            local context = { complete = true, recordFailure = function(self) self.complete = false end }
+            fm.opds:onFlushSettings(false, context)
+            assert.is_true(fm.opds.updated)
+            assert.is_false(context.complete)
+            failed:revert()
+            context.complete = true
+            fm.opds:onFlushSettings(false, context)
+            assert.is_nil(fm.opds.updated)
+            assert.is_true(context.complete)
         end)
     end)
 

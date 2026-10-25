@@ -57,6 +57,14 @@ describe("atomic settings persistence", function()
         assert.are.equal(20, LuaSettings:open(path .. ".old"):readSetting("position"))
     end)
 
+    it("can atomically replace an aged target without rotating a backup", function()
+        local settings = seed()
+        assert(lfs.touch(path, os.time() - 120, os.time() - 120))
+        assert(settings:saveSetting("position", 20):flush(nil, { rotate_backup = false }))
+        assert.are.equal(20, LuaSettings:open(path):readSetting("position"))
+        assert.is_nil(lfs.attributes(path .. ".old"))
+    end)
+
     for _, stage in ipairs{ "open", "write", "flush", "fsync", "close" } do
         it("preserves the target when temporary file " .. stage .. " fails", function()
             local settings = seed()

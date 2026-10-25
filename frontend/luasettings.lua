@@ -254,9 +254,10 @@ function LuaSettings:backup(file)
 end
 
 --- Writes settings to disk.
-function LuaSettings:flush(context)
+-- options.rotate_backup=false replaces recovery copies without retaining .old.old.
+function LuaSettings:flush(context, options)
     if not self.file then return end
-    local ok, err = SettingsWriter.write(dump(self.data, nil, true), self.file)
+    local ok, err = SettingsWriter.write(dump(self.data, nil, true), self.file, options)
     if not ok then
         logger.warn("LuaSettings: failed saving", self.file, err)
         if context then context:recordFailure(err) end

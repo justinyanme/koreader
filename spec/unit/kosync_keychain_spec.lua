@@ -104,6 +104,42 @@ describe("KOSync Keychain account lifecycle", function()
         assert.are.equal(require("ffi/sha2").md5("saved-password"), sync:getUserkey())
     end)
 
+    it("passes lifecycle save context through cleanup and retains pending settings after failure", function()
+        sync.updated = true
+        local rename = os.rename
+        local failed = stub(os, "rename", function(from, to)
+            if from == sync.settings_file .. ".old.tmp" then return nil, "backup unavailable" end
+            return rename(from, to)
+        end)
+        finally(function() failed:revert() end)
+        local context = { complete = true, recordFailure = function(self) self.complete = false end }
+        sync:onFlushSettings(false, context)
+        assert.is_true(sync.updated)
+        assert.is_false(context.complete)
+        failed:revert()
+        context.complete = true
+        sync:onFlushSettings(false, context)
+        assert.is_nil(sync.updated)
+        assert.is_true(context.complete)
+    end)
+
+    it("clears queued progress when logout commits despite a backup cleanup failure", function()
+        sync:doLogin("reader", "password")
+        local queue = require("KOSyncQueue")
+        queue:push{ document = "old-account-document", progress = "12", percentage = 0.4, device = "reader" }
+        finally(function() queue:clear() end)
+        local rename = os.rename
+        local failed = stub(os, "rename", function(from, to)
+            if from == sync.settings_file .. ".old.tmp" then return nil, "backup unavailable" end
+            return rename(from, to)
+        end)
+        finally(function() failed:revert() end)
+        sync:logout()
+        assert.is_nil(sync:getUserkey())
+        assert.are.equal(0, queue:count())
+        assert.is_true(sync.updated)
+    end)
+
     it("does not log an error response containing credentials, even with debug enabled", function()
         local logger = require("logger")
         local logged = {}

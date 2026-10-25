@@ -105,7 +105,7 @@ function KOSync:saveAccount(username, userkey)
             if draft.userkey_ref ~= previous.userkey_ref then CredentialStore.delete(draft.userkey_ref) end
         end
         UIManager:show(InfoMessage:new{ text = _("Could not save or clean up credentials. Please try again.") })
-        return
+        return nil, primary_committed
     end
     self.settings = draft
     CredentialStore.delete(previous.userkey_ref)
@@ -679,7 +679,8 @@ function KOSync:doLogin(username, password, menu)
 end
 
 function KOSync:logout(menu)
-    if not self:saveAccount(self.settings.username, nil) then return end
+    local saved, primary_committed = self:saveAccount(self.settings.username, nil)
+    if not saved and not primary_committed then return end
     self.settings.auto_sync = true
     -- Clear any queued progress for the old account
     local KOSyncQueue = require("KOSyncQueue")

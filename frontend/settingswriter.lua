@@ -18,7 +18,9 @@ function SettingsWriter.backup(path)
     return false
 end
 
-function SettingsWriter.write(data, path)
+-- rotate_backup=false is for replacing a recovery copy itself: rotating that
+-- copy could retain sensitive old data under an otherwise unused .old.old name.
+function SettingsWriter.write(data, path, options)
     if not path then return nil, "no settings path" end
     -- One writer on the Lua main thread; opening truncates a previous interrupted
     -- attempt, which is never considered a settings candidate by either loader.
@@ -38,8 +40,10 @@ function SettingsWriter.write(data, path)
         return nil, err or close_err
     end
 
-    local backed_up
-    backed_up, err = SettingsWriter.backup(path)
+    local backed_up = false
+    if not options or options.rotate_backup ~= false then
+        backed_up, err = SettingsWriter.backup(path)
+    end
     if backed_up == nil then
         os.remove(temporary)
         return nil, err
