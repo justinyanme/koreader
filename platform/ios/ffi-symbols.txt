@@ -1,8 +1,9 @@
 # Static koreader-base symbols the Lua FFI and Lua C module loader need from the app executable
 # (Q35 category 2). make/ios.mk turns each line into a link root and an export; the build fails
 # when the executable doesn't export one of them (platform/ios/scripts/check-symbols.sh).
-# ko_ios_* bridges come from the Swift @c sources, system libraries resolve through dyld, and
-# disabled-capability cdefs (mxcfb, JNI, inotify, sdcv popen, ...) are deliberately not listed.
+# The Swift @c(ko_ios_*) bridges are listed too, since this file is the export list. System
+# libraries resolve through dyld, and disabled-capability cdefs (mxcfb, JNI, inotify, sdcv popen,
+# ...) are deliberately not listed.
 # Maintain it with the iOS module set: add a symbol when enabling Lua code that calls it.
 # turbo's own TLS and hash bindings (SSL_read and friends) are deliberately not listed: they are
 # only used with DUSE_TURBO_LIB=true. Add them before turning that setting on.
@@ -207,11 +208,15 @@ k2pdfopt_optimize_bmp
 k2pdfopt_reflow_bmp
 k2pdfopt_tocr_end
 k2pdfopt_tocr_single_word
+ko_ios_brightness_get
+ko_ios_brightness_set
 ko_ios_download_cancel
 ko_ios_download_poll
 ko_ios_download_start
 ko_ios_files_pick_poll
 ko_ios_files_pick_start
+ko_ios_share_poll
+ko_ios_share_start
 lodepng_decode
 lodepng_decode_file
 lodepng_decode_memory
@@ -353,6 +358,7 @@ SDL_InitSubSystem
 SDL_IsGamepad
 SDL_IsTablet
 SDL_OpenGamepad
+SDL_OpenURL
 SDL_Quit
 SDL_QuitSubSystem
 SDL_RenderClear
