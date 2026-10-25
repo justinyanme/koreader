@@ -14,7 +14,9 @@ Design prototypes: single-file static HTML/CSS/JS (user's choice). Production im
 
 ## Users
 
-Primary and only confirmed user: the owner of this fork, reading on their own e-ink devices — Android-based e-ink readers at 6", 7" and 10.3", plus one Kindle. A tiny Xteink X4 Pro may not be able to run KOReader at all.
+Primary user: the owner of this fork, reading on their own e-ink devices — Android-based e-ink readers at 6", 7" and 10.3", plus one Kindle. A tiny Xteink X4 Pro may not be able to run KOReader at all.
+
+The same owner also reads on an iPhone and iPad. These use the same paged, motionless interface, with point-sized controls and a safe-area viewport.
 
 They read Chinese and English books, mostly non-fiction, mostly EPUB. The job is long-form reading with low friction on a slow, grayscale screen.
 
@@ -30,6 +32,8 @@ KOReader is an offline, open-source reader with deep typesetting control (crengi
 
 ## Operating Context
 
+- iOS 27 or later, full-screen iPhone and iPad in portrait and landscape; split view and multiple windows are deferred. 1dp ≈ 1pt, independent of display pixel density (T0: iPhone 3px/pt, iPad 2px/pt). The safe area holds controls and reading content; the background fills the display. The system status bar is hidden; app chrome and the reading footer show time and battery.
+
 - E-ink panels: 16-level grayscale, slow refresh (partial, full, fast/A2 modes), ghosting after many partial refreshes, no usable animation, touch latency.
 - Device range 6"–10.3", roughly 212–300 DPI. Portrait is primary.
 - Most devices are Android e-ink, where refresh is driven through vendor e-ink hooks in the Android launcher. The Kindle uses the Linux framebuffer path.
@@ -37,6 +41,9 @@ KOReader is an offline, open-source reader with deep typesetting control (crengi
 - UI language: Chinese (inferred from the user; not explicitly confirmed).
 
 ## Capabilities and Constraints
+
+- iOS keeps the e-ink UI grammar and grayscale chrome. Book illustrations, PDF pages and original cover images retain engine color. Night mode inverts the whole screen and does not follow system dark mode.
+- Device capabilities govern available features: iOS has system brightness and no e-ink refresh/ghosting controls, warmth, OTA update or process-fork support. System pickers, keyboard and sharing are native integration paths. The initial iOS scope is recorded in `doc/ios/decisions.md` Q20–Q22.
 
 - The full KOReader feature set exists today: library/file browser, cover browser, history, collections, reflowable and fixed-layout reading, typesetting controls, TOC/bookmarks/book map, highlights and notes with export, dictionary/Wikipedia lookup, vocabulary builder, statistics, gestures, sync (KOSync, calibre, OPDS, cloud), plugins.
 - For personal use, low-frequency features may be demoted or removed from the primary UI.
@@ -48,13 +55,13 @@ KOReader is an offline, open-source reader with deep typesetting control (crengi
 
 - Name: KOReader (personal fork at `justinyanme/koreader`).
 - WeChat Read's (微信读书) e-ink edition is the pinned look and interaction model. The user's words: "跟微信读书一样就行，不一样那就是有问题". Deviating from it counts as a defect unless a KOReader capability has no WeChat Read equivalent.
-- All target panels are monochrome (confirmed). Color never carries meaning in the UI.
+- E-ink remains the primary target. iOS adds color displays; color never carries meaning in interface chrome.
 
 ## Evidence on Hand
 
 - Feature inventory: `frontend/apps/`, `plugins/`, menu structure in `frontend/ui/elements/*_menu_order.lua`.
 - Existing icon set: `resources/icons/mdlight/` (105 SVGs). Bundled fonts: `resources/fonts/`.
-- No user research, device screenshots or usage data exist. Do not fabricate any.
+- iOS layout captures and simulator smoke records: `doc/ios/narrow-screen-survey.md` and `doc/ios/b4-layout.md`. No user research or usage data exist. Do not fabricate any.
 
 ## Product Principles
 
@@ -62,9 +69,12 @@ KOReader is an offline, open-source reader with deep typesetting control (crengi
 2. Fewer taps, fewer refreshes: every interaction is judged by its tap count and the screen area it repaints.
 3. Common in front, power behind: KOReader's depth stays reachable but never sits in the path of daily reading.
 4. Designed for the panel: rely on black/white contrast and structure, not mid-grays, shadows or motion.
-5. One design from 6" to 10.3": layouts scale by proportion and DPI, not by separate designs.
+5. One design from narrow iPhone to 10.3" e-ink and iPad: preserve component proportions and change columns or interaction rules when width requires it.
 
 ## Accessibility & Inclusion
+
+- iOS targets a 44pt minimum touch size. Smaller Tappable and PillButton controls gain invisible hit-area extensions; this extension does not cover Toggle, TickTrack or Segmented controls. R05 supplies five interface font sizes. Initial native keyboard/picker/share UI follows the system; VoiceOver’s five-flow minimum is a later milestone (Q21), not an implemented capability here.
+- At narrow widths, covers keep their reference size in fewer columns; crowded typesetting tracks advance one stop toward a tap rather than requiring precise selection of overlapping stops.
 
 - Large touch targets, because e-ink touch is imprecise and slow to confirm.
 - Type size and contrast stay user-adjustable everywhere text is read.

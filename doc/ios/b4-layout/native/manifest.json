@@ -1,0 +1,1762 @@
+{
+  "date": "2026-10-25",
+  "host": {
+    "model": "Mac16,11",
+    "chip": "Apple M4 Pro",
+    "memory_gb": 64,
+    "macos": "26.6.2 (25G83)"
+  },
+  "xcode": "27.1.0",
+  "runtime": "iOS 27.0 (24A434)",
+  "configuration": "arm64 iphonesimulator Release",
+  "bundle_id": "me.justinyan.justreader",
+  "built_main": "5eaed614c60c768cf06e64656e24a351ce01fb0e",
+  "built_base": "24c2188653aa4efe299498667ffa7c3b0c8b5dba",
+  "rebased_base_same_tree": "0ae4ce65ac815ce7079cbbcf155ad9aae0287c96",
+  "symbol_gate": {
+    "exports": 472,
+    "loose_dynamic_libraries": 0
+  },
+  "gui_rotation": "unaccepted; owner real-device follow-up",
+  "devices": {
+    "iphone": {
+      "udid": "066C38A4-155F-4CB0-9F15-6E05C6486FA6",
+      "name": "92-iPhone 17 Pro Max",
+      "shots": {
+        "shelf": {
+          "state": {
+            "id": 1792923642483,
+            "logical": {
+              "h": 2580,
+              "w": 1320
+            },
+            "physical": {
+              "h": 2868,
+              "w": 1320
+            },
+            "dp44": 132,
+            "viewport": {
+              "h": 2580,
+              "y": 186,
+              "x": 0,
+              "w": 1320
+            },
+            "night": false,
+            "inverse": 0,
+            "action": "shelf",
+            "insets": {
+              "top": 62,
+              "bottom": 34,
+              "right": 0,
+              "left": 0
+            },
+            "dpi": 480,
+            "window": {
+              "height": 956,
+              "width": 440
+            },
+            "ratio": 3
+          },
+          "png": "iphone-shelf.png",
+          "sha256": "c38de1fadc863ae1ae38d29d5187a7c6711fdeb5a004e18457da6e3b37fbd7b5"
+        },
+        "me": {
+          "state": {
+            "id": 1792923606351,
+            "logical": {
+              "h": 2580,
+              "w": 1320
+            },
+            "physical": {
+              "h": 2868,
+              "w": 1320
+            },
+            "dp44": 132,
+            "viewport": {
+              "h": 2580,
+              "y": 186,
+              "x": 0,
+              "w": 1320
+            },
+            "night": false,
+            "inverse": 0,
+            "action": "me",
+            "insets": {
+              "top": 62,
+              "bottom": 34,
+              "right": 0,
+              "left": 0
+            },
+            "dpi": 480,
+            "window": {
+              "height": 956,
+              "width": 440
+            },
+            "ratio": 3
+          },
+          "png": "iphone-me.png",
+          "sha256": "338f7c73a4350639b91c32ad8cb61090d1a759701ac8aaa734b7e5e03f6d6cfb"
+        },
+        "import": {
+          "state": {
+            "id": 1792923609049,
+            "logical": {
+              "h": 2580,
+              "w": 1320
+            },
+            "physical": {
+              "h": 2868,
+              "w": 1320
+            },
+            "dp44": 132,
+            "viewport": {
+              "h": 2580,
+              "y": 186,
+              "x": 0,
+              "w": 1320
+            },
+            "night": false,
+            "inverse": 0,
+            "action": "import",
+            "insets": {
+              "top": 62,
+              "bottom": 34,
+              "right": 0,
+              "left": 0
+            },
+            "dpi": 480,
+            "window": {
+              "height": 956,
+              "width": 440
+            },
+            "ratio": 3
+          },
+          "png": "iphone-import.png",
+          "sha256": "9b63cb2ae2543e8406927450463105f0e0278c1b8ccb5563101c579694d48a9e"
+        },
+        "reader": {
+          "state": {
+            "id": 1792923631883,
+            "logical": {
+              "h": 2580,
+              "w": 1320
+            },
+            "physical": {
+              "h": 2868,
+              "w": 1320
+            },
+            "dp44": 132,
+            "viewport": {
+              "h": 2580,
+              "y": 186,
+              "x": 0,
+              "w": 1320
+            },
+            "night": false,
+            "xpointer": "/body[1]/DocFragment[4]/body[1]/div[1]/div[1]/h3[1]/text()[1].0",
+            "page": 9,
+            "inverse": 0,
+            "action": "reader",
+            "insets": {
+              "top": 62,
+              "bottom": 34,
+              "right": 0,
+              "left": 0
+            },
+            "dpi": 480,
+            "window": {
+              "height": 956,
+              "width": 440
+            },
+            "ratio": 3
+          },
+          "png": "iphone-reader.png",
+          "sha256": "235e0edf660a0b43b397c6d21370cc9b13735c1e5d9bc4ba520b2a95c48cfb3f"
+        },
+        "toolbar": {
+          "state": {
+            "id": 1792923620960,
+            "logical": {
+              "h": 2580,
+              "w": 1320
+            },
+            "physical": {
+              "h": 2868,
+              "w": 1320
+            },
+            "dp44": 132,
+            "viewport": {
+              "h": 2580,
+              "y": 186,
+              "x": 0,
+              "w": 1320
+            },
+            "night": false,
+            "xpointer": "/body[1]/DocFragment[4]/body[1]/div[1]/div[1]/div[1]/div[1]/blockquote[1]/p[1]/text()[11].34",
+            "page": 10,
+            "inverse": 0,
+            "action": "toolbar",
+            "insets": {
+              "top": 62,
+              "bottom": 34,
+              "right": 0,
+              "left": 0
+            },
+            "dpi": 480,
+            "window": {
+              "height": 956,
+              "width": 440
+            },
+            "ratio": 3
+          },
+          "png": "iphone-toolbar.png",
+          "sha256": "10a252864cdcaf0c2606ec3ca3f2f40c977d15d6301817abaa4050dcdfcc59cc"
+        },
+        "typeset": {
+          "state": {
+            "id": 1792923627608,
+            "logical": {
+              "h": 2580,
+              "w": 1320
+            },
+            "physical": {
+              "h": 2868,
+              "w": 1320
+            },
+            "dp44": 132,
+            "viewport": {
+              "h": 2580,
+              "y": 186,
+              "x": 0,
+              "w": 1320
+            },
+            "night": false,
+            "tracks": [
+              {
+                "count": 10,
+                "knob_pt": 33,
+                "position": 4,
+                "pitch_pt": 23.703703703703706
+              },
+              {
+                "count": 7,
+                "knob_pt": 33,
+                "position": 3,
+                "pitch_pt": 35.55555555555556
+              },
+              {
+                "count": 9,
+                "knob_pt": 33,
+                "position": 5,
+                "pitch_pt": 26.25
+              },
+              {
+                "count": 9,
+                "knob_pt": 33,
+                "position": 5,
+                "pitch_pt": 26.25
+              }
+            ],
+            "xpointer": "/body[1]/DocFragment[4]/body[1]/div[1]/div[1]/h3[1]/text()[1].0",
+            "page": 9,
+            "inverse": 0,
+            "action": "typeset",
+            "insets": {
+              "top": 62,
+              "bottom": 34,
+              "right": 0,
+              "left": 0
+            },
+            "dpi": 480,
+            "window": {
+              "height": 956,
+              "width": 440
+            },
+            "ratio": 3
+          },
+          "png": "iphone-typeset.png",
+          "sha256": "cad947514893bebb7e27fb767810b69bc9961845de740c6f9288dbb705c88d1e"
+        },
+        "progress": {
+          "state": {
+            "id": 1792923629849,
+            "logical": {
+              "h": 2580,
+              "w": 1320
+            },
+            "physical": {
+              "h": 2868,
+              "w": 1320
+            },
+            "dp44": 132,
+            "viewport": {
+              "h": 2580,
+              "y": 186,
+              "x": 0,
+              "w": 1320
+            },
+            "night": false,
+            "xpointer": "/body[1]/DocFragment[4]/body[1]/div[1]/div[1]/h3[1]/text()[1].0",
+            "page": 9,
+            "inverse": 0,
+            "action": "progress",
+            "insets": {
+              "top": 62,
+              "bottom": 34,
+              "right": 0,
+              "left": 0
+            },
+            "dpi": 480,
+            "window": {
+              "height": 956,
+              "width": 440
+            },
+            "ratio": 3
+          },
+          "png": "iphone-progress.png",
+          "sha256": "988d8625cfa41f98f1bab52ee623d0c43946e2b345b761af87240c33181b3315"
+        },
+        "toc": {
+          "state": {
+            "id": 1792923634062,
+            "logical": {
+              "h": 2580,
+              "w": 1320
+            },
+            "physical": {
+              "h": 2868,
+              "w": 1320
+            },
+            "dp44": 132,
+            "viewport": {
+              "h": 2580,
+              "y": 186,
+              "x": 0,
+              "w": 1320
+            },
+            "night": false,
+            "xpointer": "/body[1]/DocFragment[4]/body[1]/div[1]/div[1]/h3[1]/text()[1].0",
+            "page": 9,
+            "inverse": 0,
+            "action": "toc",
+            "insets": {
+              "top": 62,
+              "bottom": 34,
+              "right": 0,
+              "left": 0
+            },
+            "dpi": 480,
+            "window": {
+              "height": 956,
+              "width": 440
+            },
+            "ratio": 3
+          },
+          "png": "iphone-toc.png",
+          "sha256": "df933d12d7f4cc1f8b25b410c46fcf9f72e03449e5d51dda9e617084e218b2d7"
+        },
+        "notes": {
+          "state": {
+            "id": 1792923638199,
+            "logical": {
+              "h": 2580,
+              "w": 1320
+            },
+            "physical": {
+              "h": 2868,
+              "w": 1320
+            },
+            "dp44": 132,
+            "viewport": {
+              "h": 2580,
+              "y": 186,
+              "x": 0,
+              "w": 1320
+            },
+            "night": false,
+            "xpointer": "/body[1]/DocFragment[4]/body[1]/div[1]/div[1]/h3[1]/text()[1].0",
+            "page": 9,
+            "inverse": 0,
+            "action": "notes",
+            "insets": {
+              "top": 62,
+              "bottom": 34,
+              "right": 0,
+              "left": 0
+            },
+            "dpi": 480,
+            "window": {
+              "height": 956,
+              "width": 440
+            },
+            "ratio": 3
+          },
+          "png": "iphone-notes.png",
+          "sha256": "4aafb50be9aed1a2a7eecc11241aba1bcc4f06ff2beb5e2d175ab3b1cf87e786"
+        },
+        "sources": {
+          "state": {
+            "id": 1792923644624,
+            "logical": {
+              "h": 2580,
+              "w": 1320
+            },
+            "physical": {
+              "h": 2868,
+              "w": 1320
+            },
+            "dp44": 132,
+            "viewport": {
+              "h": 2580,
+              "y": 186,
+              "x": 0,
+              "w": 1320
+            },
+            "night": false,
+            "inverse": 0,
+            "action": "sources",
+            "insets": {
+              "top": 62,
+              "bottom": 34,
+              "right": 0,
+              "left": 0
+            },
+            "dpi": 480,
+            "window": {
+              "height": 956,
+              "width": 440
+            },
+            "ratio": 3
+          },
+          "png": "iphone-sources.png",
+          "sha256": "e4fcabc3b9a75c442a6f4190dacdf7522470c7e0df8be1d76d63740eddbaf3cd"
+        },
+        "sources-empty": {
+          "state": {
+            "id": 1792923648535,
+            "logical": {
+              "h": 2580,
+              "w": 1320
+            },
+            "physical": {
+              "h": 2868,
+              "w": 1320
+            },
+            "dp44": 132,
+            "viewport": {
+              "h": 2580,
+              "y": 186,
+              "x": 0,
+              "w": 1320
+            },
+            "night": false,
+            "inverse": 0,
+            "action": "sources-empty",
+            "insets": {
+              "top": 62,
+              "bottom": 34,
+              "right": 0,
+              "left": 0
+            },
+            "dpi": 480,
+            "window": {
+              "height": 956,
+              "width": 440
+            },
+            "ratio": 3
+          },
+          "png": "iphone-sources-empty.png",
+          "sha256": "36f45833746d0e5a7eb6c005fbf81d3f133220b1177e5a8a08e015981c929eeb"
+        },
+        "cover": {
+          "state": {
+            "id": 1792923616421,
+            "logical": {
+              "h": 2580,
+              "w": 1320
+            },
+            "physical": {
+              "h": 2868,
+              "w": 1320
+            },
+            "dp44": 132,
+            "viewport": {
+              "h": 2580,
+              "y": 186,
+              "x": 0,
+              "w": 1320
+            },
+            "night": false,
+            "xpointer": "/body[1]/DocFragment[1]/body[1]/div[1]/img[1].0",
+            "page": 1,
+            "inverse": 0,
+            "action": "open",
+            "insets": {
+              "top": 62,
+              "bottom": 34,
+              "right": 0,
+              "left": 0
+            },
+            "dpi": 480,
+            "window": {
+              "height": 956,
+              "width": 440
+            },
+            "ratio": 3
+          },
+          "png": "iphone-cover.png",
+          "sha256": "b24ab368dc318516e4eeaa1877bf748358483f59ad455d27ab8866a9ed2bfe57"
+        },
+        "pdf": {
+          "state": {
+            "id": 1792923561543,
+            "logical": {
+              "h": 2580,
+              "w": 1320
+            },
+            "physical": {
+              "h": 2868,
+              "w": 1320
+            },
+            "dp44": 132,
+            "viewport": {
+              "h": 2580,
+              "y": 186,
+              "x": 0,
+              "w": 1320
+            },
+            "night": false,
+            "page": 1,
+            "inverse": 0,
+            "action": "open",
+            "insets": {
+              "top": 62,
+              "bottom": 34,
+              "right": 0,
+              "left": 0
+            },
+            "dpi": 480,
+            "window": {
+              "height": 956,
+              "width": 440
+            },
+            "ratio": 3
+          },
+          "png": "iphone-pdf.png",
+          "sha256": "72c691697cd2aabc6f002881f7fd84eef25a40d32ae9623e357b69553171f8fc"
+        },
+        "night": {
+          "state": {
+            "id": 1792923565002,
+            "logical": {
+              "h": 2580,
+              "w": 1320
+            },
+            "physical": {
+              "h": 2868,
+              "w": 1320
+            },
+            "dp44": 132,
+            "viewport": {
+              "h": 2580,
+              "y": 186,
+              "x": 0,
+              "w": 1320
+            },
+            "night": true,
+            "page": 1,
+            "inverse": 1,
+            "action": "night",
+            "insets": {
+              "top": 62,
+              "bottom": 34,
+              "right": 0,
+              "left": 0
+            },
+            "dpi": 480,
+            "window": {
+              "height": 956,
+              "width": 440
+            },
+            "ratio": 3
+          },
+          "png": "iphone-night.png",
+          "sha256": "3f535bcec7e4f39694d97815f0eacf3fed133067647f6147f6e9b4bc61edaa6e"
+        },
+        "system-dark": {
+          "state": {
+            "id": 1792923570399,
+            "logical": {
+              "h": 2580,
+              "w": 1320
+            },
+            "physical": {
+              "h": 2868,
+              "w": 1320
+            },
+            "dp44": 132,
+            "viewport": {
+              "h": 2580,
+              "y": 186,
+              "x": 0,
+              "w": 1320
+            },
+            "night": false,
+            "page": 1,
+            "inverse": 0,
+            "action": "system-dark",
+            "insets": {
+              "top": 62,
+              "bottom": 34,
+              "right": 0,
+              "left": 0
+            },
+            "dpi": 480,
+            "window": {
+              "height": 956,
+              "width": 440
+            },
+            "ratio": 3
+          },
+          "png": "iphone-system-dark.png",
+          "sha256": "72c691697cd2aabc6f002881f7fd84eef25a40d32ae9623e357b69553171f8fc"
+        }
+      },
+      "R2_observation": [
+        {
+          "viewport": {
+            "h": 2580,
+            "w": 1320,
+            "x": 0,
+            "y": 186
+          },
+          "tracks": [
+            {
+              "count": 10,
+              "pitch_pt": 23.703703703703706,
+              "knob_pt": 33,
+              "position": 5
+            },
+            {
+              "count": 7,
+              "pitch_pt": 35.55555555555556,
+              "knob_pt": 33,
+              "position": 3
+            },
+            {
+              "count": 9,
+              "pitch_pt": 26.25,
+              "knob_pt": 33,
+              "position": 5
+            },
+            {
+              "count": 9,
+              "pitch_pt": 26.25,
+              "knob_pt": 33,
+              "position": 5
+            }
+          ],
+          "ratio": 3,
+          "window": {
+            "height": 956,
+            "width": 440
+          },
+          "page": 10,
+          "xpointer": "/body[1]/DocFragment[4]/body[1]/div[1]/div[1]/div[1]/div[1]/blockquote[1]/p[1]/text()[11].34",
+          "night": false,
+          "action": "typeset",
+          "dpi": 480,
+          "inverse": 0,
+          "id": 1792923426328,
+          "logical": {
+            "h": 2580,
+            "w": 1320
+          },
+          "physical": {
+            "h": 2868,
+            "w": 1320
+          },
+          "dp44": 132,
+          "insets": {
+            "top": 62,
+            "bottom": 34,
+            "right": 0,
+            "left": 0
+          }
+        },
+        {
+          "viewport": {
+            "h": 2580,
+            "w": 1320,
+            "x": 0,
+            "y": 186
+          },
+          "tracks": [
+            {
+              "count": 10,
+              "pitch_pt": 23.703703703703706,
+              "knob_pt": 33,
+              "position": 6
+            },
+            {
+              "count": 7,
+              "pitch_pt": 35.55555555555556,
+              "knob_pt": 33,
+              "position": 3
+            },
+            {
+              "count": 9,
+              "pitch_pt": 26.25,
+              "knob_pt": 33,
+              "position": 5
+            },
+            {
+              "count": 9,
+              "pitch_pt": 26.25,
+              "knob_pt": 33,
+              "position": 5
+            }
+          ],
+          "ratio": 3,
+          "window": {
+            "height": 956,
+            "width": 440
+          },
+          "page": 11,
+          "xpointer": "/body[1]/DocFragment[4]/body[1]/div[1]/div[1]/div[1]/div[1]/blockquote[1]/p[1]/text()[10].1",
+          "night": false,
+          "action": "track",
+          "dpi": 480,
+          "inverse": 0,
+          "id": 1792923439499,
+          "logical": {
+            "h": 2580,
+            "w": 1320
+          },
+          "physical": {
+            "h": 2868,
+            "w": 1320
+          },
+          "dp44": 132,
+          "insets": {
+            "top": 62,
+            "bottom": 34,
+            "right": 0,
+            "left": 0
+          }
+        }
+      ],
+      "samples_sha256": {
+        "juliet.epub": "80ec2025c7736e1efaa1804965050b0a6ae8a970788fa312ea3dced47208a2e6",
+        "rgb.pdf": "eb9343f60cfb3302c456cd9665621d74eb02de9eb005425cda9fb264bc99a38b"
+      },
+      "pixel_observations": {
+        "sources": {
+          "non_gray_pixels": 0,
+          "margin_samples": [
+            {
+              "xy": [
+                660,
+                20
+              ],
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                660,
+                2848
+              ],
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          ]
+        },
+        "cover": {
+          "non_gray_pixels": 295930,
+          "margin_samples": [
+            {
+              "xy": [
+                660,
+                20
+              ],
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                660,
+                2848
+              ],
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          ]
+        },
+        "pdf": {
+          "non_gray_pixels": 1010672,
+          "margin_samples": [
+            {
+              "xy": [
+                660,
+                20
+              ],
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                660,
+                2848
+              ],
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          ]
+        },
+        "night": {
+          "non_gray_pixels": 1010672,
+          "margin_samples": [
+            {
+              "xy": [
+                660,
+                20
+              ],
+              "rgb": [
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "xy": [
+                660,
+                2848
+              ],
+              "rgb": [
+                0,
+                0,
+                0
+              ]
+            }
+          ]
+        },
+        "system-dark": {
+          "non_gray_pixels": 1010672,
+          "margin_samples": [
+            {
+              "xy": [
+                660,
+                20
+              ],
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                660,
+                2848
+              ],
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "ipad": {
+      "udid": "0C4CD5EF-998F-4205-8846-8D6D0432BEF5",
+      "name": "92-iPad Pro 11 M5",
+      "shots": {
+        "shelf": {
+          "state": {
+            "id": 1792923656792,
+            "logical": {
+              "h": 2380,
+              "w": 1668
+            },
+            "viewport": {
+              "h": 2380,
+              "w": 1668,
+              "x": 0,
+              "y": 0
+            },
+            "night": false,
+            "inverse": 0,
+            "window": {
+              "height": 1210,
+              "width": 834
+            },
+            "ratio": 2,
+            "action": "shelf",
+            "dpi": 320,
+            "physical": {
+              "h": 2420,
+              "w": 1668
+            },
+            "dp44": 88,
+            "insets": {
+              "bottom": 20,
+              "top": 0,
+              "left": 0,
+              "right": 0
+            }
+          },
+          "png": "ipad-shelf.png",
+          "sha256": "6889bac73ac0254cc714b6b935bd367fe6d3a049ecc389beb2908f787c0eda7e"
+        },
+        "me": {
+          "state": {
+            "id": 1792923606400,
+            "logical": {
+              "h": 2380,
+              "w": 1668
+            },
+            "viewport": {
+              "h": 2380,
+              "w": 1668,
+              "x": 0,
+              "y": 0
+            },
+            "night": false,
+            "inverse": 0,
+            "window": {
+              "height": 1210,
+              "width": 834
+            },
+            "ratio": 2,
+            "action": "me",
+            "dpi": 320,
+            "physical": {
+              "h": 2420,
+              "w": 1668
+            },
+            "dp44": 88,
+            "insets": {
+              "bottom": 20,
+              "top": 0,
+              "left": 0,
+              "right": 0
+            }
+          },
+          "png": "ipad-me.png",
+          "sha256": "4f45e30c5e49ceb8e890801a8b2af830535df0d66c3bf8f38f18f49234e2f9a2"
+        },
+        "import": {
+          "state": {
+            "id": 1792923609925,
+            "logical": {
+              "h": 2380,
+              "w": 1668
+            },
+            "viewport": {
+              "h": 2380,
+              "w": 1668,
+              "x": 0,
+              "y": 0
+            },
+            "night": false,
+            "inverse": 0,
+            "window": {
+              "height": 1210,
+              "width": 834
+            },
+            "ratio": 2,
+            "action": "import",
+            "dpi": 320,
+            "physical": {
+              "h": 2420,
+              "w": 1668
+            },
+            "dp44": 88,
+            "insets": {
+              "bottom": 20,
+              "top": 0,
+              "left": 0,
+              "right": 0
+            }
+          },
+          "png": "ipad-import.png",
+          "sha256": "fe95c2c75fe11167e89f68f5cadbc4e799d1b2823d89bddd2b4ab0b45a1c2c98"
+        },
+        "reader": {
+          "state": {
+            "id": 1792923641715,
+            "page": 10,
+            "logical": {
+              "h": 2380,
+              "w": 1668
+            },
+            "viewport": {
+              "h": 2380,
+              "w": 1668,
+              "x": 0,
+              "y": 0
+            },
+            "night": false,
+            "inverse": 0,
+            "window": {
+              "height": 1210,
+              "width": 834
+            },
+            "xpointer": "/body[1]/DocFragment[5]/body[1]/div[1]/div[1]/div[1]/blockquote[26]/p[1]/text()[1].0",
+            "ratio": 2,
+            "action": "reader",
+            "dpi": 320,
+            "physical": {
+              "h": 2420,
+              "w": 1668
+            },
+            "dp44": 88,
+            "insets": {
+              "bottom": 20,
+              "top": 0,
+              "left": 0,
+              "right": 0
+            }
+          },
+          "png": "ipad-reader.png",
+          "sha256": "255f063b6f1be9178d5b6f132f1f4126f6ca78d84925bd3de1917dd1b9561bfb"
+        },
+        "toolbar": {
+          "state": {
+            "id": 1792923626369,
+            "page": 10,
+            "logical": {
+              "h": 2380,
+              "w": 1668
+            },
+            "viewport": {
+              "h": 2380,
+              "w": 1668,
+              "x": 0,
+              "y": 0
+            },
+            "night": false,
+            "inverse": 0,
+            "window": {
+              "height": 1210,
+              "width": 834
+            },
+            "xpointer": "/body[1]/DocFragment[5]/body[1]/div[1]/div[1]/div[1]/blockquote[26]/p[1]/text()[1].0",
+            "ratio": 2,
+            "action": "toolbar",
+            "dpi": 320,
+            "physical": {
+              "h": 2420,
+              "w": 1668
+            },
+            "dp44": 88,
+            "insets": {
+              "bottom": 20,
+              "top": 0,
+              "left": 0,
+              "right": 0
+            }
+          },
+          "png": "ipad-toolbar.png",
+          "sha256": "26931394681a1e17d02160cee34d0c5fbaa87f7ca26e73e16c2ec403adfb9852"
+        },
+        "typeset": {
+          "state": {
+            "id": 1792923635649,
+            "page": 10,
+            "tracks": [
+              {
+                "count": 10,
+                "pitch_pt": 67.44444444444444,
+                "position": 5,
+                "knob_pt": 33
+              },
+              {
+                "count": 7,
+                "pitch_pt": 101.16666666666667,
+                "position": 3,
+                "knob_pt": 33
+              },
+              {
+                "count": 9,
+                "pitch_pt": 75.5,
+                "position": 5,
+                "knob_pt": 33
+              },
+              {
+                "count": 9,
+                "pitch_pt": 75.5,
+                "position": 5,
+                "knob_pt": 33
+              }
+            ],
+            "logical": {
+              "h": 2380,
+              "w": 1668
+            },
+            "viewport": {
+              "h": 2380,
+              "w": 1668,
+              "x": 0,
+              "y": 0
+            },
+            "night": false,
+            "inverse": 0,
+            "window": {
+              "height": 1210,
+              "width": 834
+            },
+            "xpointer": "/body[1]/DocFragment[5]/body[1]/div[1]/div[1]/div[1]/blockquote[26]/p[1]/text()[1].0",
+            "ratio": 2,
+            "action": "typeset",
+            "dpi": 320,
+            "physical": {
+              "h": 2420,
+              "w": 1668
+            },
+            "dp44": 88,
+            "insets": {
+              "bottom": 20,
+              "top": 0,
+              "left": 0,
+              "right": 0
+            }
+          },
+          "png": "ipad-typeset.png",
+          "sha256": "3e1f69d78dc305faa02424399e2772328d08c9587dc0ee865fa8a266e72cccfd"
+        },
+        "progress": {
+          "state": {
+            "id": 1792923638752,
+            "page": 10,
+            "logical": {
+              "h": 2380,
+              "w": 1668
+            },
+            "viewport": {
+              "h": 2380,
+              "w": 1668,
+              "x": 0,
+              "y": 0
+            },
+            "night": false,
+            "inverse": 0,
+            "window": {
+              "height": 1210,
+              "width": 834
+            },
+            "xpointer": "/body[1]/DocFragment[5]/body[1]/div[1]/div[1]/div[1]/blockquote[26]/p[1]/text()[1].0",
+            "ratio": 2,
+            "action": "progress",
+            "dpi": 320,
+            "physical": {
+              "h": 2420,
+              "w": 1668
+            },
+            "dp44": 88,
+            "insets": {
+              "bottom": 20,
+              "top": 0,
+              "left": 0,
+              "right": 0
+            }
+          },
+          "png": "ipad-progress.png",
+          "sha256": "a4fb72f427964154723675125d11e0967c3afd68472eb77652a96ec1862a0981"
+        },
+        "toc": {
+          "state": {
+            "id": 1792923644682,
+            "page": 10,
+            "logical": {
+              "h": 2380,
+              "w": 1668
+            },
+            "viewport": {
+              "h": 2380,
+              "w": 1668,
+              "x": 0,
+              "y": 0
+            },
+            "night": false,
+            "inverse": 0,
+            "window": {
+              "height": 1210,
+              "width": 834
+            },
+            "xpointer": "/body[1]/DocFragment[5]/body[1]/div[1]/div[1]/div[1]/blockquote[26]/p[1]/text()[1].0",
+            "ratio": 2,
+            "action": "toc",
+            "dpi": 320,
+            "physical": {
+              "h": 2420,
+              "w": 1668
+            },
+            "dp44": 88,
+            "insets": {
+              "bottom": 20,
+              "top": 0,
+              "left": 0,
+              "right": 0
+            }
+          },
+          "png": "ipad-toc.png",
+          "sha256": "c8621371983eb5b050feab1ed0ef3e874195f91945db40d7447203baf61cd10b"
+        },
+        "notes": {
+          "state": {
+            "id": 1792923650697,
+            "page": 10,
+            "logical": {
+              "h": 2380,
+              "w": 1668
+            },
+            "viewport": {
+              "h": 2380,
+              "w": 1668,
+              "x": 0,
+              "y": 0
+            },
+            "night": false,
+            "inverse": 0,
+            "window": {
+              "height": 1210,
+              "width": 834
+            },
+            "xpointer": "/body[1]/DocFragment[5]/body[1]/div[1]/div[1]/div[1]/blockquote[26]/p[1]/text()[1].0",
+            "ratio": 2,
+            "action": "notes",
+            "dpi": 320,
+            "physical": {
+              "h": 2420,
+              "w": 1668
+            },
+            "dp44": 88,
+            "insets": {
+              "bottom": 20,
+              "top": 0,
+              "left": 0,
+              "right": 0
+            }
+          },
+          "png": "ipad-notes.png",
+          "sha256": "706662ab5253d8fb555e414f8471bc92707ce6525660366ebd21223edf89f4c8"
+        },
+        "sources": {
+          "state": {
+            "id": 1792923659898,
+            "logical": {
+              "h": 2380,
+              "w": 1668
+            },
+            "viewport": {
+              "h": 2380,
+              "w": 1668,
+              "x": 0,
+              "y": 0
+            },
+            "night": false,
+            "inverse": 0,
+            "window": {
+              "height": 1210,
+              "width": 834
+            },
+            "ratio": 2,
+            "action": "sources",
+            "dpi": 320,
+            "physical": {
+              "h": 2420,
+              "w": 1668
+            },
+            "dp44": 88,
+            "insets": {
+              "bottom": 20,
+              "top": 0,
+              "left": 0,
+              "right": 0
+            }
+          },
+          "png": "ipad-sources.png",
+          "sha256": "5476e373313dbacd36e5d5f2429c42cbc2873b97de2a275b6588bd03d1050e4e"
+        },
+        "sources-empty": {
+          "state": {
+            "id": 1792923666060,
+            "logical": {
+              "h": 2380,
+              "w": 1668
+            },
+            "viewport": {
+              "h": 2380,
+              "w": 1668,
+              "x": 0,
+              "y": 0
+            },
+            "night": false,
+            "inverse": 0,
+            "window": {
+              "height": 1210,
+              "width": 834
+            },
+            "ratio": 2,
+            "action": "sources-empty",
+            "dpi": 320,
+            "physical": {
+              "h": 2420,
+              "w": 1668
+            },
+            "dp44": 88,
+            "insets": {
+              "bottom": 20,
+              "top": 0,
+              "left": 0,
+              "right": 0
+            }
+          },
+          "png": "ipad-sources-empty.png",
+          "sha256": "a088f77ea6248579f76d8b6a43687efd41f360c341b1834980b8790d0acba940"
+        },
+        "cover": {
+          "state": {
+            "id": 1792923619846,
+            "page": 1,
+            "logical": {
+              "h": 2380,
+              "w": 1668
+            },
+            "viewport": {
+              "h": 2380,
+              "w": 1668,
+              "x": 0,
+              "y": 0
+            },
+            "night": false,
+            "inverse": 0,
+            "window": {
+              "height": 1210,
+              "width": 834
+            },
+            "xpointer": "/body[1]/DocFragment[1]/body[1]/div[1]/img[1].0",
+            "ratio": 2,
+            "action": "open",
+            "dpi": 320,
+            "physical": {
+              "h": 2420,
+              "w": 1668
+            },
+            "dp44": 88,
+            "insets": {
+              "bottom": 20,
+              "top": 0,
+              "left": 0,
+              "right": 0
+            }
+          },
+          "png": "ipad-cover.png",
+          "sha256": "c366f432651668b49b0210e16250a9b1b5e3cd281a6a9e0b2a278fa2036f4a93"
+        },
+        "pdf": {
+          "state": {
+            "id": 1792923563623,
+            "page": 1,
+            "logical": {
+              "h": 2380,
+              "w": 1668
+            },
+            "viewport": {
+              "h": 2380,
+              "w": 1668,
+              "x": 0,
+              "y": 0
+            },
+            "night": false,
+            "inverse": 0,
+            "window": {
+              "height": 1210,
+              "width": 834
+            },
+            "ratio": 2,
+            "action": "open",
+            "dpi": 320,
+            "physical": {
+              "h": 2420,
+              "w": 1668
+            },
+            "dp44": 88,
+            "insets": {
+              "bottom": 20,
+              "top": 0,
+              "left": 0,
+              "right": 0
+            }
+          },
+          "png": "ipad-pdf.png",
+          "sha256": "f64fa48980393fc8be429b5f838d5c72869d01e14349f7db7516acbbedafe794"
+        },
+        "night": {
+          "state": {
+            "id": 1792923568555,
+            "page": 1,
+            "logical": {
+              "h": 2380,
+              "w": 1668
+            },
+            "viewport": {
+              "h": 2380,
+              "w": 1668,
+              "x": 0,
+              "y": 0
+            },
+            "night": true,
+            "inverse": 1,
+            "window": {
+              "height": 1210,
+              "width": 834
+            },
+            "ratio": 2,
+            "action": "night",
+            "dpi": 320,
+            "physical": {
+              "h": 2420,
+              "w": 1668
+            },
+            "dp44": 88,
+            "insets": {
+              "bottom": 20,
+              "top": 0,
+              "left": 0,
+              "right": 0
+            }
+          },
+          "png": "ipad-night.png",
+          "sha256": "ddfa9b0397ddc46540344648af956a16590d5499f26402d74495b164afcae673"
+        },
+        "system-dark": {
+          "state": {
+            "id": 1792923575348,
+            "page": 1,
+            "logical": {
+              "h": 2380,
+              "w": 1668
+            },
+            "viewport": {
+              "h": 2380,
+              "w": 1668,
+              "x": 0,
+              "y": 0
+            },
+            "night": false,
+            "inverse": 0,
+            "window": {
+              "height": 1210,
+              "width": 834
+            },
+            "ratio": 2,
+            "action": "system-dark",
+            "dpi": 320,
+            "physical": {
+              "h": 2420,
+              "w": 1668
+            },
+            "dp44": 88,
+            "insets": {
+              "bottom": 20,
+              "top": 0,
+              "left": 0,
+              "right": 0
+            }
+          },
+          "png": "ipad-system-dark.png",
+          "sha256": "f64fa48980393fc8be429b5f838d5c72869d01e14349f7db7516acbbedafe794"
+        }
+      },
+      "R2_observation": [
+        {
+          "action": "typeset",
+          "page": 10,
+          "tracks": [
+            {
+              "knob_pt": 33,
+              "position": 5,
+              "pitch_pt": 67.44444444444444,
+              "count": 10
+            },
+            {
+              "knob_pt": 33,
+              "position": 3,
+              "pitch_pt": 101.16666666666667,
+              "count": 7
+            },
+            {
+              "knob_pt": 33,
+              "position": 5,
+              "pitch_pt": 75.5,
+              "count": 9
+            },
+            {
+              "knob_pt": 33,
+              "position": 5,
+              "pitch_pt": 75.5,
+              "count": 9
+            }
+          ],
+          "id": 1792923432796,
+          "dpi": 320,
+          "physical": {
+            "h": 2420,
+            "w": 1668
+          },
+          "dp44": 88,
+          "ratio": 2,
+          "insets": {
+            "top": 0,
+            "bottom": 20,
+            "right": 0,
+            "left": 0
+          },
+          "night": false,
+          "window": {
+            "height": 1210,
+            "width": 834
+          },
+          "xpointer": "/body[1]/DocFragment[5]/body[1]/div[1]/div[1]/div[1]/blockquote[43]/p[1]/text()[1].0",
+          "viewport": {
+            "x": 0,
+            "y": 0,
+            "h": 2380,
+            "w": 1668
+          },
+          "logical": {
+            "h": 2380,
+            "w": 1668
+          },
+          "inverse": 0
+        },
+        {
+          "action": "track",
+          "page": 13,
+          "tracks": [
+            {
+              "knob_pt": 33,
+              "position": 10,
+              "pitch_pt": 67.44444444444444,
+              "count": 10
+            },
+            {
+              "knob_pt": 33,
+              "position": 3,
+              "pitch_pt": 101.16666666666667,
+              "count": 7
+            },
+            {
+              "knob_pt": 33,
+              "position": 5,
+              "pitch_pt": 75.5,
+              "count": 9
+            },
+            {
+              "knob_pt": 33,
+              "position": 5,
+              "pitch_pt": 75.5,
+              "count": 9
+            }
+          ],
+          "id": 1792923441519,
+          "dpi": 320,
+          "physical": {
+            "h": 2420,
+            "w": 1668
+          },
+          "dp44": 88,
+          "ratio": 2,
+          "insets": {
+            "top": 0,
+            "bottom": 20,
+            "right": 0,
+            "left": 0
+          },
+          "night": false,
+          "window": {
+            "height": 1210,
+            "width": 834
+          },
+          "xpointer": "/body[1]/DocFragment[5]/body[1]/div[1]/div[1]/div[1]/blockquote[41]/p[1]/text()[1].43",
+          "viewport": {
+            "x": 0,
+            "y": 0,
+            "h": 2380,
+            "w": 1668
+          },
+          "logical": {
+            "h": 2380,
+            "w": 1668
+          },
+          "inverse": 0
+        }
+      ],
+      "samples_sha256": {
+        "juliet.epub": "80ec2025c7736e1efaa1804965050b0a6ae8a970788fa312ea3dced47208a2e6",
+        "rgb.pdf": "eb9343f60cfb3302c456cd9665621d74eb02de9eb005425cda9fb264bc99a38b"
+      },
+      "pixel_observations": {
+        "sources": {
+          "non_gray_pixels": 0,
+          "margin_samples": [
+            {
+              "xy": [
+                834,
+                20
+              ],
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                834,
+                2400
+              ],
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          ]
+        },
+        "cover": {
+          "non_gray_pixels": 295930,
+          "margin_samples": [
+            {
+              "xy": [
+                834,
+                20
+              ],
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                834,
+                2400
+              ],
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          ]
+        },
+        "pdf": {
+          "non_gray_pixels": 1670956,
+          "margin_samples": [
+            {
+              "xy": [
+                834,
+                20
+              ],
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                834,
+                2400
+              ],
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          ]
+        },
+        "night": {
+          "non_gray_pixels": 1670956,
+          "margin_samples": [
+            {
+              "xy": [
+                834,
+                20
+              ],
+              "rgb": [
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "xy": [
+                834,
+                2400
+              ],
+              "rgb": [
+                0,
+                0,
+                0
+              ]
+            }
+          ]
+        },
+        "system-dark": {
+          "non_gray_pixels": 1670956,
+          "margin_samples": [
+            {
+              "xy": [
+                834,
+                20
+              ],
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                834,
+                2400
+              ],
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  "R2_observation_built_main": "fd7a338cf6425c9851ecff0cb3ce85b16572dd53"
+}

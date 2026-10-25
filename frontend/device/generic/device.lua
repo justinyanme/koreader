@@ -171,6 +171,9 @@ local Device = {
 
     -- some devices have part of their screen covered by the bezel
     viewport = nil,
+    -- Minimum touch target in dp, independent of the drawn control size.
+    -- Zero preserves the existing targets on devices without this requirement.
+    minimum_touch_size = 0,
     -- enforce portrait orientation of display when FB defaults to landscape
     isAlwaysPortrait = no,
     -- On some devices (eg newer pocketbook) we can force HW rotation on the fly (before each update)
@@ -309,12 +312,10 @@ function Device:init()
     if self.viewport then
         logger.dbg("setting a viewport:", self.viewport)
         self.screen:setViewport(self.viewport)
-        if self.viewport.x ~= 0 or self.viewport.y ~= 0 then
-            self.input:registerEventAdjustHook(
-                self.input.adjustTouchTranslate,
-                {x = 0 - self.viewport.x, y = 0 - self.viewport.y}
-            )
-        end
+        -- Keep the same table for dynamic viewports (including an initially
+        -- zero offset). Updating it must not register another translation hook.
+        self.viewport_touch_offset = { x = -self.viewport.x, y = -self.viewport.y }
+        self.input:registerEventAdjustHook(self.input.adjustTouchTranslate, self.viewport_touch_offset)
     end
 
     -- Handle button mappings shenanigans

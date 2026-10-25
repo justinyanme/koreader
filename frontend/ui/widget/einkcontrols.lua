@@ -24,7 +24,8 @@ local Palette = require("ui/palette")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
-local Screen = require("device").screen
+local Device = require("device")
+local Screen = Device.screen
 local _ = require("gettext")
 
 local function tapEvents(dimen)
@@ -93,6 +94,15 @@ function PillButton:init()
         },
     }
     self.ges_events = tapEvents(self.dimen)
+    if Device.minimum_touch_size > 0 then
+        self.ges_events.TapSelect[1].range = function()
+            local d = self.dimen
+            local minimum = Screen:scaleBySize(Device.minimum_touch_size)
+            local dx, dy = math.max(0, minimum - d.w), math.max(0, minimum - d.h)
+            return Geom:new{ x = d.x - math.floor(dx / 2), y = d.y - math.floor(dy / 2),
+                w = d.w + dx, h = d.h + dy }
+        end
+    end
 end
 
 function PillButton:onTapSelect()
@@ -332,6 +342,13 @@ function Track:onTapPlus() return self:step(1) end
 
 function Track:onTapTrack(_, ges)
     local tx = ges.pos.x - self.dimen.x
+    -- B0 R2: crowded stops are not individually tappable. Keep all drawing
+    -- dimensions and step once toward the tap, just as the adjacent +/- does.
+    if self.count > 1 and (self.pill_w - 2 * self.inset) / (self.count - 1) < self.pill_h then
+        local knob_x = self:stopX(math.max(1, math.min(self.count, self.position)))
+        if tx ~= knob_x then return self:step(tx < knob_x and -1 or 1) end
+        return true
+    end
     local best, best_d
     for i = 1, self.count do
         local dist = math.abs(tx - self:stopX(i))
