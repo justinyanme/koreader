@@ -191,7 +191,7 @@ describe("SDL device selection (seam C)", function()
             stub(io, "open", function(path, ...)
                 local catalog = path:match("^l10n/(.-)/koreader%.mo$")
                 if catalog then
-                    if ({ zh_CN = true, zh_TW = true, de = true, en_GB = true,
+                    if ({ zh_CN = true, zh_TW = true, de = true, en_GB = true, ar = true, he = true,
                         pt_BR = true, pt_PT = true, ko_KR = true, it_IT = true })[catalog] then
                         return { close = function() end }
                     end
@@ -213,6 +213,7 @@ describe("SDL device selection (seam C)", function()
                 { "de", "DE", "de" }, { "pt", "BR", "pt_BR" }, { "pt", nil, "pt_PT" },
                 { "ko", "KR", "ko_KR" }, { "it", nil, "it_IT" }, { "en", "GB", "en_GB" },
                 { "en", "US", "C" },
+                { "ar", "SA", "ar" }, { "he", "IL", "he" },
             } do
                 preferred = { { case[1], case[2] } }
                 assert.are.equal(case[3], Locale.resolveLanguage(nil), case[1])
