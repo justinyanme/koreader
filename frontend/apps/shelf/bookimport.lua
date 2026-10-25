@@ -29,6 +29,12 @@ local function notDownloaded()
     return _("It isn't downloaded to this device. Download it in the Files app, then try again.")
 end
 
+-- Whether `path` is inside the folder `dir`, and its resolved path.
+local function inside(path, dir)
+    local real, real_dir = ffiUtil.realpath(path), ffiUtil.realpath(dir) or dir
+    return real ~= nil and real:sub(1, #real_dir + 1) == real_dir .. "/", real
+end
+
 local function sameBook(a, b)
     return lfs.attributes(a, "size") == lfs.attributes(b, "size") and util.partialMD5(a) == util.partialMD5(b)
 end
@@ -75,7 +81,8 @@ function BookImport.receive(src, home)
         return fail(notDownloaded())
     end
     if not DocumentRegistry:hasProvider(src) then
-        os.remove(src)
+        -- the system's copies only: Documents/Inbox shows in Files, and what someone put there stays
+        if not inside(src, home) then os.remove(src) end
         return fail(_("This type of file can't be opened."))
     end
     local dest = home .. "/" .. name
@@ -187,7 +194,13 @@ function BookImport.pick(folder)
         elseif snapshot.state == "picked" then
             local results = {}
             for __, path in ipairs(snapshot.paths or {}) do
-                table.insert(results, BookImport.receive(path, folder))
+                local dest = BookImport.moved[path]
+                if dest and not lfs.attributes(path, "mode") then
+                    -- swept in already (Resume, as the picker closed)
+                    table.insert(results, { name = ffiUtil.basename(path), status = "imported", dest = dest })
+                else
+                    table.insert(results, BookImport.receive(path, folder))
+                end
             end
             for name, reason in pairs(snapshot.errors or {}) do
                 table.insert(results, { name = name, status = "failed",
@@ -204,8 +217,8 @@ end
 --- "Open with" (SDL's drop event): the system's copy goes into `home`, and the book opens.
 function BookImport.open(src, home)
     local dest, notice
-    local real, real_home = ffiUtil.realpath(src), ffiUtil.realpath(home) or home
-    if real and real:sub(1, #real_home + 1) == real_home .. "/" and not real:find("/Inbox/", #real_home, true) then
+    local in_home, real = inside(src, home)
+    if in_home and not real:find("/Inbox/", 1, true) then
         -- one of the app's own books: the system hands those over as they are, not as a copy
         dest = real
     elseif lfs.attributes(src, "mode") ~= "file" and not src:match("%.icloud$") then

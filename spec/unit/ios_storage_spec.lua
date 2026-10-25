@@ -245,13 +245,28 @@ describe("iOS storage and imports", function()
             assert.are.equal("/var/mobile/B/Documents", settings:readSetting("lastdir"))
         end)
 
+        it("keeps the old container recorded while anything failed to move, so the next start tries again", function()
+            local old, new, data, settings = install()
+            local rename = os.rename
+            stub(os, "rename", function() return nil, "Operation not permitted" end)
+            local ok, err = pcall(IosStorage.setup, settings, new, data)
+            os.rename:revert()
+            assert(ok, err)
+            assert.are.same({ old }, settingsIn(data):readSetting("ios_container_roots"))
+            assert.is_true(exists(data .. "/docsettings" .. old .. "/Documents/sub/juliet.sdr/metadata.epub.lua"))
+            assert.are.equal(rename, os.rename)
+            IosStorage.setup(settings, new, data) -- the next start
+            assertMoved(old, new, data, settings)
+            assert.are.same(IosStorage.roots(new), settingsIn(data):readSetting("ios_container_roots"))
+        end)
+
         it("does nothing on the first start, or when the container stayed", function()
             local container = fresh("container")
             local settings = settingsIn(container)
             stub(IosStorage, "migrate")
             IosStorage.setup(settings, container, container .. "/data")
             IosStorage.setup(settings, container, container .. "/data")
-            assert.stub(IosStorage.migrate).was.called(1) -- the second start, with nothing to move
+            assert.stub(IosStorage.migrate).was_not_called()
             IosStorage.migrate:revert()
         end)
     end)
@@ -299,6 +314,13 @@ describe("iOS storage and imports", function()
             assert.are.equal(_("This type of file can't be opened."), result.reason)
             assert.is_false(exists(src))
             assert.is_false(exists(home .. "/notes.xyz"))
+        end)
+
+        it("leaves what someone put in Documents/Inbox when it can't be opened, and says so", function()
+            local mine = write(home .. "/Inbox/notes.xyz", "x")
+            local results = BookImport.sweep({ home .. "/Inbox" }, home)
+            assert.are.equal("failed", results[1].status)
+            assert.is_true(exists(mine))
         end)
 
         it("says when a cloud file isn't on the device", function()
@@ -366,7 +388,8 @@ describe("iOS storage and imports", function()
             local bridge = FakeBridge.new{ picks = picks }
             rawset(Device, "bridge", bridge)
             BookImport.pick(home)
-            UIManager:_checkTasks()
+            -- each poll schedules the next after the pass's clock: run them until none is left
+            repeat UIManager:_checkTasks() until not UIManager._task_queue[1]
             return bridge
         end
 
@@ -386,6 +409,14 @@ describe("iOS storage and imports", function()
             assert.is_truthy(shown[1].text:find(T(_("Could not import %1: %2"), "far.epub",
                 "The file couldn't be downloaded."), 1, true))
             assert.are.same({ state = "idle" }, bridge.pickFilesPoll())
+        end)
+
+        it("counts a picked copy swept in already (Resume as the picker closed) as imported", function()
+            local picked = book(inbox .. "/juliet.epub")
+            BookImport.sweep({ inbox }, home)
+            pickWith{ { { state = "picked", paths = { picked } } } }
+            assert.are.equal(T(N_("Imported 1 book", "Imported %1 books", 1), 1), shown[1].text)
+            assert.are.same({ "BooksImported" }, broadcast)
         end)
 
         it("does nothing when cancelled, and says why when the picker fails", function()

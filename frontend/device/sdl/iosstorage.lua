@@ -79,35 +79,44 @@ local function rebase(value, moves)
 end
 
 -- Moves the tree `src` to `dst`; where `dst` exists already (an earlier, interrupted run), only what it lacks:
--- a file in both is the one the app went on using at the new path.
+-- a file in both is the one the app went on using at the new path. Returns whether all of it moved.
 local function moveTree(src, dst)
     local mode = lfs.attributes(src, "mode")
-    if not mode then return end
+    if not mode then return true end
     if not lfs.attributes(dst, "mode") then
         util.makePath(ffiUtil.dirname(dst))
         local ok, err = os.rename(src, dst)
         if not ok then logger.warn("IosStorage: could not move", src, err) end
+        return ok == true
     elseif mode == "directory" then
         local names = {}
         for name in lfs.dir(src) do
             if name ~= "." and name ~= ".." then table.insert(names, name) end
         end
+        local all = true
         for __, name in ipairs(names) do
-            moveTree(src .. "/" .. name, dst .. "/" .. name)
+            all = moveTree(src .. "/" .. name, dst .. "/" .. name) and all
         end
         lfs.rmdir(src)
-    else
-        os.remove(src)
+        return all
     end
+    os.remove(src)
+    return true
 end
 
+-- Returns false only when the file had paths to move and could not be written.
 local function rebaseFile(path, moves)
     local ok, data = pcall(dofile, path)
-    if not ok or type(data) ~= "table" then return end
+    if not ok or type(data) ~= "table" then return true end
     local _, changed = rebase(data, moves)
     if changed then
-        util.writeToFile(dump(data, nil, true), path, true, true)
+        local written, err = util.writeToFile(dump(data, nil, true), path, true, true)
+        if not written then
+            logger.warn("IosStorage: could not update", path, err)
+            return false
+        end
     end
+    return true
 end
 
 local function rebaseCoverCache(db_path, moves)
@@ -127,7 +136,8 @@ local function rebaseCoverCache(db_path, moves)
 end
 
 --- Moves the paths under `old_roots` to `new_roots` (pairwise, as IosStorage.roots returns them), in `settings`
--- (G_reader_settings, already open) and in the files of `data_dir` (DataStorage's by default).
+-- (G_reader_settings, already open) and in the files of `data_dir` (DataStorage's by default). Returns whether
+-- everything moved (the cover cache aside: it can be rebuilt).
 function IosStorage.migrate(settings, old_roots, new_roots, data_dir)
     data_dir = data_dir or DataStorage:getDataDir()
     local moves = {}
@@ -135,22 +145,24 @@ function IosStorage.migrate(settings, old_roots, new_roots, data_dir)
         local new = new_roots[i] or new_roots[1]
         if old ~= new then table.insert(moves, { old, new }) end
     end
-    if #moves == 0 then return end
+    if #moves == 0 then return true end
     logger.info("IosStorage: the container moved, updating paths", moves)
+    local all = true
     for _, move in ipairs(moves) do
-        moveTree(data_dir .. "/docsettings" .. move[1], data_dir .. "/docsettings" .. move[2])
+        all = moveTree(data_dir .. "/docsettings" .. move[1], data_dir .. "/docsettings" .. move[2]) and all
     end
-    rebaseFile(data_dir .. "/history.lua", moves)
+    all = rebaseFile(data_dir .. "/history.lua", moves) and all
     local settings_dir = data_dir .. "/settings"
     if lfs.attributes(settings_dir, "mode") == "directory" then
         for name in lfs.dir(settings_dir) do
             if name:match("%.lua$") then
-                rebaseFile(settings_dir .. "/" .. name, moves)
+                all = rebaseFile(settings_dir .. "/" .. name, moves) and all
             end
         end
     end
     rebaseCoverCache(settings_dir .. "/bookinfo_cache.sqlite3", moves)
     rebase(settings.data, moves)
+    return all
 end
 
 --- Sets up the layout for the container `container` (HOME) and returns the home folder.
@@ -159,8 +171,12 @@ function IosStorage.setup(settings, container, data_dir)
     local old_roots = settings:readSetting("ios_container_roots")
     -- decided first: migrating rewrites old_roots, which is in the settings, too
     local changed = not util.tableEquals(old_roots or {}, roots)
+    local recorded = roots
     if old_roots and changed then
-        IosStorage.migrate(settings, old_roots, roots, data_dir)
+        local unmoved = util.tableDeepCopy(old_roots)
+        if not IosStorage.migrate(settings, old_roots, roots, data_dir) then
+            recorded = unmoved -- still the old container: the next start tries again
+        end
     end
     local home = container .. "/Documents"
     if lfs.attributes(home, "mode") ~= "directory" then
@@ -175,7 +191,7 @@ function IosStorage.setup(settings, container, data_dir)
         settings:saveSetting("document_metadata_folder", "dir")
     end
     if changed then
-        settings:saveSetting("ios_container_roots", roots)
+        settings:saveSetting("ios_container_roots", recorded)
         settings:flush()
     end
     return home

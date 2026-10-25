@@ -548,6 +548,7 @@ describe("Shelf home, 导入 and 文件", function()
             Device.hasSandboxedHome = function() return true end
             Device.getTransferInstructions = function() return transfer end
             Device.importFile = function(folder) BookImport.pick(folder) end
+            Device.sweepImports = function() return {} end -- ShelfFileManager:init sweeps on a sandboxed device
             BookImport.poll_interval = 0
         end)
 
@@ -589,7 +590,9 @@ describe("Shelf home, 导入 and 文件", function()
             local picked = systemCopy("picked.epub")
             Device.bridge = FakeBridge.new{ picks = { { { state = "pending" }, { state = "picked", paths = { picked } } } } }
             tap(find(page, _("Choose files")).dimen)
-            fastforward_ui_events()
+            -- one UI pass per poll: each poll schedules the next after the pass started
+            fastforward_ui_events() -- pending
+            fastforward_ui_events() -- picked
             assert.are.equal("file", lfs.attributes(home .. "/picked.epub", "mode"))
             assert.is_nil(lfs.attributes(picked, "mode"))
             tap(page.close_button.dimen)

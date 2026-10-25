@@ -12,10 +12,14 @@ private final class FilePicker: NSObject, UIDocumentPickerDelegate {
     private var failures: [(name: String, reason: String)] = []
     private var error = ""
     private var snapshot: UnsafeMutablePointer<CChar>? // the last poll's text, valid until the next poll
+    private weak var picker: UIDocumentPickerViewController?
+    private var shown = Date.distantPast
 
     func start(_ extensions: [String]) -> Int32 {
         guard state != "pending" else { return 1 }
         guard let presenter = Self.topViewController() else { return 2 }
+        // the last picker still on its way out: UIKit would refuse to present over it
+        guard !presenter.isBeingDismissed else { return 1 }
         var types: [UTType] = []
         for ext in extensions {
             // "fb2.zip" is a zip file to the system
@@ -32,6 +36,8 @@ private final class FilePicker: NSObject, UIDocumentPickerDelegate {
         failures = []
         error = ""
         presenter.present(picker, animated: true)
+        self.picker = picker
+        shown = Date()
         return 0
     }
 
@@ -54,6 +60,11 @@ private final class FilePicker: NSObject, UIDocumentPickerDelegate {
     // One line per field: "state\t<state>", "path\t<path>", "fail\t<name>\t<reason>", "error\t<text>".
     // ponytail: a tab or newline inside a file name would split its line; take JSON if that ever shows up.
     func poll() -> UnsafePointer<CChar> {
+        // a picker that went away without telling (or never showed): give up on it after a grace period,
+        // as the share sheet does (B8), or every later tap would be "busy"
+        if state == "pending", picker?.presentingViewController == nil, Date().timeIntervalSince(shown) > 3 {
+            state = "cancelled"
+        }
         var lines = ["state\t\(state)"]
         lines += paths.map { "path\t\($0)" }
         lines += failures.map { "fail\t\($0.name)\t\($0.reason)" }
