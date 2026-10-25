@@ -3,7 +3,7 @@
 对应 #92；依据 decisions Q5/Q6/Q7/Q25/Q39/Q46、ADR-0008、B0 的
 [窄屏清单](narrow-screen-survey.md)，以及 T0 的 point/pixel 表。
 
-## Lua 和文档已完成，原生集成等待 B1
+## 实现与原生接入
 
 - iOS 屏幕实例按完整 framebuffer / SDL window 的宽度取得 pixel/point，
   `scaleBySize`、`scaleByDPI` 均为 `ceil(dp × scale)`；`display_dpi = 160 × scale`
@@ -45,7 +45,7 @@ Lua 源；两者使用同一份现有 macOS Emulator 库、字体和已编译语
 spec。每个尺寸单独进程；每次重建相同绝对路径的 KO_HOME，固定显示时间，避免路径、
 时钟或旧元数据造成无关差异。书源用确定性假 feed，使用真实入口和页面构建；阅读
 使用随测试数据提供的 juliet.epub 副本。现有编译语言目录包含中英混合文案，图片只
-证明这些输入的布局，不替代 B1 后真实 iOS 包、完整中文文案及最大界面字号的冒烟。
+证明这些输入的布局，真实 iOS 包的竖屏冒烟另见下文；最大界面字号仍留给 owner 复核。
 
 每组 11 页：书架、导入、阅读、工具栏、排版、进度、目录、笔记、书源、书源空状态、我。
 原始截图和日志保留在 `/tmp/jr-92-render/captures/{before,after}/<尺寸>/`；
@@ -70,27 +70,89 @@ PNG 文件字节一致比逐像素一致更严格；没有把截图比较称为�
 | --- | --- | --- | --- |
 | ![390 shelf](b4-layout/390x844-shelf.png) | ![390 sources](b4-layout/390x844-sources.png) | ![390 typeset](b4-layout/390x844-typeset.png) | ![820 shelf](b4-layout/820x1180-shelf.png) |
 
-## 验证与待完成项
+## 原生构建与竖屏冒烟
 
-测试已编写、按 Q46 未运行：`ioslayout_spec.lua`（接缝 C，真实设备初始化及
-输入分发配假桥/假窗口，包括已保存的非零逻辑旋转，物理安全区重建后恢复逻辑轴）；
-`narrowscreen_spec.lua`（接缝 B 书架及共享规则）；
-`readertypesetpanel_spec.lua`（接缝 A，横竖屏及 inset 高度变化后同一正文位置）。
-未做 Leaf5 实机验收。Lua 文件仅做 loadfile 语法解析，diff 做空白检查。
+2026-10-25，B1 合并后 rebase 到 `origin/master`（包含 #147），初始化 base 与构建所需
+子模块。base 的后续改动在独立分支 `feat/92-ios-safe-area`：安全区事件转发、完整
+allocation 释放、夜间边缘 texture 更新，以及仅 iOS 生效的首帧 window point 查询。
+像素尺寸事件原来已转发。补丁说明见 [base-fork.md](base-fork.md)。主仓库增加
+`SDL_GetWindowSafeArea` 符号保留、隐藏状态栏与手机横屏的 plist 键，没有写 Swift 桥。
 
-按 implement 技能做了两路只读 code-review（基线 `4f3ff7d1d`）：Standards
-无硬性问题，1 项可选的触控矩形重复代码建议保留现状；Spec 找到 1 项软件旋转后把
-逻辑宽高误作物理宽高的问题，已在 `5ae104e77` 修复并补 spec，原审查者复核通过。
-该复核没有运行测试；B1 后的实际 iOS 验证仍须完成。
+首次完整构建及两次增量构建均成功；后续构建只在锁内执行：
 
-B1 合并并收到通知前，未改 base、platform/ios、Project.swift、kodev、make。
-下列原生事项尚未完成，不能据此声称 #92 已满足全部验收：
+```sh
+export CCACHE_BASEDIR=/Volumes/T5/github/koreader-wt
+lockf -t 7200 /tmp/justreader-ios-build.lock ./kodev build ios
+# 构建结束后释放锁，直接使用 simctl；不在锁内挂 console。
+xcrun simctl install <UDID> <Release-iphonesimulator/JustReader.app>
+xcrun simctl launch --terminate-running-process <UDID> me.justinyan.justreader
+xcrun simctl io <UDID> screenshot <output.png>
+```
 
-1. Rebase 到 master；在 base fork 的独立小 PR 中转发 SAFE_AREA_CHANGED 和
-   PIXEL_SIZE_CHANGED，并修复 resize 时旧 viewport / full_bb 的释放与重建。
-   Lua 的 iOS resize 目前以该 framebuffer 契约为前提；不得单独把本票当作完整原生实现合入。
-2. 按 B1 清单加入 SDL_GetWindowSafeArea 的导出/符号门禁，补隐藏状态栏的 plist 键。
-3. `./kodev build ios`，创建 jr-92 前缀的 iPhone 17 Pro Max、iPad Pro 11 M5
-   iOS 27.0 模拟器，CLI 安装/启动/截图冒烟；需要旋转 GUI 时先申请。
-4. 核对真实包安全区、整屏背景与夜间反色、彩色内容、触控尺寸、旋转位置和两设备
-   全部页面；补实际记录。fork PR 先合，再开/完成主仓库 PR，正文 Closes #92。
+构建为 Xcode 27.1、arm64 `iphonesimulator` Release；门禁通过：472 个符号、无松散
+动态库。最后一包顶层为 `5eaed614c60c768cf06e64656e24a351ce01fb0e`，base 为
+`24c2188653aa4efe299498667ffa7c3b0c8b5dba`；随后 base rebase 到 fork master 的
+`0ae4ce65ac815ce7079cbbcf155ad9aae0287c96`，前后 tree 相同。实际包的 plist
+核对了 `UIStatusBarHidden=true`、`UIViewControllerBasedStatusBarAppearance=false`、
+`UIRequiresFullScreen=true`、手机三个方向及原有 iPad 四个方向。
+
+独立创建的两台 `92-` 模拟器均为 iOS 27.0 `24A434`；宿主为 Apple M4 Pro、64GB、
+macOS 26.6.2 `25G83`。模拟器被统一关机后用 CLI 重新 boot；没有操作 Simulator.app。
+
+| 项目 | 92-iPhone 17 Pro Max | 92-iPad Pro 11 M5 |
+| --- | --- | --- |
+| UDID | `066C38A4-155F-4CB0-9F15-6E05C6486FA6` | `0C4CD5EF-998F-4205-8846-8D6D0432BEF5` |
+| window / framebuffer | 440×956pt / 1320×2868px | 834×1210pt / 1668×2420px |
+| scale / 44dp / synthetic DPI | 3 / 132px / 480 | 2 / 88px / 320 |
+| 安全区 inset（上右下左） | 62 / 0 / 34 / 0pt | 0 / 0 / 20 / 0pt |
+| 内容 viewport | (0,186) 1320×2580px | (0,0) 1668×2380px |
+| R2 字号轨道 | 档距约 23.70pt，点第 10 档从第 5 档只走到第 6 档 | 档距约 67.44pt，同样点按从第 5 档直接到第 10 档 |
+
+用沙盒外临时驱动轮询命令文件，经真实页面入口/事件进入各页并读取屏幕几何；驱动
+只存在于这两台模拟器的用户 patches，不打进包，不加载 spec 或断言。书架使用 14 本
+自建中文 TXT、公开 juliet EPUB 及自建 RGB PDF；书源传输 seam 使用确定性假 feed，
+仍调用真实页面构建。第一次启动现有的“未安装思源宋体”提示关闭后继续，中文 chrome
+使用包内思源黑体；系统中文正文字体的注册/选择属于后续字体集成验收。
+
+两台逐页查看书架、导入、阅读、工具栏、排版、进度、目录、笔记、书源、书源空状态和我：
+默认界面字号下无控件越出安全区或意外截断。字体名长于 chip 时保留原有省略号。
+iPhone 书架/书源均为两列 123dp；iPad 保留原有按英寸阈值的五列及面板比例，没有
+引入第三种布局。44pt 的命中范围由设备能力值与对应 spec 覆盖；CLI 驱动的页面事件
+不替代真人触摸体验验收。
+
+彩色 EPUB 封面、RGB PDF 都保留颜色；无封面的书源页面全部像素为灰度。夜间模式
+打开后，两台屏幕上下边缘采样均为 RGB(0,0,0)，关闭为 RGB(255,255,255)，没有
+安全区外白边；PDF 色块也随整屏反色。`simctl ui <UDID> appearance dark` 后 App
+仍为日间、inverse=0。覆盖安装最后一包后再次打开 PDF、切换夜间和系统深色外观，
+同样通过冒烟。
+
+[原始几何、R2 状态、样书 SHA、PNG SHA 与像素采样](b4-layout/native/manifest.json)。
+以下截图均来自 `simctl io screenshot`；同目录另存两台的其余逐页 PNG。
+
+| iPhone 书架 | iPhone 排版 | iPhone 书源 | iPad 书架 |
+| --- | --- | --- | --- |
+| ![iPhone shelf](b4-layout/native/iphone-shelf.png) | ![iPhone typeset](b4-layout/native/iphone-typeset.png) | ![iPhone sources](b4-layout/native/iphone-sources.png) | ![iPad shelf](b4-layout/native/ipad-shelf.png) |
+
+| iPhone PDF | iPhone 夜间 | iPad 排版 | iPad PDF |
+| --- | --- | --- | --- |
+| ![iPhone PDF](b4-layout/native/iphone-pdf.png) | ![iPhone night](b4-layout/native/iphone-night.png) | ![iPad typeset](b4-layout/native/ipad-typeset.png) | ![iPad PDF](b4-layout/native/ipad-pdf.png) |
+
+## Spec、审查与未验收项
+
+**测试已编写、按 Q46 未运行**，也没有做 Leaf5 实机验收：
+
+- `ioslayout_spec.lua`：接缝 C，真实设备初始化及输入分发配假桥/假窗口；覆盖倍率、
+  保存的非零软件旋转、旧事件尺寸、resize 和仅安全区变化、触摸偏移及完整底色。
+- `narrowscreen_spec.lua`：接缝 B，390/820 的书架/书源几何、R2 分支及 iOS 命中区域。
+- `readertypesetpanel_spec.lua`：接缝 A，横竖屏及 inset 高度变化后同一正文位置。
+- base 的 `SDL3_spec.lua`、`framebuffer_SDL3_spec.lua`：首帧点/像素、旧窗口设置、
+  桌面原行为、viewport allocation 释放、软件旋转、夜间边缘及 flash shadow。
+
+Lua 文件仅做 loadfile 语法解析，diff 做空白检查。按 implement 技能做了 Standards /
+Spec 两路只读 code-review；发现的软件旋转物理轴及 flash shadow 问题已修复并补
+spec，复核通过。末次复核也确认旧事件尺寸不会再混入当前 renderer 像素。
+
+物理横竖屏切换后回到同一段正文、仅原生安全区变化、真实触控手感、最大界面字号和
+系统键盘遮挡仍**未验收**。owner 指示禁止 builder 操作 Simulator.app，GUI 项移交
+[acceptance.md 的真机复核](acceptance.md#两台设备分别复核)。对应逻辑已有 spec，
+不将“写了 spec”记作运行通过。P1/P6 的后续决定见上表。

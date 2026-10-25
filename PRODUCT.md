@@ -61,7 +61,7 @@ KOReader is an offline, open-source reader with deep typesetting control (crengi
 
 - Feature inventory: `frontend/apps/`, `plugins/`, menu structure in `frontend/ui/elements/*_menu_order.lua`.
 - Existing icon set: `resources/icons/mdlight/` (105 SVGs). Bundled fonts: `resources/fonts/`.
-- No user research, device screenshots or usage data exist. Do not fabricate any.
+- iOS layout captures and simulator smoke records: `doc/ios/narrow-screen-survey.md` and `doc/ios/b4-layout.md`. No user research or usage data exist. Do not fabricate any.
 
 ## Product Principles
 
