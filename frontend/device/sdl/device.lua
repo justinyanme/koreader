@@ -9,6 +9,7 @@ local ffi = require("ffi")
 local logger = require("logger")
 local time = require("ui/time")
 local util = require("util")
+local _ = require("gettext")
 
 -- SDL computes WM_CLASS on X11/Wayland based on process's binary name.
 -- Some desktop environments rely on WM_CLASS to name the app and/or to assign the proper icon.
@@ -53,16 +54,20 @@ local function getLinkOpener()
     return false
 end
 
--- third-party app support
-local external = require("device/thirdparty"):new{
-    dicts = getDesktopDicts(),
-    check = function(self, app)
-        if (isUrl(app) and getLinkOpener()) or isCommand(app) then
-            return true
-        end
-        return false
-    end,
-}
+-- Probe desktop applications only when a device with external lookup support
+-- actually requests them. Loading the iOS variant must never invoke a shell.
+local external
+local function getExternal()
+    if not external then
+        external = require("device/thirdparty"):new{
+            dicts = getDesktopDicts(),
+            check = function(self, app)
+                return (isUrl(app) and getLinkOpener()) or isCommand(app)
+            end,
+        }
+    end
+    return external
+end
 
 local Device = Generic:extend{
     model = "SDL",
@@ -94,8 +99,9 @@ local Device = Generic:extend{
         return runCommand(util.shell_escape{tool, link})
     end,
     canExternalDictLookup = yes,
-    getExternalDictLookupList = function() return external.dicts end,
+    getExternalDictLookupList = function() return getExternal().dicts end,
     doExternalDictLookup = function(self, text, method, callback)
+        local external = getExternal()
         external.when_back_callback = callback
         local ok, app = external:checkMethod("dict", method)
         if app then
@@ -110,7 +116,6 @@ local Device = Generic:extend{
             external.when_back_callback = nil
         end
     end,
-    window = G_reader_settings:readSetting("sdl_window", {}),
 }
 
 function Device:hasKeyboardTextInput()
@@ -137,7 +142,6 @@ function AppImage:otaModel()
 end
 
 local Desktop = Device:extend{
-    model = SDL.getPlatform(),
     isDesktop = yes,
     canRestart = notOSX,
     hasExitOptions = notOSX,
@@ -171,6 +175,35 @@ local UbuntuTouch = Device:extend{
     hasFrontlight = yes,
     isDefaultFullscreen = yes,
 }
+
+local IOS = Device:extend{
+    model = "iOS",
+    isIOS = yes,
+    isDesktop = no,
+    isEmulator = no,
+    hasFrontlight = yes,
+    hasNaturalLight = no,
+    hasKeys = no,
+    hasDPad = no,
+    hasKeyboard = no,
+    hasSymKey = no,
+    useDPadAsActionKeys = no,
+    supportsGamepad = no,
+    hasOTAUpdates = no,
+    canForkProcesses = no,
+    canRestart = no,
+    hasExitOptions = no,
+    isDefaultFullscreen = yes,
+    canOpenLink = no,
+    openLink = no,
+    canExternalDictLookup = no,
+    getExternalDictLookupList = function() return {} end,
+    doExternalDictLookup = function() end,
+}
+
+function IOS:getUpdateInstructions()
+    return _("To update it, install the new build from TestFlight.")
+end
 
 function Device:init()
     -- allows to set a viewport via environment variable
@@ -501,14 +534,33 @@ function Emulator:initNetworkManager(NetworkMgr)
 end
 
 -------------- device probe ------------
-if os.getenv("APPIMAGE") then
-    return AppImage
-elseif os.getenv("FLATPAK") then
-    return Flatpak
-elseif os.getenv("KO_MULTIUSER") then
-    return Desktop
-elseif os.getenv("UBUNTU_APPLICATION_ISOLATION") then
-    return UbuntuTouch
-else
-    return Emulator
+-- Seam C: production and specs use the same selection path. Construction does not
+-- open a window; callers can initialize the returned device with :init().
+function Device:createVariant(options)
+    options = options or {}
+    local platform = options.platform or SDL.getPlatform()
+    local variant
+    if platform == "iOS" then
+        variant = IOS
+    elseif os.getenv("APPIMAGE") then
+        variant = AppImage
+    elseif os.getenv("FLATPAK") then
+        variant = Flatpak
+    elseif os.getenv("KO_MULTIUSER") then
+        variant = Desktop
+    elseif os.getenv("UBUNTU_APPLICATION_ISOLATION") then
+        variant = UbuntuTouch
+    else
+        variant = Emulator
+    end
+    local device = variant:extend{
+        window = G_reader_settings:readSetting("sdl_window", {}),
+    }
+    if variant == Desktop then device.model = platform end
+    if variant == IOS then
+        device.bridge = options.native_bridge or require("device/sdl/iosbridge").new()
+    end
+    return device
 end
+
+return Device:createVariant()

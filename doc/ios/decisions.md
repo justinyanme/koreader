@@ -21,7 +21,7 @@ grilling 记录，2026-10-23 起。依据 [可行性报告](../iOS-feasibility.m
 | Q6 | 界面 chrome 保持黑白灰；书的内容（插图、PDF 页、封面原图）按引擎输出彩色显示，不量化成 16 灰。夜间模式仍是整屏反色，不跟随系统深色模式。 |
 | Q7 | iOS 设备把 dp 标尺设为 1dp≈1pt；iPhone 成为新的"窄屏"等级（约 390dp 宽），按比例规则重算，只为放不下的组件补规则。具体倍率真机验证后定。见 ADR-0008。→ Q42 |
 | Q8 | iOS 作为 `frontend/device/sdl/device.lua` 里与 Desktop、Emulator 并列的变体，由 SDL 平台名选中；能力位初值：`isSDL=yes`、`isDesktop=no`、`isEmulator=no`、`hasEinkScreen=no`、`hasFrontlight=yes`（系统亮度）、`hasNaturalLight=no`、`hasKeys/hasDPad/hasKeyboard=no`、`hasWifiToggle=no`、`hasOTAUpdates=no`、`canRestart/hasExitOptions=no`、`isDefaultFullscreen=yes`、`hasSystemFonts=yes`；新增通用能力位 `isIOS`，默认 `no`。硬规则：改版模块只按能力位分支，`isIOS` 只允许出现在设备层和原生桥。墨水屏零回归是**门禁要验证的目标**（Docker 全量 + Leaf5 验收），不是保证。 |
-| Q9 | 墨水屏专属入口按能力位隐藏、不留占位：`hasEinkScreen=no` 隐藏刷新与残影；`hasNaturalLight=no` 隐藏色温；`hasOTAUpdates=no` 隐藏"我"页版本更新。若现有入口尚未按能力位判断，补判断算 iOS ticket 的一部分，Leaf5 行为不变。 |
+| Q9 | 墨水屏专属入口按能力位隐藏、不留占位：`hasEinkScreen=no` 隐藏刷新与残影；`hasNaturalLight=no` 隐藏色温；`hasOTAUpdates=no` 隐藏"我"页版本更新。若现有入口尚未按能力位判断，补判断算 iOS ticket 的一部分，Leaf5 行为不变。→ Q49 |
 | Q10 | 书在 `Documents`（主目录），设置和笔记数据在 `Library/Application Support`，可重建缓存在 `Library/Caches`；`.sdr` 集中存放（`document_metadata_folder = "dir"`）。导入三条路都做、都是复制进主目录：Files 里露出 `Documents`；导入页"设备文件"换成系统文件选择器；注册文档类型支持"用 KOReader 打开"。不做授权目录原地阅读。→ Q43 |
 | Q11 | 书源进首个可用版本，修正报告的阶段划分；下载的异步实现在阶段 B 解决。 |
 | Q12 | 三处 fork 调用按任务各自替换，不做通用任务框架：书源下载走原生 URLSession 桥（Lua 轮询 start/poll/cancel，短时后台任务只收尾）；封面提取进程内、每 tick 一本；后台重排和缩略图子进程在 iOS 上关闭（能力位门）。原生桥总原则：C ABI 函数 + Lua 轮询，无 FFI callback、无第二个 Lua VM。见 [ADR-0009](../adr/0009-ios-native-bridge-polling-only.md)。 |
@@ -130,3 +130,9 @@ grilling 记录，2026-10-23 起。依据 [可行性报告](../iOS-feasibility.m
 | # | 决定 |
 | --- | --- |
 | Q48 | T0 的"切后台再回来进度和划线不丢"一项，判定对象是 ADR-0009 的保存设计，而不是 hezi 原样移植。hezi 移植没有进后台保存这一层，原样跑必然丢数据，这正是 B5 要补的。T0 照实记录原样移植的失败，然后在仓库外的副本里按 ADR-0009 做最小 B5 原型（续时加事件入队，Lua 同步 flushSettings 和 saveSettings），用同样步骤重跑。生命周期事件能送达 Lua，且原型在两台模拟器上都不丢数据，这一项才判 go；否则判 no-go。其他门禁项不变。 |
+
+## 版本说明更正（Q49，2026-10-25，编排者依 owner 授权裁定）
+
+| # | 决定 |
+| --- | --- |
+| Q49 | 更正 Q9："我"页的"版本更新"自 #64 起只显示当前版本，点开是 About 和安装说明，从不检查或执行 OTA，因此不按 `hasOTAUpdates` 隐藏。Leaf5、Emulator 保持现有版本行和 APK 说明；iOS 同样保留版本行，由设备提供安装说明，显示"更新请在 TestFlight 中安装新版本。"（英文 gettext 原文为 `To update it, install the new build from TestFlight.`）。原版菜单的 OTA 入口仍按 `hasOTAUpdates` 判断。刷新、残影与色温的能力位规则不变。 |

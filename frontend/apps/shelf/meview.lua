@@ -6,7 +6,7 @@ circled icon, a title over a subtitle and a chevron: 全部书笔记, 生词本,
 The name is the nickname set here, else the KOSync user name, else the device model (Me.name()); a tap on it edits
 the nickname, and saving it empty goes back to the others. A tap on the reading time opens the statistics plugin's
 reading progress, as 更多 → 阅读统计 does in the reader; without the plugin the time says so and takes no tap.
-版本更新 shows the version running, and a tap shows KOReader's About with how to update this build: a new APK.
+版本更新 shows the version running, and a tap shows KOReader's About with the device's update instructions.
 It never checks KOReader's updates (OTA), which would install upstream KOReader over this build; the original
 menu keeps its Update entry.
 
@@ -396,13 +396,12 @@ function MeView:homeRows()
     }
 end
 
---- KOReader's About (as in the original menu's Help), and that this build is updated by installing a new APK.
+--- KOReader's About (as in the original menu's Help), and how to update this build.
 function MeView:showVersion()
     UIManager:show(InfoMessage:new{
         text = T(_("KOReader %1\n\nA document viewer for E Ink devices.\n\nLicensed under Affero GPL v3. All dependencies are free software.\n\nhttp://koreader.rocks"),
             BD.ltr(Version:getCurrentRevision()))
-            -- @translators On the Me page, after KOReader's About: this fork is built by its owner and is not updated over the air. Chinese: 本机为自编译的定制版本，更新请安装新的 APK。
-            .. "\n\n" .. _("This is a custom build made for this device. To update it, install a new APK."),
+            .. "\n\n" .. Device:getUpdateInstructions(),
         icon = "koreader",
     })
 end

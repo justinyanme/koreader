@@ -488,6 +488,31 @@ describe("Shelf home, 我 tab", function()
         assert(ok, err)
     end)
 
+    it("keeps the version row on the injected iOS device and describes TestFlight installation", function()
+        local ios = require("device/sdl/device"):createVariant{
+            platform = "iOS", native_bridge = require("iosbridge").new(),
+        }
+        stub(Device, "hasOTAUpdates", ios.hasOTAUpdates)
+        stub(Device, "getUpdateInstructions", ios.getUpdateInstructions)
+        local fm
+        local ok, err = pcall(function()
+            local view
+            fm, view = openMe()
+            local row = shownRows(view)[6]
+            assert.are.equal(C_("Me page", "Version update"), row[1])
+            assert.are.equal(T(_("Current version %1"), Version:getShortVersion()), row[2])
+            tap(row[3].dimen)
+            local info = topWidget()
+            assert.is_truthy(info.text:find(_("To update it, install the new build from TestFlight."), 1, true))
+            assert.is_nil(info.text:find("APK", 1, true))
+            tap(info.dimen)
+        end)
+        Device.hasOTAUpdates:revert()
+        Device.getUpdateInstructions:revert()
+        if fm then fm:onClose() end
+        assert(ok, err)
+    end)
+
     it("counts days in a row up to yesterday while today has none yet, and as far back as they go", function()
         -- the fixture's days: today, 1 and 2 days ago, then 4 and 10 days ago
         Me.now = function() return dayAt(-1, 12) end -- tomorrow: nothing read yet
