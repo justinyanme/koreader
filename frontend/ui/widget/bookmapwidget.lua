@@ -1340,7 +1340,7 @@ function BookMapWidget:onShowBookMapMenu()
                 self:showGestures()
             end,
         }},
-        {{
+        Device:canForkProcesses() and {{
             text = Device:isTouchDevice() and _("Page browser on tap") or _("Page browser on key press"),
             checked_func = function()
                 if self.overview_mode then
@@ -1935,7 +1935,9 @@ function BookMapWidget:onTap(arg, ges)
         page = row:getPageAtX(x, true)
     end
     if page then
-        if (self.overview_mode and G_reader_settings:isFalse("book_map_overview_tap_to_page_browser")) or (not self.overview_mode and G_reader_settings:isFalse("book_map_tap_to_page_browser")) then
+        if not Device:canForkProcesses()
+                or (self.overview_mode and G_reader_settings:isFalse("book_map_overview_tap_to_page_browser"))
+                or (not self.overview_mode and G_reader_settings:isFalse("book_map_tap_to_page_browser")) then
             self:onClose(true)
             self.ui.link:addCurrentLocationToStack()
             self.ui:handleEvent(Event:new("GotoPage", page))
@@ -1978,7 +1980,7 @@ function BookMapWidget:onGoToFocusedPage()
         else
             should_go_to_page_browser = G_reader_settings:isFalse("book_map_tap_to_page_browser")
         end
-        if should_go_to_page_browser then
+        if Device:canForkProcesses() and should_go_to_page_browser then
             local PageBrowserWidget = require("ui/widget/pagebrowserwidget")
             UIManager:show(PageBrowserWidget:new{
                 launcher = self,

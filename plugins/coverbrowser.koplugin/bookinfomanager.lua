@@ -420,7 +420,34 @@ function BookInfoManager:getDocProps(filepath)
 end
 
 function BookInfoManager:extractBookInfo(filepath, cover_specs)
-    -- This will be run in a subprocess
+    if Device:canForkProcesses() then
+        return self:_extractBookInfo(filepath, cover_specs)
+    end
+
+    -- Cache configuration is global to crengine. Parsing large non-EPUB books
+    -- can create cache files even without rendering. Isolate each extraction,
+    -- then restore the reader's cache before giving control back to the UI.
+    local CreDocument = require("document/credocument")
+    CreDocument:engineInit()
+    local resources = {}
+    local start = time.now()
+    self.cleanup_needed = true
+    local ok, result = pcall(self._extractBookInfo, self, filepath, cover_specs, resources)
+    if resources.document then
+        local closed, err = pcall(resources.document.close, resources.document)
+        if not closed then logger.warn("BookInfoManager: closing failed extraction:", err) end
+    end
+    local restored, err = pcall(CreDocument.cacheInit)
+    self.cre_cache_overriden = nil
+    logger.info("BookInfoManager: in-process extraction", filepath,
+        "took", time.to_ms(time.since(start)), "ms", "success:", ok and result == true)
+    if not restored then error(err) end
+    if not ok then error(result) end
+    return result
+end
+
+function BookInfoManager:_extractBookInfo(filepath, cover_specs, resources)
+    -- In a subprocess, or inside extractBookInfo's cache restoration guard.
     -- We use a temporary directory for cre cache (that will not affect parent process),
     -- so we don't fill the main cache with books we're not actually reading
     if not self.cre_cache_overriden then
@@ -496,6 +523,7 @@ function BookInfoManager:extractBookInfo(filepath, cover_specs)
     local ReaderUI = require("apps/reader/readerui")
     local provider = ReaderUI:extendProvider(filepath, DocumentRegistry:getProvider(filepath))
     local document = DocumentRegistry:openDocument(filepath, provider)
+    if resources then resources.document = document end
     local loaded = true
     if document then
         local pages
@@ -553,6 +581,7 @@ function BookInfoManager:extractBookInfo(filepath, cover_specs)
             end
         end
         document:close()
+        if resources then resources.document = nil end
     else
         loaded = false
     end
@@ -676,6 +705,11 @@ function BookInfoManager:collectSubprocesses()
 end
 
 function BookInfoManager:terminateBackgroundJobs()
+    if self.in_process_job then
+        UIManager:unschedule(self.in_process_job.action)
+        self.in_process_job = nil
+        UIManager:allowStandby()
+    end
     logger.dbg("terminating", #self.subprocesses_pids, "subprocesses")
     for i=1, #self.subprocesses_pids do
         FFIUtil.terminateSubProcess(self.subprocesses_pids[i])
@@ -683,16 +717,55 @@ function BookInfoManager:terminateBackgroundJobs()
 end
 
 function BookInfoManager:isExtractingInBackground()
-    return #self.subprocesses_pids > 0
+    return self.in_process_job ~= nil or #self.subprocesses_pids > 0
 end
 
-function BookInfoManager:extractInBackground(files)
+-- on_extracted(filepath, success) is used only by the in-process path.
+function BookInfoManager:extractInBackground(files, on_extracted)
     if #files == 0 then
         return
     end
 
     -- Terminate any previous extraction background task that would be still running
     self:terminateBackgroundJobs()
+
+    if not Device:canForkProcesses() then
+        local job = { index = 1 }
+        local arm = true
+        job.action = function()
+            if self.in_process_job ~= job then return end
+            if arm then
+                -- As in ReaderThumbnail, separate nextTick and scheduleIn so
+                -- input gets polled even when painting takes longer than the delay.
+                arm = false
+                UIManager:scheduleIn(0.1, job.action)
+                return
+            end
+            local file = files[job.index]
+            local ok, result = pcall(self.extractBookInfo, self, file.filepath, file.cover_specs)
+            if not ok then
+                logger.warn("BookInfoManager: in-process extraction failed:", file.filepath, result)
+            end
+            job.index = job.index + 1
+            if on_extracted then
+                local notified, err = pcall(on_extracted, file.filepath, ok and result == true)
+                if not notified then logger.warn("BookInfoManager: extraction notification failed:", err) end
+            end
+            -- The completion callback may have cancelled or replaced this job.
+            if self.in_process_job ~= job then return end
+            if job.index > #files then
+                self.in_process_job = nil
+                UIManager:allowStandby()
+            else
+                arm = true
+                UIManager:nextTick(job.action)
+            end
+        end
+        self.in_process_job = job
+        UIManager:preventStandby()
+        UIManager:nextTick(job.action)
+        return true
+    end
 
     -- Close current handle on sqlite, so it's not shared by both processes
     -- (both processes will re-open one when needed)
