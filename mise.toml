@@ -1,0 +1,33 @@
+[tools]
+tuist = "4.155.3"
+ruby = "4.0"
+xcbeautify = "3.2.1"
+
+[env]
+# ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH, MATCH_PASSWORD; see doc/ios/delivery.md.
+_.file = ".env"
+
+[tasks."ios:generate"]
+description = "Generate the Just Reader Xcode workspace without opening Xcode"
+dir = "platform/ios"
+run = "tuist generate --no-open"
+
+[tasks."ios:certs"]
+description = "Install the Just Reader signing (App Store and development) read-only"
+dir = "platform/ios"
+run = "bundle exec fastlane ios certs"
+
+[tasks."ios:refresh_profiles"]
+description = "Create or refresh the two Just Reader profiles in match (after App ID or device changes)"
+dir = "platform/ios"
+run = "bundle exec fastlane ios refresh_profiles"
+
+[tasks."ios:tf"]
+description = "Build the next TestFlight build and send it to the External group"
+dir = "platform/ios"
+run = "bundle exec fastlane ios tf"
+
+[tasks."ios:ota"]
+description = "Build a development IPA and publish it at https://test.justinyan.app/justreader/"
+dir = "platform/ios"
+run = "bundle exec fastlane ios ota"

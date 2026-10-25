@@ -1,0 +1,244 @@
+require "openssl"
+require "shellwords"
+
+# Delivery for Just Reader: TestFlight for iPhone and iPad, and OTA installs at
+# https://test.justinyan.app/justreader/. Adapted from justoodoo; see doc/ios/delivery.md.
+
+IOS_DIR = File.expand_path("..", __dir__)
+APP_IDENTIFIER = "me.justinyan.justreader"
+DISTRIBUTION_CERTIFICATE_ID = "7MB766938Z"
+DEVELOPMENT_CERTIFICATE_ID = "59A4GCYDB5"
+DEVELOPMENT_PROFILE_NAME = "match Development #{APP_IDENTIFIER}"
+APP_STORE_PROFILE_NAME = "match AppStore #{APP_IDENTIFIER}"
+TEAM_ID = "V88UWDRASU"
+SIGNING_KEYCHAIN_NAME = "justreader-signing"
+WORKSPACE = File.join(IOS_DIR, "JustReader.xcworkspace")
+OUTPUT_DIRECTORY = File.join(IOS_DIR, "Build")
+OTA_SLUG = "justreader"
+
+def require_environment!(*names)
+  missing = names.select { |name| ENV[name].to_s.strip.empty? }
+  return if missing.empty?
+
+  UI.user_error!("Missing required environment variables: #{missing.join(', ')}")
+end
+
+def app_store_connect_key
+  lane_context[SharedValues::APP_STORE_CONNECT_API_KEY]
+end
+
+def signing_keychain_password
+  require_environment!("MATCH_PASSWORD")
+  password = ENV["MATCH_KEYCHAIN_PASSWORD"].to_s
+  password.strip.empty? ? ENV.fetch("MATCH_PASSWORD") : password
+end
+
+# iOS refuses an OTA install whose build number is below the installed TestFlight build.
+def next_build_number
+  latest_testflight_build_number(
+    api_key: app_store_connect_key,
+    app_identifier: APP_IDENTIFIER,
+    platform: "ios",
+    initial_build_number: 0
+  ) + 1
+end
+
+def with_signing_keychain_first
+  password = signing_keychain_password
+  original = sh("security list-keychains -d user", log: false).shellsplit
+  # Snapshot before creation: security may add a newly created keychain to
+  # the search list even when create_keychain's add_to_search_list is false.
+  create_keychain(
+    name: SIGNING_KEYCHAIN_NAME,
+    password: password,
+    default_keychain: false,
+    unlock: true,
+    timeout: 0,
+    lock_when_sleeps: false,
+    lock_after_timeout: false,
+    add_to_search_list: false
+  )
+  path = File.expand_path("~/Library/Keychains/#{SIGNING_KEYCHAIN_NAME}-db")
+  ordered = [path] + (original - [path])
+  sh("security list-keychains -d user -s #{ordered.shelljoin}", log: false)
+  yield
+ensure
+  sh("security list-keychains -d user -s #{original.shelljoin}", log: false) if original
+end
+
+def development_code_sign_identity
+  path = ENV.fetch("sigh_#{APP_IDENTIFIER}_development_profile-path")
+  certificate = FastlaneCore::ProvisioningProfile.parse(path).fetch("DeveloperCertificates").first
+  OpenSSL::Digest::SHA1.hexdigest(certificate.string).upcase
+end
+
+def pin_system_rsync!
+  # Xcode's IPA packaging step spawns an `rsync` server through PATH, and a
+  # Homebrew rsync 3.x there rejects the flags /usr/bin/rsync (openrsync)
+  # sends it, failing the export with "Copy failed".
+  shim_dir = File.join(Dir.tmpdir, "justreader-rsync-shim")
+  FileUtils.mkdir_p(shim_dir)
+  shim = File.join(shim_dir, "rsync")
+  FileUtils.ln_sf("/usr/bin/rsync", shim)
+  ENV["PATH"] = "#{shim_dir}#{File::PATH_SEPARATOR}#{ENV['PATH']}"
+end
+
+def generate_project
+  sh("tuist", "generate", "--path", IOS_DIR, "--no-open")
+end
+
+skip_docs
+default_platform(:ios)
+
+platform :ios do
+  before_all do
+    require_environment!("ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_KEY_PATH")
+    key_path = File.expand_path(ENV.fetch("ASC_KEY_PATH"))
+    UI.user_error!("ASC_KEY_PATH does not point to an existing .p8 file: #{key_path}") unless File.exist?(key_path)
+    app_store_connect_api_key(key_id: ENV["ASC_KEY_ID"], issuer_id: ENV["ASC_ISSUER_ID"], key_filepath: key_path)
+  end
+
+  # MARK: Signing
+
+  private_lane :install_app_store_signing do |options|
+    match(
+      type: "appstore",
+      platform: "ios",
+      app_identifier: APP_IDENTIFIER,
+      certificate_id: DISTRIBUTION_CERTIFICATE_ID,
+      team_id: TEAM_ID,
+      api_key: app_store_connect_key,
+      keychain_name: SIGNING_KEYCHAIN_NAME,
+      keychain_password: signing_keychain_password,
+      readonly: options.fetch(:readonly, true)
+    )
+  end
+
+  private_lane :install_development_signing do |options|
+    match(
+      type: "development",
+      platform: "ios",
+      app_identifier: APP_IDENTIFIER,
+      certificate_id: DEVELOPMENT_CERTIFICATE_ID,
+      team_id: TEAM_ID,
+      api_key: app_store_connect_key,
+      keychain_name: SIGNING_KEYCHAIN_NAME,
+      keychain_password: signing_keychain_password,
+      readonly: options.fetch(:readonly, true),
+      force_for_new_devices: !options.fetch(:readonly, true)
+    )
+  end
+
+  desc "Install the App Store and development signing read-only"
+  lane :certs do
+    with_signing_keychain_first do
+      install_app_store_signing(readonly: true)
+      install_development_signing(readonly: true)
+    end
+    # Xcode signs Debug runs from the user search list, which justreader-signing stays off, so the
+    # development identity also goes in the login keychain, unless the search list already has it.
+    match(type: "development", app_identifier: APP_IDENTIFIER, certificate_id: DEVELOPMENT_CERTIFICATE_ID,
+          team_id: TEAM_ID, api_key: app_store_connect_key, readonly: true, skip_provisioning_profiles: true)
+  end
+
+  desc "Create or refresh both Just Reader profiles in match (after App ID or device changes)"
+  lane :refresh_profiles do
+    with_signing_keychain_first do
+      # Fail on a missing shared identity before any portal write.
+      match(type: "appstore", app_identifier: APP_IDENTIFIER, certificate_id: DISTRIBUTION_CERTIFICATE_ID,
+            api_key: app_store_connect_key, readonly: true, skip_provisioning_profiles: true,
+            keychain_name: SIGNING_KEYCHAIN_NAME, keychain_password: signing_keychain_password)
+      match(type: "development", app_identifier: APP_IDENTIFIER, certificate_id: DEVELOPMENT_CERTIFICATE_ID,
+            api_key: app_store_connect_key, readonly: true, skip_provisioning_profiles: true,
+            keychain_name: SIGNING_KEYCHAIN_NAME, keychain_password: signing_keychain_password)
+      install_app_store_signing(readonly: false)
+      install_development_signing(readonly: false)
+    end
+  end
+
+  # MARK: OTA
+
+  desc "Build a development-signed Debug IPA"
+  lane :build_development_ipa do
+    pin_system_rsync!
+    generate_project
+    build_number = next_build_number
+    with_signing_keychain_first do
+      install_development_signing(readonly: true)
+      build_app(
+        workspace: WORKSPACE,
+        scheme: "JustReader",
+        configuration: "Debug",
+        clean: true,
+        sdk: "iphoneos",
+        destination: "generic/platform=iOS",
+        export_method: "development",
+        export_team_id: TEAM_ID,
+        export_options: {
+          signingStyle: "manual",
+          signingCertificate: development_code_sign_identity,
+          provisioningProfiles: { APP_IDENTIFIER => DEVELOPMENT_PROFILE_NAME },
+        },
+        skip_profile_detection: true,
+        output_directory: OUTPUT_DIRECTORY,
+        output_name: "JustReader-development.ipa",
+        archive_path: File.join(OUTPUT_DIRECTORY, "JustReader-development.xcarchive"),
+        derived_data_path: File.join(OUTPUT_DIRECTORY, "DevelopmentDerivedData"),
+        xcargs: "CURRENT_PROJECT_VERSION=#{build_number}",
+        xcodebuild_formatter: "xcbeautify"
+      )
+    end
+  end
+
+  desc "Build and publish the latest OTA install at https://test.justinyan.app/justreader/"
+  lane :ota do
+    ipa_path = build_development_ipa
+    commit = sh("git", "-C", IOS_DIR, "rev-parse", "--short", "HEAD", log: false).strip
+    sh("ssh -o BatchMode=yes -o ConnectTimeout=10 heredev@192.168.31.150 " \
+       "/Users/heredev/Documents/jproj/nginx/ota-publish #{OTA_SLUG} #{commit.shellescape} < #{ipa_path.shellescape}")
+  end
+
+  # MARK: TestFlight
+
+  desc "Build the next TestFlight build and send it to the External group"
+  desc "Option `changelog:` sets What to Test; it defaults to the last commit's subject"
+  lane :tf do |options|
+    changelog = options[:changelog] || sh("git", "-C", IOS_DIR, "log", "-1", "--format=%s", log: false).strip
+    pin_system_rsync!
+    generate_project
+    build_number = next_build_number
+    ipa_path = nil
+    # Sign from the dedicated keychain: the distribution identity also lives in other projects'
+    # keychains on the login search list, which makes codesign fail with errSecInternalComponent.
+    with_signing_keychain_first do
+      install_app_store_signing(readonly: true)
+      ipa_path = build_app(
+        workspace: WORKSPACE,
+        scheme: "JustReader",
+        configuration: "Release",
+        sdk: "iphoneos",
+        destination: "generic/platform=iOS",
+        export_method: "app-store",
+        export_team_id: TEAM_ID,
+        export_options: { signingStyle: "manual", provisioningProfiles: { APP_IDENTIFIER => APP_STORE_PROFILE_NAME } },
+        skip_profile_detection: true,
+        output_directory: OUTPUT_DIRECTORY,
+        output_name: "JustReader.ipa",
+        xcargs: "CURRENT_PROJECT_VERSION=#{build_number}",
+        xcodebuild_formatter: "xcbeautify"
+      )
+    end
+    # The upload waits for processing, then submits for Beta App Review and adds the External group;
+    # testers are invited once Apple approves. Internal gets every build on its own. Test information
+    # and the review contact are set once on the app in App Store Connect.
+    begin
+      upload_to_testflight(api_key: app_store_connect_key, app_identifier: APP_IDENTIFIER, app_platform: "ios",
+                           ipa: ipa_path, distribute_external: true, groups: ["External"], changelog: changelog)
+    rescue => e
+      # Apple reviews one build per version at a time. By now the build is uploaded and in Internal.
+      raise unless e.message.include?("Another build is in review")
+      UI.important("An earlier build is still in Beta App Review, so this one stays in Internal. " \
+                   "Once that review ends, add it to the External group in App Store Connect.")
+    end
+  end
+end

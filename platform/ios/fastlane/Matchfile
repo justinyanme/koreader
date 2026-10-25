@@ -1,0 +1,6 @@
+git_url("git@github.com:justinyanme/jtf-mac-certs.git")
+storage_mode("git")
+type("appstore")
+app_identifier("me.justinyan.justreader")
+platform("ios")
+readonly(true)
