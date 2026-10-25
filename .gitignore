@@ -44,3 +44,14 @@ i18n
 
 # design review screenshots (regenerated)
 .impeccable/review/
+
+# iOS (platform/ios): local secrets, Tuist output, delivery
+.env
+platform/ios/*.xcodeproj/
+platform/ios/*.xcworkspace/
+platform/ios/Derived/
+platform/ios/Build/
+platform/ios/.bundle/
+platform/ios/vendor/bundle/
+platform/ios/fastlane/report.xml
+platform/ios/fastlane/README.md
