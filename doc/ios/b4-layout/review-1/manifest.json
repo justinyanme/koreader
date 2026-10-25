@@ -1,0 +1,72 @@
+{
+  "built_main": "daf13f61802ec05e107d7a5ed922afdc5f3b4d1e",
+  "built_base": "64c1fe253132278571e9d0fb9727aa7fad54b062",
+  "runtime": "iOS 27.0 (24A434)",
+  "build": "Xcode 27.1 arm64 iphonesimulator Release; lockf serialized",
+  "symbol_gate": {
+    "exports": 472,
+    "loose_dynamic_libraries": 0
+  },
+  "observation": "Natural startup only; temporary user patch records counts, no fake bridge, injected events or assertions. Patch removed and own simulators shut down afterward.",
+  "specs": "written; not run per Q46",
+  "devices": {
+    "iphone": {
+      "state": {
+        "viewport": {
+          "x": 0,
+          "y": 186,
+          "h": 2580,
+          "w": 1320
+        },
+        "ratio": 3,
+        "physical": {
+          "h": 2868,
+          "w": 1320
+        },
+        "dp44": 132,
+        "counts": {
+          "notifications": 0,
+          "window_events": 2,
+          "buffer_rebuilds": 0
+        },
+        "needs_full_upload": false,
+        "window": {
+          "height": 956,
+          "width": 440
+        }
+      },
+      "png": "iphone-startup.png",
+      "sha256": "47a44e8e34aa33a199822056f0b714d782eb5e9764af8df7fe206ebbfff029f1",
+      "visual_observation": "Shelf bottom navigation and pager visible inside the safe viewport."
+    },
+    "ipad": {
+      "state": {
+        "dp44": 88,
+        "counts": {
+          "notifications": 0,
+          "window_events": 2,
+          "buffer_rebuilds": 0
+        },
+        "viewport": {
+          "x": 0,
+          "y": 0,
+          "h": 2380,
+          "w": 1668
+        },
+        "needs_full_upload": false,
+        "ratio": 2,
+        "window": {
+          "width": 834,
+          "height": 1210
+        },
+        "physical": {
+          "h": 2420,
+          "w": 1668
+        }
+      },
+      "png": "ipad-startup.png",
+      "sha256": "6889bac73ac0254cc714b6b935bd367fe6d3a049ecc389beb2908f787c0eda7e",
+      "visual_observation": "Shelf bottom navigation and pager visible inside the safe viewport."
+    }
+  }
+}

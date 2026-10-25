@@ -178,3 +178,14 @@ spec，复核通过。末次复核也确认旧事件尺寸不会再混入当前 
 
 本轮 spec 同样按 Q46 只编写、不运行；原有 PNG/SHA 记录仍对应前述构建，不作为
 本轮新增 spec 已通过的证据。
+
+方案 C 的锁内增量构建成功：顶层 `daf13f618`、base `64c1fe253`，Release 符号门禁
+仍为 472、无松散动态库。两台仅用 CLI 重启、安装和启动，首次画面均显示完整底栏。
+临时用户 patch 只观察自然启动事件，没有假桥、注入事件或断言：两台各收到 2 条窗口
+通知，额外 buffer 重建 0 次、重排通知 0 次；首内容帧的完整上传标记已消费。原有倍率
+和安全区保持不变。patch 随后移除，仅本票两台模拟器用 CLI 关机。
+[本轮状态与 PNG SHA](b4-layout/review-1/manifest.json)。
+
+| iPhone 去重后的首次启动 | iPad 去重后的首次启动 |
+| --- | --- |
+| ![iPhone startup](b4-layout/review-1/iphone-startup.png) | ![iPad startup](b4-layout/review-1/ipad-startup.png) |
