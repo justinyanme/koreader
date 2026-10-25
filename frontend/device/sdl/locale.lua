@@ -36,8 +36,7 @@ local function catalogFor(language, country)
     end
 end
 
-function Locale.resolveLanguage(explicit_language)
-    if explicit_language ~= nil then return explicit_language end
+function Locale.resolveLanguage()
     local SDL = ffiUtil.loadSDL3()
     if not SDL then return end
     require("ffi/SDL3_h")

@@ -60,8 +60,8 @@ local _ = require("gettext")
 if lang_locale then
     _.changeLang(lang_locale)
 end
--- Carry the effective system language through to bidi/text shaping setup too.
-lang_locale = lang_locale or _.current_lang
+-- Carry a resolved system language through to bidi/text shaping setup too.
+lang_locale = lang_locale or _.system_lang
 
 -- Try to turn the C blitter on/off, and synchronize setting so that UI config reflects real state
 local bb = require("ffi/blitbuffer")

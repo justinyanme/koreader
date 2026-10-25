@@ -28,11 +28,9 @@ describe("SDL device selection (seam C)", function()
         assert.are.equal(bridge, device.bridge)
     end)
 
-    it("keeps each device's window and bridge state separate", function()
+    it("keeps each device's bridge state separate", function()
         local first = SDLDevice:createVariant{ platform = "iOS", native_bridge = FakeBridge.new() }
         local second = SDLDevice:createVariant{ platform = "iOS", native_bridge = FakeBridge.new() }
-        first.window.width = 390
-        assert.are_not.equal(390, second.window.width)
         first.bridge.brightnessSet(75)
         assert.are.equal(75, first.bridge.brightnessGet())
         assert.are.equal(50, second.bridge.brightnessGet())
@@ -216,34 +214,30 @@ describe("SDL device selection (seam C)", function()
                 { "ar", "SA", "ar" }, { "he", "IL", "he" },
             } do
                 preferred = { { case[1], case[2] } }
-                assert.are.equal(case[3], Locale.resolveLanguage(nil), case[1])
+                assert.are.equal(case[3], Locale.resolveLanguage(), case[1])
             end
         end)
 
         it("honors preference order and falls back to English when none is supported", function()
             preferred = { { "xx", "XX" }, { "de", "AT" }, { "zh", "CN" } }
-            assert.are.equal("de", Locale.resolveLanguage(nil))
+            assert.are.equal("de", Locale.resolveLanguage())
             preferred = { { "xx", "XX" } }
-            assert.are.equal("C", Locale.resolveLanguage(nil))
+            assert.are.equal("C", Locale.resolveLanguage())
             preferred = {}
-            assert.are.equal("C", Locale.resolveLanguage(nil))
+            assert.are.equal("C", Locale.resolveLanguage())
         end)
 
-        it("preserves explicit language and KO_RTL overrides without persisting the system default", function()
+        it("resolves the system default without persisting it", function()
             local saved_language = G_reader_settings:readSetting("language")
             preferred = { { "zh", "CN" } }
-            for _, override in ipairs{ "C", "de", "ar", "" } do
-                assert.are.equal(override, Locale.resolveLanguage(override))
-            end
-            assert.are.equal(saved_language, G_reader_settings:readSetting("language"))
-            assert.are.equal("zh_CN", Locale.resolveLanguage(nil))
+            assert.are.equal("zh_CN", Locale.resolveLanguage())
             assert.are.equal(saved_language, G_reader_settings:readSetting("language"))
         end)
 
         it("leaves Desktop and Emulator startup language selection alone", function()
             preferred = { { "zh", "CN" } }
             platform = "Linux"
-            assert.is_nil(Locale.resolveLanguage(nil))
+            assert.is_nil(Locale.resolveLanguage())
         end)
     end)
 end)

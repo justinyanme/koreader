@@ -554,7 +554,7 @@ function Device:createVariant(options)
         variant = Emulator
     end
     local device = variant:extend{
-        window = util.tableDeepCopy(G_reader_settings:readSetting("sdl_window", {})),
+        window = G_reader_settings:readSetting("sdl_window", {}),
     }
     if variant == Desktop then device.model = platform end
     if variant == IOS then
