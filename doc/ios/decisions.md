@@ -64,7 +64,7 @@ grilling 记录，2026-10-23 起。依据 [可行性报告](../iOS-feasibility.m
 | Q33 | 首版不做任何备份排除：数据目录（含设置、docsettings、笔记）整体随 iCloud/Finder 备份，凭据暂以明文存在备份里。iCloud 备份由 Apple 加密；**Finder 备份是否加密取决于用户设置**，不能假定。稳定版迁入 Keychain 时用 AfterFirstUnlockThisDeviceOnly，恢复到新设备后书源和 KOSync 需重新登录，笔记和进度照常恢复。永远不排除数据目录；若将来排除单个凭据文件，必须同时提供重新登录路径。 |
 | Q34 | 下载桥不自动跟随重定向，把 3xx 和 Location 交给 Lua；复用 `opdsclient` 已有的跳转循环（次数上限、拒绝 https 降级、`auth_headers` 只发同源，每一跳重判）。书源的下载路径必须改为走同一个策略函数，不允许第二套判断。验收：跨域 302 后敏感头不出现在第二个请求里。 |
 | Q35 | 符号核对分四类：`ko_ios_*` 桥符号和 `platform/ios/ffi-symbols.txt` 列出的静态 base 库符号在构建时用 `nm` 核对、缺则失败；系统库符号由 dyld 解析、只在 Debug 启动自检里 `pcall` 解析并记日志；按能力未启用路径的 cdef（mxcfb、Android JNI、inotify、sdcv popen 等）不在清单。清单随 iOS 模块集维护，不自动扫全部 cdef。 |
-| Q36 | 后台保存六条：从 `willResignActive` 开始保存；续时标识无效时照常保存；过期回调立即结束任务并置标志，Lua 先写进度、笔记、设置三样必要项，过期后跳过非必要项；写入原子性依赖 `LuaSettings` 现有的临时文件 + fsync + 改名 + `.old`（`.sdr` 同类；阶段 A 验证在 iOS 上成立）；回前台时检查"保存未完成"标志补做；秒级合并落盘。**秒级落盘是正常可调度时的目标**，不保证崩溃、主循环阻塞或存储失败时只丢几秒；这些情形的验收是"已落盘的数据不损坏、可恢复到上一个完整版本"。 |
+| Q36 | 后台保存六条：从 `willResignActive` 开始保存；续时标识无效时照常保存；过期回调立即结束任务并置标志，Lua 先写进度、笔记、设置三样必要项，过期后跳过非必要项；写入原子性依赖 `LuaSettings` 现有的临时文件 + fsync + 改名 + `.old`（`.sdr` 同类；阶段 A 验证在 iOS 上成立） → Q47；回前台时检查"保存未完成"标志补做；秒级合并落盘。**秒级落盘是正常可调度时的目标**，不保证崩溃、主循环阻塞或存储失败时只丢几秒；这些情形的验收是"已落盘的数据不损坏、可恢复到上一个完整版本"。 |
 | Q37 | ticket 切分：T0 阶段 A 技术验证（仓库外，交付 `doc/ios/phase-a-report.md`）；B0 窄屏离屏采集（Docker，与 T0 并行，只阻塞 B4）；B1 base fork 与构建骨架、符号门禁；B2 iOS 设备变体与能力位隐藏；B3 存储布局与三条导入；B4 dp 标尺、安全区、旋转、窄屏规则并更新 DESIGN/PRODUCT；B5 生命周期保存；B6 下载桥与书源；B7 封面进程内、后台重排与缩略图关闭；B8 亮度、URL、分享、语言、插件清单；C1 查询进程内化；C2 Keychain；C3 VoiceOver 五流程；C4 外接键盘；C5 KOPT（条件触发）；C6 手工验收清单 `doc/ios/acceptance.md` 与性能、内存、耗电记录；C7 Leaf5/Android 回归。阻塞：T0 → B1 → B2 → {B3, B4, B5} → {B6, B7, B8} → C1–C5 → C6 → C7。 |
 | Q38 | 一个父 issue；ticket 一次建好并带 Blocked by，创建时只给 T0 和 B0 打 `ready-for-agent`，T0 报告通过后再逐级打标。 |
 | Q39 | PRODUCT.md 和 DESIGN.md 由 B4 一并修改：Users、Operating Context、Capabilities、Accessibility 各加 iOS 内容；DESIGN 的 Layout 加窄屏 390 和 iPad 约 820 两档并写明 1dp≈1pt，Colors 加内容彩色规则，Refresh mapping 注明 LCD 上无效果但声明保留。design/demo 不改。 |
@@ -118,3 +118,9 @@ grilling 记录，2026-10-23 起。依据 [可行性报告](../iOS-feasibility.m
 | --- | --- |
 | Q45 | 发布通道照搬 justoodoo（`docs/agents/delivery.md`）：fastlane + match（与 justoodoo、Just-ABC 共用证书仓库和证书）+ mise 任务。`ios:tf` 上传 TestFlight，Internal 组自动拿到，同时提交 Beta App Review 进 External 组；`ios:ota` 发布开发签名包到 `https://test.justinyan.app/justreader/`。新增 D0 票：先做一个空壳 App 上 TestFlight，让 Apple 的审核尽早开始。空壳只在 `platform/ios/` 下，不碰 Lua 代码，不等 T0；T0 判 no-go 时整个目录撤掉。B1 在 D0 的工程上扩展。不用 GitHub Actions，确有需要时用本机做 runner。覆盖 Q17 的"不用 TestFlight"和 Q4 里"没过关不合主线"对这个目录的约束。 |
 | Q46 | 每张票照常写 spec，但实现过程中不跑测试（单个 spec 和全量都不跑），也不逐票做 Leaf5 实机验收；每次提交 TestFlight 之前，由编排者批量跑全量并修复。各票验收里"跑 Docker 全量""Leaf5 实机验收"两条按此执行。iOS 构建和模拟器冒烟不算测试，照做。 |
+
+## 更正（Q47，2026-10-25）
+
+| # | 决定 |
+| --- | --- |
+| Q47 | Q36 和 ADR-0009 说"`LuaSettings` 现有写法是临时文件 + fsync + 改名 + `.old`"是错的。T0 核对发现：`LuaSettings:flush` 和 `.sdr` 的写入都是原地 `io.open("wb")` 加 fsync，只有文件超过 60 秒未改时才先改名为 `.old`。B5（#93）因此要把两者改为写临时文件、fsync、改名替换，并保留 `.old`。这是共享代码改动，墨水屏同样受益，按 Q46 统一回归。缺少原子写入本身不判 T0 no-go；T0 用未修改的代码实测时，如果出现数据丢失或文件损坏，仍按规则判 no-go。 |
