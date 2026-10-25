@@ -105,4 +105,10 @@ Release 构建成功，`nm` 门禁 **478/478**，无 loose dylib。原生接线�
 
 除屏幕页码外，还比对加载后的 EPUB xpointer、每条 note/pos0/pos1/page，以及迁移到新路径的 metadata 文件，全部一致。截图已目视检查为第 86 页的正常正文，带笔记标记，无错误对话框。证据保留在忽略目录 `koreader-93-evidence/` 的 `build-ios-b3.log`、`upgrade-b3.log`、`upgrade_b3.py`、`devices-b3.json`、`*-b3-before.lua`、`*-b3-after.lua`、`*-b3-events.tsv`、`*-b3-reading.png`。冒烟后两台应用已终止，一次性 userpatch 已禁用。
 
-本轮全程仅用 simctl CLI；未操作 Simulator.app，未运行任何 spec/测试或 Leaf5 验收。锁屏及其他真机待验收项不变。PR #155 继续等待审查，不合并。
+本轮全程仅用 simctl CLI；未操作 Simulator.app，未运行任何 spec/测试或 Leaf5 验收。锁屏及其他真机待验收项不变。本轮最初继续等待 PR #155 审查；随后审查批准并要求四项小修，记录如下。
+
+## 审查第 1 轮修正及复验
+
+`e5b80725c` 撤销 AutoWarmth 门控、清理 purge 遗留临时文件、将提交后的目录 fsync 失败改为仅记日志，并移除 Swift 的 main.sync。相关 spec 已更新但按 Q46 未运行；四个变更 Lua 文件只做语法编译，未执行模块或测试。
+
+按共享 lockf 重新构建该提交，Release 成功，484/484 符号，无 loose dylib。对两台 93- 模拟器以 `apple-b3-review-93.epub` 再次执行“80/83/86 页各添加一条笔记 → 正常合并保存 → terminate → simctl install 覆盖 → 新容器路径重开”，均恢复第 86 页、3 条，xpointer 与笔记 note/pos0/pos1/page 及迁移后的 metadata 全部匹配。iPhone UUID 从 `5E30FD1E-A476-4642-91FF-E4E49880AA1D` 变为 `09063D10-5201-4DFA-B9C6-0FD213108F6B`，iPad 从 `0921B252-DCF0-4D45-A248-23A548501BF7` 变为 `0F9AC771-13FB-4D9F-9EB0-561BD1E0A597`。证据为 `build-ios-review.log`、`upgrade-review.log`、`upgrade_review.py`、`devices-review.json` 和 `*-review-*` 快照/截图，仍在忽略的 evidence 目录。冒烟应用已终止，userpatch 已禁用，构建锁已释放。
