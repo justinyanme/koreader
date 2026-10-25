@@ -23,10 +23,25 @@ local function isIdempotentRequest(method)
     return method == nil or method == "GET" or method == "HEAD"
 end
 
-local function isSameOrigin(left, right)
-    return left.scheme == right.scheme
+local function origin(u)
+    local parsed = url.parse(u or "")
+    if not parsed or not parsed.scheme or not parsed.host or parsed.host == "" then return end
+    local scheme = parsed.scheme:lower()
+    if not default_ports[scheme] then return end
+    local port = parsed.port and tonumber(parsed.port) or default_ports[scheme]
+    if parsed.port and not parsed.port:match("^%d+$") then return end
+    if not port or port < 1 or port > 65535 then return end
+    return { scheme = scheme, host = parsed.host:lower(), port = port }
+end
+
+--- Whether two HTTP(S) URLs have the same scheme, host and effective port.
+-- Invalid origins never receive credentials, even when both URLs are identical.
+function OPDSClient.isSameOrigin(left_url, right_url)
+    local left, right = origin(left_url), origin(right_url)
+    return left ~= nil and right ~= nil
+        and left.scheme == right.scheme
         and left.host == right.host
-        and (left.port or default_ports[left.scheme]) == (right.port or default_ports[right.scheme])
+        and left.port == right.port
 end
 
 local function isHttpsDowngrade(from_url, to_url)
@@ -40,7 +55,6 @@ end
 function OPDSClient:request(request)
     local request_url = request.url
     local original_headers = request.headers or {}
-    local original_origin = url.parse(request_url)
 
     for _ = 1, 5 do
         local headers = {}
@@ -50,8 +64,7 @@ function OPDSClient:request(request)
         local cookies = self.cookie_jar:headerFor(request_url)
         if cookies then headers.Cookie = cookies end
 
-        local request_origin = url.parse(request_url)
-        local same_origin = isSameOrigin(request_origin, original_origin)
+        local same_origin = OPDSClient.isSameOrigin(request_url, request.url)
         -- like Basic auth, auth_headers (e.g. Cloudflare Access tokens) only go to the original origin
         if same_origin then
             for name, value in pairs(request.auth_headers or {}) do headers[name] = value end

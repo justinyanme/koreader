@@ -65,6 +65,9 @@ describe("书源 (OPDS as a remote shelf)", function()
     -- path -> code, headers, body
     local function route(method, path)
         local mode = server.mode
+        if server.redirects and server.redirects[path] then
+            return 302, { location = server.redirects[path] }, "redirect body"
+        end
         if mode == "timeout" then return nil end
         if mode == "auth" then return 401, {}, "Unauthorized" end
         if mode == "500" then return 500, {}, "boom", "HTTP/1.1 500 Internal Server Error" end
@@ -1059,9 +1062,40 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.is_true(#same > 0)
             for _, r in ipairs(same) do
                 assert.are.equal("reader", r.user)
+                assert.are.equal("secret", r.password)
                 assert.are.equal("id.access", r.headers["CF-Access-Client-Id"])
+                assert.are.equal("token", r.headers["CF-Access-Client-Secret"])
             end
         end)
+
+        for _, failure in ipairs{
+            { name = "an HTTPS downgrade", location = "http://nas.example/files/book5.epub", code = 302, count = 1 },
+            { name = "a redirect loop", location = ROOT .. "/download/5/epub/", code = nil, count = 5 },
+        } do
+            it("reports " .. failure.name .. " and removes the partial download", function()
+                server.redirects = { ["/opds/download/5/epub/"] = failure.location }
+                local view = openSources(openFM())
+                tap(view, "Book 5")
+                local dl = view.downloads["urn:uuid:book-5"]
+                waitFor(function() return next(view.downloads) == nil end, failure.name)
+                local result = BookSource.downloadResult(failure.code, "", nil, home)
+                assert.are.equal(failure.code and "http" or "unreachable", result.state)
+                local notification = UIManager._window_stack[#UIManager._window_stack].widget
+                assert.are.equal(T(_("Download failed: %1"), BookSource.failureText(result)), notification.text)
+                assert.is_nil(lfs.attributes(dl.part, "mode"))
+                assert.is_nil(lfs.attributes(home .. "/Author 5 - Book 5.epub", "mode"))
+                assert.is_nil(savedSources()[1].downloaded)
+                assert.is_true(has(view, "Author 5"))
+                assert.are.same({}, opened)
+                assert.are.same({}, requestsTo("http://nas.example/"))
+                local head, get = 0, 0
+                for _, r in ipairs(requestsTo(ROOT .. "/download/5/epub/")) do
+                    if r.method == "HEAD" then head = head + 1 else get = get + 1 end
+                end
+                assert.are.equal(failure.count, head)
+                assert.are.equal(failure.count, get)
+            end)
+        end
 
         it("shows formats, size and description on long-press, and re-download once downloaded", function()
             local view = openSources(openFM())
@@ -1090,6 +1124,51 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.are.equal("BOOK", f:read(4))
             f:close()
         end)
+    end)
+
+    describe("shared request policy", function()
+        for _, path in ipairs{
+            { name = "catalog browsing", from = "/opds/new", to = "/opds/books", count = 2,
+                send = function(source)
+                    BookSource.fetch(source, ROOT .. "/new")
+                end },
+            { name = "thumbnails", from = "/opds/cover_240_240/1", to = "/opds/cover_240_240/2", count = 2,
+                send = function(source)
+                    BookSource.fetchThumbs(source, { ROOT .. "/cover_240_240/1" })
+                end },
+            { name = "downloads", from = "/opds/download/1/epub/", to = "/files/book1.epub", count = 4,
+                send = function(source)
+                    local part = tmp .. "/policy-download.part"
+                    local code = BookSource.downloadTo(source, { href = ROOT .. "/download/1/epub/", ext = "epub" },
+                        part, function() end)
+                    assert.are.equal(200, code)
+                    local file = assert(io.open(part, "rb"))
+                    assert.are.equal("BOOK", file:read(4)) -- no redirect body in the book
+                    file:close()
+                    os.remove(part)
+                end },
+        } do
+            for _, destination in ipairs{
+                { origin = "https://nas.example:443", same = true },
+                { origin = "https://cdn.example", same = false },
+                { origin = "https://nas.example:8443", same = false },
+            } do
+                it("applies the origin policy to " .. path.name .. " redirected to " .. destination.origin, function()
+                    server.redirects = { [path.from] = destination.origin .. path.to }
+                    -- Initial authorization and redirect hops must agree on case and default ports.
+                    path.send(nas{ url = "HTTPS://NAS.EXAMPLE:443/opds" })
+                    local sent = requests()
+                    assert.are.equal(path.count, #sent)
+                    for _, r in ipairs(sent) do
+                        local authorized = r.url == ORIGIN .. path.from or destination.same
+                        assert.are.equal(authorized and "reader" or nil, r.user)
+                        assert.are.equal(authorized and "secret" or nil, r.password)
+                        assert.are.equal(authorized and "id.access" or nil, r.headers["CF-Access-Client-Id"])
+                        assert.are.equal(authorized and "token" or nil, r.headers["CF-Access-Client-Secret"])
+                    end
+                end)
+            end
+        end
     end)
 
     describe("credentials and answers", function()

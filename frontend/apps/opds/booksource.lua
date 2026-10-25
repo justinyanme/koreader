@@ -44,7 +44,6 @@ local BookSource = {
 }
 
 local SORT_NEW = "http://opds-spec.org/sort/new"
-local DEFAULT_PORTS = { http = "80", https = "443" }
 local clients = {} -- by source URL: one cookie jar per source for the session
 
 local function browser()
@@ -78,17 +77,9 @@ function BookSource.save(opds)
     opds.updated = nil
 end
 
-local function origin(u)
-    local parsed = url.parse(u or "")
-    if not parsed or not parsed.host then return end
-    local scheme = (parsed.scheme or ""):lower()
-    return scheme .. "://" .. parsed.host:lower() .. ":" .. (parsed.port or DEFAULT_PORTS[scheme] or "")
-end
-
 --- Whether `u` is on the source's own origin, the only one that gets its credentials.
 function BookSource.isOwnOrigin(source, u)
-    local own = origin(source.url)
-    return own ~= nil and own == origin(u)
+    return require("opdsclient").isSameOrigin(source.url, u)
 end
 
 --- Request fields for `source`: Basic auth and the Access token headers (see OPDSClient).
