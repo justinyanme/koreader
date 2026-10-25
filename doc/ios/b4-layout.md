@@ -206,3 +206,20 @@ TestFlight 双方文案。布局 spec 隔离存储迁移，不访问宿主 HOME�
 | iPhone rebase 后启动 | iPad rebase 后启动 |
 | --- | --- |
 | ![iPhone rebase startup](b4-layout/rebase-b3/iphone-startup.png) | ![iPad rebase startup](b4-layout/rebase-b3/ipad-startup.png) |
+
+### B5、C9 合并后的 rebase
+
+Rebase 到 `25c1e0e87`（包含 #155、#156），base 改为 fork master `dc8b1547e`，
+同时包含 B4 framebuffer/安全区和 B5 生命周期事件转发。B4 framebuffer 与 `64c1fe25`
+相比未变。保留存储→内存 provider→Device.init（屏幕设置）→键盘的初始化顺序，以及
+生命周期接入、全部桥 features、符号和 plist 条目。布局 spec 恢复其临时安装的内存
+provider，避免假设备影响其他用例；按 Q46 未运行。
+
+顶层 `2bfcb79ad` 的锁内增量构建成功：485 个导出、无松散动态库。两台 CLI 截图确认
+底栏完整，生命周期对象与内存 provider 已初始化，主目录为 `Documents`，B4 倍率/
+安全区正确；各 2 条窗口通知、0 次额外 buffer 重建和重排通知。临时观察 patch 已
+移除，仅本票两台模拟器用 CLI 关机。[状态及 PNG SHA](b4-layout/rebase-b5-c9/manifest.json)。
+
+| iPhone B5/C9 rebase 后启动 | iPad B5/C9 rebase 后启动 |
+| --- | --- |
+| ![iPhone B5 C9 startup](b4-layout/rebase-b5-c9/iphone-startup.png) | ![iPad B5 C9 startup](b4-layout/rebase-b5-c9/ipad-startup.png) |

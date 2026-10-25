@@ -1,0 +1,82 @@
+{
+  "built_main": "2bfcb79adf46b599f8b2e0bb9073559d61212605",
+  "master": "25c1e0e87893c01cc671ee5a75ab37d8300b93e4",
+  "base": "dc8b1547e8c481996c3a12dfb2903439f0a22547",
+  "l10n": "cd88caef553fa4fb1a42f6aa7306d1380d53a9ef",
+  "runtime": "iOS 27.0 (24A434)",
+  "build": "Xcode 27.1 arm64 iphonesimulator Release; lockf serialized",
+  "symbol_gate": {
+    "exports": 485,
+    "loose_dynamic_libraries": 0
+  },
+  "observation": "Natural startup only; temporary observer patch removed and owned simulators shut down. No fake bridge, injected event or assertion.",
+  "specs": "not run per Q46",
+  "devices": {
+    "iphone": {
+      "state": {
+        "counts": {
+          "buffer_rebuilds": 0,
+          "notifications": 0,
+          "window_events": 2
+        },
+        "dp44": 132,
+        "needs_full_upload": false,
+        "physical": {
+          "w": 1320,
+          "h": 2868
+        },
+        "window": {
+          "height": 956,
+          "width": 440
+        },
+        "has_lifecycle": true,
+        "memory_provider_installed": true,
+        "storage_home": "Documents",
+        "settings_home": "Documents",
+        "ratio": 3,
+        "viewport": {
+          "w": 1320,
+          "h": 2580,
+          "x": 0,
+          "y": 186
+        }
+      },
+      "png": "iphone-startup.png",
+      "sha256": "c38de1fadc863ae1ae38d29d5187a7c6711fdeb5a004e18457da6e3b37fbd7b5",
+      "visual_observation": "Shelf bottom navigation and pager visible inside the safe viewport."
+    },
+    "ipad": {
+      "state": {
+        "viewport": {
+          "w": 1668,
+          "y": 0,
+          "h": 2380,
+          "x": 0
+        },
+        "physical": {
+          "w": 1668,
+          "h": 2420
+        },
+        "ratio": 2,
+        "has_lifecycle": true,
+        "memory_provider_installed": true,
+        "storage_home": "Documents",
+        "settings_home": "Documents",
+        "needs_full_upload": false,
+        "window": {
+          "height": 1210,
+          "width": 834
+        },
+        "counts": {
+          "buffer_rebuilds": 0,
+          "notifications": 0,
+          "window_events": 2
+        },
+        "dp44": 88
+      },
+      "png": "ipad-startup.png",
+      "sha256": "6889bac73ac0254cc714b6b935bd367fe6d3a049ecc389beb2908f787c0eda7e",
+      "visual_observation": "Shelf bottom navigation and pager visible inside the safe viewport."
+    }
+  }
+}
