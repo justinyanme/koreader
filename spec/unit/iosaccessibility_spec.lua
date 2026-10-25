@@ -2,7 +2,7 @@ describe("iOS VoiceOver regions (C3)", function()
     -- Seams: A (ReaderUI), B (the shelf through FileManager), C (the iOS device with a fake bridge).
     local A11y, DataStorage, Event, FakeBridge, FileManager, ReaderUI, Replacements, Screen, SDLDevice, UIManager
     local ffiUtil, lfs, T, _
-    local saved_home, old_menu, home, bridge, a11y
+    local saved_home, old_menu, old_config, home, bridge, a11y
 
     local function topWidget()
         return UIManager._window_stack[#UIManager._window_stack].widget
@@ -58,7 +58,9 @@ describe("iOS VoiceOver regions (C3)", function()
         _ = require("gettext")
         require("apps/shelf/shelffilemanager") -- registers the replacement
         old_menu = Replacements.reader_menu
+        old_config = Replacements.reader_config
         Replacements.reader_menu = require("apps/reader/modules/readertoolbar")
+        Replacements.reader_config = require("apps/reader/modules/readertypesetpanel")
         saved_home = G_reader_settings:readSetting("home_dir")
         home = ffiUtil.realpath(DataStorage:getDataDir()) .. "/a11y_home"
         ffiUtil.purgeDir(home)
@@ -72,6 +74,7 @@ describe("iOS VoiceOver regions (C3)", function()
         if ReaderUI.instance then ReaderUI.instance:onClose() end
         if FileManager.instance then FileManager.instance:onClose() end
         Replacements.reader_menu = old_menu
+        Replacements.reader_config = old_config
         Replacements.filemanager = nil
         G_reader_settings:saveSetting("home_dir", saved_home)
         ffiUtil.purgeDir(home)
@@ -158,7 +161,8 @@ describe("iOS VoiceOver regions (C3)", function()
         act(_("Progress"))
         assert.are.equal("progress", ui.menu.panel_name)
         act(_("Font"))
-        assert.is_truthy(ui.config.panel or ui.menu.panel)
+        assert.are.equal("font", ui.menu.panel_name)
+        assert.are.equal(ui.config.panel, ui.menu.panel)
         ui.menu:hideToolbar()
         UIManager:forceRePaint()
         act(ui.doc_props.display_title)

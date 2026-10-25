@@ -125,15 +125,16 @@ describe("Credential migration through the device bridge", function()
     end)
 
     it("does not rewrite unrelated global settings on startup when there are no legacy credential keys", function()
-        local original_settings = G_reader_settings
+        local original_settings = _G.G_reader_settings
         local global = LuaSettings:wrap{ unrelated = "preserved" }
         global.file = dir .. "/global.lua"
         global:flush()
         local fs = require("libs/libkoreader-lfs")
         local previous = os.time() - 120
         assert(fs.touch(global.file, previous, previous))
-        G_reader_settings = global
-        finally(function() G_reader_settings = original_settings end)
+        -- Required modules read _G, while bare assignments here stay in Busted's isolated environment.
+        _G.G_reader_settings = global
+        finally(function() _G.G_reader_settings = original_settings end)
         local paths = stub(require("datastorage"), "getSettingsDir", function() return dir end)
         finally(function() paths:revert() end)
         Store.migrate()
@@ -142,7 +143,7 @@ describe("Credential migration through the device bridge", function()
     end)
 
     it("cleans global backup residues without rewriting an already clean primary", function()
-        local original_settings = G_reader_settings
+        local original_settings = _G.G_reader_settings
         local global = LuaSettings:wrap{ unrelated = "preserved" }
         global.file = dir .. "/global-clean.lua"
         assert(global:flush())
@@ -152,8 +153,8 @@ describe("Credential migration through the device bridge", function()
         local fs = require("libs/libkoreader-lfs")
         local previous = os.time() - 120
         assert(fs.touch(global.file, previous, previous))
-        G_reader_settings = global
-        finally(function() G_reader_settings = original_settings end)
+        _G.G_reader_settings = global
+        finally(function() _G.G_reader_settings = original_settings end)
         local paths = stub(require("datastorage"), "getSettingsDir", function() return dir end)
         finally(function() paths:revert() end)
         Store.migrate()
