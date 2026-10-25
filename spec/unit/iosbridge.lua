@@ -14,6 +14,24 @@ function FakeBridge.new(options)
     local share
     local bridge = { opened = {}, shared = {} }
 
+    local keychain = options.keychain or {}
+    bridge.keychainAvailable = true
+    function bridge.keychainGet(key)
+        if options.keychain_error then return nil, options.keychain_error end
+        if keychain[key] == nil then return nil, "not_found" end
+        return keychain[key]
+    end
+    function bridge.keychainSet(key, value)
+        if options.keychain_error then return nil, options.keychain_error end
+        keychain[key] = value
+        return true
+    end
+    function bridge.keychainDelete(key)
+        if options.keychain_error then return nil, options.keychain_error end
+        keychain[key] = nil
+        return true
+    end
+
     function bridge.keyboardConnected() return keyboard_connected end
     -- Native-side hotplug stimulus, observed on the next input wait (no callback).
     function bridge.setKeyboardConnected(connected) keyboard_connected = connected end

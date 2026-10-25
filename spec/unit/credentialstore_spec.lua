@@ -1,0 +1,95 @@
+-- The device bridge (seam C) and serialized backup are the security boundary.
+-- User-visible source operations are also exercised through FileManager in booksource_spec.
+describe("Credential migration through the device bridge", function()
+    local Store, Device, LuaSettings, util, dir, original_bridge
+    local options, settings
+    setup(function()
+        require("commonrequire")
+        Store = require("credentialstore")
+        Device = require("device")
+        LuaSettings = require("luasettings")
+        util = require("util")
+        dir = require("datastorage"):getDataDir() .. "/keychain_spec"
+        require("libs/libkoreader-lfs").mkdir(dir)
+        original_bridge = Device.bridge
+    end)
+    before_each(function()
+        options = { keychain = {} }
+        Device.bridge = require("iosbridge").new(options)
+        settings = LuaSettings:wrap{
+            servers = { { title = "NAS", url = "https://nas.example/opds", username = "reader",
+                password = "basic-canary", access_client_id = "id-canary", access_client_secret = "secret-canary",
+                downloaded = { book = "home/book.epub" } } },
+        }
+        settings.file = dir .. "/opds.lua"
+        settings:flush()
+    end)
+    after_each(function() Device.bridge = original_bridge end)
+    teardown(function() require("ffi/util").purgeDir(dir) end)
+
+    local function absent(path, secrets)
+        local contents = assert(util.readFromFile(path))
+        for _, secret in ipairs(secrets) do assert.is_nil(contents:find(secret, 1, true)) end
+    end
+
+    it("migrates Basic and both CF token fields, retaining only an opaque reference in primary and backup", function()
+        assert.is_true(Store.migrateSettings(settings, "opds"))
+        local saved = LuaSettings:open(settings.file):readSetting("servers")[1]
+        assert.is_string(saved.credential_ref)
+        assert.is_nil(saved.password)
+        assert.is_nil(saved.access_client_id)
+        assert.are.same({ book = "home/book.epub" }, saved.downloaded)
+        assert.are.same({ password = "basic-canary", access_client_id = "id-canary", access_client_secret = "secret-canary" },
+            Store.source(saved))
+        for _, suffix in ipairs{ "", ".old" } do
+            absent(settings.file .. suffix, { "basic-canary", "id-canary", "secret-canary" })
+        end
+        local ref = saved.credential_ref
+        assert.is_true(Store.migrateSettings(LuaSettings:open(settings.file), "opds"))
+        assert.are.equal(ref, LuaSettings:open(settings.file):readSetting("servers")[1].credential_ref)
+    end)
+
+    it("keeps failed migrations retryable without losing the original credentials", function()
+        options.keychain_error = "-25308"
+        assert.is_nil(Store.migrateSettings(settings, "opds"))
+        assert.are.equal("basic-canary", LuaSettings:open(settings.file):readSetting("servers")[1].password)
+        options.keychain_error = nil
+        assert.is_true(Store.migrateSettings(LuaSettings:open(settings.file), "opds"))
+        absent(settings.file, { "basic-canary", "id-canary", "secret-canary" })
+    end)
+
+    it("scrubs a stale plaintext backup when the primary already has references", function()
+        local old = util.readFromFile(settings.file)
+        assert.is_true(Store.migrateSettings(settings, "opds"))
+        util.writeToFile(old, settings.file .. ".old") -- interrupted backup cleanup
+        assert.is_true(Store.migrateSettings(LuaSettings:open(settings.file), "opds"))
+        absent(settings.file .. ".old", { "basic-canary", "id-canary", "secret-canary" })
+    end)
+
+    it("migrates KOSync's reusable password digest and treats a restored device as logged out", function()
+        local sync = LuaSettings:wrap{ settings = { username = "reader", userkey = "digest-canary", auto_sync = true } }
+        sync.file = dir .. "/kosync.lua"
+        assert.is_true(Store.migrateSettings(sync, "kosync"))
+        local saved = LuaSettings:open(sync.file):readSetting("settings")
+        assert.is_string(saved.userkey_ref)
+        assert.is_nil(saved.userkey)
+        assert.are.equal("digest-canary", Store.userkey(saved))
+        absent(sync.file, { "digest-canary" })
+        absent(sync.file .. ".old", { "digest-canary" })
+        Device.bridge = require("iosbridge").new() -- ThisDeviceOnly not restored
+        assert.is_nil(Store.userkey(saved))
+        assert.are.equal("reader", saved.username)
+    end)
+
+    it("keeps non-Keychain devices and unsupported bridge stubs on the legacy plaintext path", function()
+        for _, bridge in ipairs{ {}, require("device/sdl/iosbridge").new() } do
+            Device.bridge = bridge
+            assert.is_true(Store.migrateSettings(settings, "opds"))
+            assert.are.equal("basic-canary", settings.data.servers[1].password)
+            local draft = {}
+            assert.is_true(Store.setUserkey(draft, "legacy-digest"))
+            assert.are.equal("legacy-digest", draft.userkey)
+            assert.is_nil(draft.userkey_ref)
+        end
+    end)
+end)

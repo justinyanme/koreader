@@ -67,6 +67,16 @@ shareStart(paths) -> handle | nil, error
 sharePoll(handle) -> state | nil, error
     state is "presenting", "completed", "cancelled" or "failed"; terminal states
     are sticky. Lua removes the shared files once a terminal state is reached.
+
+keychainAvailable = true only when the three Keychain operations are implemented.
+keychainGet(key) -> string | nil, error
+    Missing entries return nil, "not_found"; other failures are distinct.
+keychainSet(key, value) -> true | nil, error
+keychainDelete(key) -> true | nil, error
+    Delete succeeds for an absent entry. Values are byte strings, including empty
+    strings. Keys are opaque references, never credentials. Native storage uses
+    generic passwords, AfterFirstUnlockThisDeviceOnly, without synchronization.
+    Errors contain only numeric OSStatus; no credential or system error text.
 --]]
 
 local Bridge = {}
@@ -95,6 +105,12 @@ function Bridge.new()
         openURL = unsupported,
         shareStart = unsupported,
         sharePoll = unsupported,
+
+
+        keychainAvailable = false,
+        keychainGet = unsupported,
+        keychainSet = unsupported,
+        keychainDelete = unsupported,
     }
 end
 

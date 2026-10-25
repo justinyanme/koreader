@@ -1,4 +1,5 @@
 local ConfirmBox = require("ui/widget/confirmbox")
+local CredentialStore = require("credentialstore")
 local DataStorage = require("datastorage")
 local Device = require("device")
 local Dispatcher = require("dispatcher")
@@ -71,12 +72,44 @@ function KOSync:loadSettings()
         KOSync.settings_obj = LuaSettings:open(self.settings_file)
     end
     self.settings = KOSync.settings_obj:readSetting("settings", KOSync.default_settings)
+    if CredentialStore.available() then CredentialStore.migrateSettings(KOSync.settings_obj, "kosync") end
+end
+
+function KOSync:getUserkey()
+    return CredentialStore.userkey(self.settings)
+end
+
+function KOSync:saveAccount(username, userkey)
+    if not CredentialStore.available() then
+        self.settings.username, self.settings.userkey = username, userkey
+        return true
+    end
+    local previous = self.settings
+    local draft = util.tableDeepCopy(previous)
+    draft.username = username
+    local ok = CredentialStore.setUserkey(draft, userkey)
+    if ok then
+        KOSync.settings_obj:saveSetting("settings", draft)
+        ok = CredentialStore.flush(KOSync.settings_obj)
+    end
+    if not ok then
+        KOSync.settings_obj:saveSetting("settings", previous)
+        UIManager:show(InfoMessage:new{ text = _("Could not save credentials. Please try again.") })
+        return
+    end
+    self.settings = draft
+    CredentialStore.delete(previous.userkey_ref)
+    return true
 end
 
 function KOSync:onFlushSettings(show_notification, context)
     if self.updated then
-        local ok = KOSync.settings_obj:flush(context)
-        if context and not ok then return end
+        if require("credentialstore").available() then
+            if not require("credentialstore").migrateSettings(KOSync.settings_obj, "kosync", context) then return end
+        else
+            local ok = KOSync.settings_obj:flush(context)
+            if context and not ok then return end
+        end
         self.updated = nil
     end
 end
@@ -246,7 +279,7 @@ function KOSync:addToMainMenu(menu_items)
                                     is_enter_default = true,
                                     callback = function()
                                         local hostname = dialog:getInputText()
-                                        logger.dbg("KOSync: Setting custom hostname to:", hostname)
+                                        logger.dbg("KOSync: Setting custom hostname")
                                         self.settings.kosync_hostname = hostname ~= "" and hostname or nil
                                         self.updated = true
                                         UIManager:close(dialog)
@@ -261,12 +294,12 @@ function KOSync:addToMainMenu(menu_items)
             },
             {
                 text_func = function()
-                    return self.settings.userkey and (_("Logout"))
+                    return self:getUserkey() and (_("Logout"))
                         or _("Register") .. " / " .. _("Login")
                 end,
                 keep_menu_open = true,
                 callback_func = function()
-                    if self.settings.userkey then
+                    if self:getUserkey() then
                         return function(menu)
                             self:logout(menu)
                             self.updated = true
@@ -403,7 +436,7 @@ If set to 0, updating progress based on page turns will be disabled.]]),
             {
                 text = _("Push progress from this device now"),
                 enabled_func = function()
-                    return self.settings.userkey ~= nil
+                    return self:getUserkey() ~= nil
                 end,
                 callback = function()
                     self:updateProgress(true, true)
@@ -412,7 +445,7 @@ If set to 0, updating progress based on page turns will be disabled.]]),
             {
                 text = _("Pull progress from other devices now"),
                 enabled_func = function()
-                    return self.settings.userkey ~= nil
+                    return self:getUserkey() ~= nil
                 end,
                 callback = function()
                     self:getProgress(true, true)
@@ -462,7 +495,7 @@ function KOSync:setPagesBeforeUpdate(pages_before_update)
 end
 
 function KOSync:setCustomServer(server)
-    logger.dbg("KOSync: Setting custom server to:", server)
+    logger.dbg("KOSync: Setting custom server")
     self.settings.custom_server = server ~= "" and server or nil
 end
 
@@ -580,8 +613,7 @@ function KOSync:doRegister(username, password, menu)
             })
         end
     elseif status then
-        self.settings.username = username
-        self.settings.userkey = userkey
+        if not self:saveAccount(username, userkey) then Device:setIgnoreInput(false); return end
         if menu then
             menu:updateItems()
         end
@@ -620,8 +652,7 @@ function KOSync:doLogin(username, password, menu)
         Device:setIgnoreInput(false)
         return
     elseif status then
-        self.settings.username = username
-        self.settings.userkey = userkey
+        if not self:saveAccount(username, userkey) then Device:setIgnoreInput(false); return end
         self.updated = true
         if menu then
             menu:updateItems()
@@ -638,7 +669,7 @@ function KOSync:doLogin(username, password, menu)
 end
 
 function KOSync:logout(menu)
-    self.settings.userkey = nil
+    if not self:saveAccount(self.settings.username, nil) then return end
     self.settings.auto_sync = true
     -- Clear any queued progress for the old account
     local KOSyncQueue = require("KOSyncQueue")
@@ -704,7 +735,7 @@ function KOSync:getMetadata()
 end
 
 function KOSync:syncToProgress(progress)
-    logger.dbg("KOSync: [Sync] progress to", progress)
+    logger.dbg("KOSync: [Sync] progress")
     if self.ui.document.info.has_pages then
         self.ui:handleEvent(Event:new("GotoPage", tonumber(progress)))
     else
@@ -713,7 +744,7 @@ function KOSync:syncToProgress(progress)
 end
 
 function KOSync:updateProgress(ensure_networking, interactive, on_suspend)
-    if not self.settings.username or not self.settings.userkey then
+    if not self.settings.username or not self:getUserkey() then
         if interactive then
             promptLogin()
         end
@@ -751,7 +782,7 @@ function KOSync:updateProgress(ensure_networking, interactive, on_suspend)
     local ok, err = pcall(client.update_progress,
         client,
         self.settings.username,
-        self.settings.userkey,
+        self:getUserkey(),
         doc_digest,
         metadata,
         progress,
@@ -759,8 +790,8 @@ function KOSync:updateProgress(ensure_networking, interactive, on_suspend)
         chosen_device_name,
         self.device_id,
         function(ok, status, body)
-            logger.dbg("KOSync: [Push] progress to", percentage * 100, "% =>", progress, "for", self.view.document.file)
-            logger.dbg("KOSync: ok:", ok, "body:", body)
+            logger.dbg("KOSync: [Push] progress")
+            logger.dbg("KOSync: success:", ok == true)
             if ok then
                 if interactive then
                     UIManager:show(InfoMessage:new{
@@ -779,7 +810,7 @@ function KOSync:updateProgress(ensure_networking, interactive, on_suspend)
         end)
     if not ok then
         if interactive then showSyncError() end
-        if err then logger.dbg("err:", err) end
+        if err then logger.dbg("KOSync: request failed") end
         -- Network unreachable: queue for retry
         local KOSyncQueue = require("KOSyncQueue")
         KOSyncQueue:push(queue_item)
@@ -811,7 +842,7 @@ function KOSync:updateProgress(ensure_networking, interactive, on_suspend)
 end
 
 function KOSync:getProgress(ensure_networking, interactive)
-    if not self.settings.username or not self.settings.userkey then
+    if not self.settings.username or not self:getUserkey() then
         if interactive then
             promptLogin()
         end
@@ -837,11 +868,11 @@ function KOSync:getProgress(ensure_networking, interactive)
     local ok, err = pcall(client.get_progress,
         client,
         self.settings.username,
-        self.settings.userkey,
+        self:getUserkey(),
         doc_digest,
         function(ok, body)
-            logger.dbg("KOSync: [Pull] progress for", self.view.document.file)
-            logger.dbg("KOSync: ok:", ok, "body:", body)
+            logger.dbg("KOSync: [Pull] progress")
+            logger.dbg("KOSync: success:", ok == true)
             if not ok or not body then
                 if interactive then
                     showSyncError()
@@ -873,7 +904,7 @@ function KOSync:getProgress(ensure_networking, interactive)
             body.percentage = Math.roundPercent(body.percentage)
             local progress = self:getLastProgress()
             local percentage = self:getLastPercent()
-            logger.dbg("KOSync: Current progress:", percentage * 100, "% =>", progress)
+            logger.dbg("KOSync: Current progress")
 
             if percentage == body.percentage
             or body.progress == progress then
@@ -934,7 +965,7 @@ function KOSync:getProgress(ensure_networking, interactive)
         end)
     if not ok then
         if interactive then showSyncError() end
-        if err then logger.dbg("err:", err) end
+        if err then logger.dbg("KOSync: request failed") end
     end
 
     self.pull_timestamp = now
@@ -1028,6 +1059,10 @@ function KOSync:_onNetworkConnected()
 end
 
 function KOSync:drainQueue(done_func)
+    if not self.settings.username or not self:getUserkey() then
+        if done_func then done_func() end
+        return
+    end
     local KOSyncQueue = require("KOSyncQueue")
     if KOSyncQueue:count() == 0 then
         if done_func then done_func() end
@@ -1043,7 +1078,7 @@ function KOSync:drainQueue(done_func)
     KOSyncQueue:drain(function(item, callback)
         client:update_progress(
             self.settings.username,
-            self.settings.userkey,
+            self:getUserkey(),
             item.document,
             item.metadata,
             item.progress,

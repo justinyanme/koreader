@@ -901,6 +901,31 @@ describe("Shelf home, 我 tab", function()
         table.remove(ReadHistory.hist, ReadHistory:getIndexByFile(ffiUtil.realpath(bookmarked)))
     end)
 
+    it("shows a restored Keychain account as not logged in (seams B + C)", function()
+        local bridge = Device.bridge
+        local disabled = G_reader_settings:readSetting("plugins_disabled")
+        finally(function()
+            Device.bridge = bridge
+            G_reader_settings:saveSetting("plugins_disabled", disabled)
+        end)
+        Device.bridge = require("iosbridge").new()
+        local account = { username = "keychain-reader" }
+        assert.is_true(require("credentialstore").setUserkey(account, "digest-canary"))
+        writeKOSync(account)
+        local enabled = require("util").tableDeepCopy(disabled or {})
+        enabled.kosync = nil
+        G_reader_settings:saveSetting("plugins_disabled", enabled)
+        local fm, view = openMe()
+        view:open("sync")
+        assert.is_true(contains(texts(view), T(_("Logged in as %1"), "keychain-reader")))
+        fm:onClose()
+        Device.bridge = require("iosbridge").new()
+        fm, view = openMe()
+        view:open("sync")
+        assert.is_true(contains(texts(view), _("Not logged in")))
+        fm:onClose()
+    end)
+
     it("shows sync and transfer entries, plugins that are off as disabled", function()
         local fm, view = openMe()
         tap(tappable(view, _("Sync and transfer")).dimen)

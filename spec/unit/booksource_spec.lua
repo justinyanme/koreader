@@ -1878,4 +1878,60 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.is_true(has(view, _("No books here yet")))
         end)
     end)
+    describe("Keychain credentials (seams B + C)", function()
+        local Device, original_bridge, options
+        before_each(function()
+            Device = require("device")
+            original_bridge = Device.bridge
+            options = { keychain = {} }
+            Device.bridge = require("iosbridge").new(options)
+        end)
+        after_each(function() Device.bridge = original_bridge end)
+
+        it("opens and edits a migrated source without storing credentials in settings", function()
+            local fm = openFM()
+            local view = openSources(fm)
+            assert.are.equal("ok", view:top().result.state)
+            local source = fm.opds.servers[1]
+            local ref = source.credential_ref
+            assert.is_string(ref)
+            assert.is_nil(source.password)
+            assert.is_nil(source.access_client_secret)
+            view:showEditSheet(source)
+            assert.is_not_nil(view.edit_rows.password)
+            view:closeSheet()
+            view:saveSource(source, { title = "Renamed", url = ROOT, username = "reader", password = "new-password",
+                access_client_id = "new-id", access_client_secret = "new-secret" })
+            assert.are.equal("new-password", BookSource.authorize(source, { url = ROOT }).password)
+            assert.is_nil(options.keychain[ref])
+            local bytes = assert(require("util").readFromFile(settings_file))
+            assert.is_nil(bytes:find("new-password", 1, true))
+            view:deleteSource(source)
+            assert.are.equal(0, #savedSources())
+            assert.is_nil(options.keychain[source.credential_ref])
+        end)
+
+        it("shows login failed and edit source when restored references have no Keychain items", function()
+            local fm = openFM()
+            fm.opds:loadSettings()
+            Device.bridge = require("iosbridge").new()
+            local view = openSources(fm)
+            assert.are.equal("auth", view:top().result.state)
+            assert.is_true(has(view, _("Login failed")))
+            assert.is_true(has(view, _("Edit source")))
+        end)
+
+        it("keeps the saved account when saving new credentials fails", function()
+            local fm = openFM()
+            local view = openSources(fm)
+            local source = fm.opds.servers[1]
+            local ref = source.credential_ref
+            options.keychain_error = "-25308"
+            view:saveSource(source, { title = "Rejected", url = ROOT, password = "must-not-persist" })
+            assert.are.equal(ref, source.credential_ref)
+            assert.are.equal("NAS at home", savedSources()[1].title)
+            assert.is_nil(assert(require("util").readFromFile(settings_file)):find("must-not-persist", 1, true))
+        end)
+    end)
+
 end)

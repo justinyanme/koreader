@@ -62,6 +62,9 @@ function OPDS:loadSettings()
     self.servers = self.settings:readSetting("servers", self.default_servers)
     self.downloads = self.settings:readSetting("downloads", {})
     self.pending_syncs = self.settings:readSetting("pending_syncs", {})
+    if require("credentialstore").available() then
+        require("credentialstore").migrateSettings(self.settings, "opds")
+    end
 end
 
 function OPDS:onDispatcherRegisterActions()
@@ -156,8 +159,12 @@ end
 
 function OPDS:onFlushSettings(show_notification, context)
     if self.updated then
-        local ok = self.settings:flush(context)
-        if context and not ok then return end
+        if require("credentialstore").available() then
+            if not require("credentialstore").migrateSettings(self.settings, "opds", context) then return end
+        else
+            local ok = self.settings:flush(context)
+            if context and not ok then return end
+        end
         self.updated = nil
     end
 end

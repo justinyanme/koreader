@@ -23,7 +23,7 @@ function KOSyncQueue:load()
     if not storage:exists() then return {} end
     local data, err = storage:load()
     if not data then
-        logger.warn("KOSyncQueue: failed to load queue:", err)
+        logger.warn("KOSyncQueue: failed to load queue")
         return {}
     end
     return data
@@ -32,7 +32,7 @@ end
 function KOSyncQueue:save(queue)
     local ok, err = self:_storage():save(queue)
     if not ok then
-        logger.warn("KOSyncQueue: failed to save queue:", err)
+        logger.warn("KOSyncQueue: failed to save queue")
     end
 end
 
@@ -96,7 +96,7 @@ function KOSyncQueue:drain(send_func, done_func)
 
     local function fail(err)
         if err then
-            logger.warn("KOSyncQueue: drain failed:", err)
+            logger.warn("KOSyncQueue: drain failed")
         end
         settle()
     end
@@ -153,7 +153,7 @@ function KOSyncQueue:drain(send_func, done_func)
         end
         local ok, err = pcall(send_func, item, callback)
         if not ok then
-            logger.warn("KOSyncQueue: failed to send queued progress:", err)
+            logger.warn("KOSyncQueue: failed to send queued progress")
             callback(false)
         end
     end

@@ -27,6 +27,9 @@ function KOSyncClient:init()
     })
     package.loaded["Spore.Middleware.GinClient"] = {}
     require("Spore.Middleware.GinClient").call = function(_, req)
+        -- Spore.debug prints all request/response headers, including auth keys.
+        -- Disable it per request without changing other Spore clients.
+        req.env.spore.debug = nil
         req.headers["accept"] = "application/vnd.koreader.v1+json"
     end
     package.loaded["Spore.Middleware.KOSyncAuth"] = {}
@@ -77,7 +80,7 @@ function KOSyncClient:register(username, password)
     if ok then
         return res.status == 201, res.body
     else
-        logger.dbg("KOSyncClient:register failure:", res)
+        logger.dbg("KOSyncClient:register failure")
         return false, res.body
     end
 end
@@ -98,7 +101,7 @@ function KOSyncClient:authorize(username, password)
     if ok then
         return res.status == 200, res.body
     else
-        logger.dbg("KOSyncClient:authorize failure:", res)
+        logger.dbg("KOSyncClient:authorize failure")
         return false, res.body
     end
 end
@@ -136,7 +139,7 @@ function KOSyncClient:update_progress(
         if ok then
             callback(res.status == 200, res.status, res.body)
         else
-            logger.dbg("KOSyncClient:update_progress failure:", res)
+            logger.dbg("KOSyncClient:update_progress failure")
             callback(false, nil, nil)
         end
     end)
@@ -168,7 +171,7 @@ function KOSyncClient:get_progress(
         if ok then
             callback(res.status == 200, res.body)
         else
-            logger.dbg("KOSyncClient:get_progress failure:", res)
+            logger.dbg("KOSyncClient:get_progress failure")
             callback(false, res.body)
         end
     end)

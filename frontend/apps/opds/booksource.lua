@@ -24,6 +24,7 @@ plugin is disabled.
 ]]
 
 local BookList = require("ui/widget/booklist")
+local CredentialStore = require("credentialstore")
 local DataStorage = require("datastorage")
 local Shelf = require("apps/shelf/shelf")
 local filemanagerutil = require("apps/filemanager/filemanagerutil")
@@ -64,7 +65,7 @@ function BookSource.host(source)
 end
 
 function BookSource.hasLogin(source)
-    return source.username ~= nil or source.access_client_id ~= nil
+    return source.username ~= nil or source.access_client_id ~= nil or source.credential_ref ~= nil
 end
 
 --- The URL as typed, with https:// when it has no scheme.
@@ -80,8 +81,12 @@ end
 --- Writes the plugin's settings file now, so sources and downloads survive a crash.
 function BookSource.save(opds)
     opds.settings:saveSetting("servers", opds.servers)
+    if CredentialStore.available() then
+        return CredentialStore.migrateSettings(opds.settings, "opds")
+    end
     opds.settings:flush()
     opds.updated = nil
+    return true
 end
 
 --- Whether `u` is on the source's own origin, the only one that gets its credentials.
@@ -92,12 +97,14 @@ end
 --- Request fields for `source`: Basic auth and the Access token headers (see OPDSClient).
 function BookSource.authorize(source, request)
     if not BookSource.isOwnOrigin(source, request.url) then return request end
+    local credentials, err = CredentialStore.source(source)
+    if not credentials then return nil, err end
     request.username = source.username
-    request.password = source.password
-    if source.access_client_id then
+    request.password = credentials.password
+    if credentials.access_client_id then
         request.auth_headers = {
-            ["CF-Access-Client-Id"] = source.access_client_id,
-            ["CF-Access-Client-Secret"] = source.access_client_secret,
+            ["CF-Access-Client-Id"] = credentials.access_client_id,
+            ["CF-Access-Client-Secret"] = credentials.access_client_secret,
         }
     end
     return request
@@ -111,7 +118,9 @@ local function client(source)
 end
 
 function BookSource.request(source, request)
-    return client(source):request(BookSource.authorize(source, request))
+    local authorized = BookSource.authorize(source, request)
+    if not authorized then return 401 end
+    return client(source):request(authorized)
 end
 
 -- A GET through the download bridge (see BookSource.bridgeDownload).
@@ -123,9 +132,10 @@ BridgeJob.__index = BridgeJob
 -- It fails when no data comes for `timeout` seconds; like the subprocess's file sink, a slow transfer that keeps
 -- moving is not cut off.
 function BookSource.bridgeDownload(bridge, source, request, part, timeout)
-    local job = setmetatable({ bridge = bridge, client = client(source), request = BookSource.authorize(source, request),
+    local authorized = BookSource.authorize(source, request)
+    local job = setmetatable({ bridge = bridge, client = client(source), request = authorized,
         part = part, timeout = timeout, hops = 0, received = 0 }, BridgeJob)
-    job:start(request.url)
+    if authorized then job:start(request.url) else job.result = { code = 401 } end
     return job
 end
 
@@ -215,7 +225,7 @@ function BookSource.fetch(source, feed_url)
     })
     socketutil:reset_timeout()
     if code ~= 200 then
-        logger.info("BookSource: cannot get", feed_url, code, status)
+        logger.info("BookSource: cannot get feed", type(code) == "number" and code or 0)
         return BookSource.failure(code, status, block_timeout, total_timeout)
     end
     local body = table.concat(sink)
