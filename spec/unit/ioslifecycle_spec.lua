@@ -137,6 +137,11 @@ describe("iOS lifecycle persistence (seams A and C)", function()
         assert.is_true(device.bridge.backgroundSaveIncomplete())
         assert.is_nil(require("libs/libkoreader-lfs").attributes(archive .. "/ios-lifecycle-spec.lua"))
         assert.are.equal("remember", require("docsettings"):open(sample):readSetting("annotations")[1].note)
+        -- WILL and DID may share the watcher's expired task and both be queued
+        -- before Lua runs. The duplicate cannot restart optional background work.
+        lifecycle("DID_ENTER_BACKGROUND")
+        assert.is_true(device.bridge.backgroundSaveIncomplete())
+        assert.is_nil(require("libs/libkoreader-lfs").attributes(archive .. "/ios-lifecycle-spec.lua"))
         lifecycle("DID_ENTER_FOREGROUND")
         assert.is_false(device.bridge.backgroundSaveIncomplete())
         assert.is_truthy(require("libs/libkoreader-lfs").attributes(archive .. "/ios-lifecycle-spec.lua"))

@@ -12,8 +12,17 @@ end
 
 -- Shared by the explicit reader save and the FlushSettings broadcast. Existing
 -- handlers need not know about it; ReaderUI uses it to avoid duplicate writes.
-local function saveContext(bridge, handle)
+local function saveContext(bridge, handle, lifecycle)
     local context = { readers = {}, optional = {}, complete = true }
+    function context:expired()
+        if bridge.backgroundExpired(handle) then
+            if lifecycle.inactive then lifecycle.background_expired = true end
+            return true
+        end
+        -- WILL and DID can already be queued when the watcher's task expires.
+        -- A duplicate notification must not grant optional work a new budget.
+        return lifecycle.inactive and lifecycle.background_expired or false
+    end
     function context:recordFailure(err)
         self.complete = false
         logger.warn("iOS settings save:", err)
@@ -32,7 +41,7 @@ local function saveContext(bridge, handle)
     function context:finish()
         if not self.complete then return end
         for _, action in ipairs(self.optional) do
-            if bridge.backgroundExpired(handle) then
+            if self:expired() then
                 self.complete = false
                 break
             end
@@ -49,7 +58,7 @@ end
 function Lifecycle:save(suspending)
     local bridge = self.device.bridge
     local handle = bridge.backgroundBegin() -- nil is allowed; still save.
-    local context = saveContext(bridge, handle)
+    local context = saveContext(bridge, handle, self)
     bridge.backgroundSetSaveIncomplete(true)
     local ok, err = pcall(function()
         local reader = require("apps/reader/readerui").instance
@@ -78,7 +87,7 @@ function Lifecycle:save(suspending)
         logger.warn("iOS lifecycle save interrupted:", err)
     end
     -- A final check also covers expiry during the last optional operation.
-    if bridge.backgroundExpired(handle) then context.complete = false end
+    if context:expired() then context.complete = false end
     bridge.backgroundSetSaveIncomplete(not context.complete)
     bridge.backgroundEnd(handle) -- idempotent even when UIKit already expired it.
     if context.complete then self.dirty = nil end
@@ -139,6 +148,7 @@ function Lifecycle:handle(code)
     elseif code == SDL.SDL_EVENT_DID_ENTER_FOREGROUND then
         local was_inactive = self.inactive
         self.inactive = false
+        self.background_expired = nil
         if self.device.bridge.backgroundSaveIncomplete() or self.dirty then self:save() end
         -- SDL's scene/application notifications can describe the same transition.
         if was_inactive ~= false then
