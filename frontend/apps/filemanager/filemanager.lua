@@ -1332,21 +1332,218 @@ function FileManager:showFiles(path, focused_file, selected_files)
     UIManager:show(file_manager)
 end
 
---- A shortcut to execute mv.
+-- Keep these helpers local to the file page; imports have their own lifecycle.
+local fileop_serial = 0
+
+local function fileopEntries(path)
+    local entries = {}
+    for name in lfs.dir(path) do
+        if name ~= "." and name ~= ".." then entries[#entries + 1] = name end
+    end
+    table.sort(entries)
+    return entries
+end
+
+local function fileopSnapshot(path)
+    local attr = assert(lfs.symlinkattributes(path))
+    assert(attr.mode == "file" or attr.mode == "directory", "unsupported file type: " .. path)
+    local node = { path = path, attr = attr }
+    if attr.mode == "directory" then
+        node.children = {}
+        for __, name in ipairs(fileopEntries(path)) do
+            node.children[#node.children + 1] = { name = name, node = fileopSnapshot(path .. "/" .. name) }
+        end
+    end
+    return node
+end
+
+local function fileopVerify(node, destination)
+    local attr = assert(lfs.symlinkattributes(node.path))
+    assert(attr.mode == node.attr.mode and attr.modification == node.attr.modification
+        and attr.dev == node.attr.dev and attr.ino == node.attr.ino, "source changed: " .. node.path)
+    if node.children then
+        local entries = fileopEntries(node.path)
+        assert(#entries == #node.children, "source directory changed: " .. node.path)
+        for i, child in ipairs(node.children) do
+            assert(entries[i] == child.name, "source directory changed: " .. node.path)
+            fileopVerify(child.node, destination and destination .. "/" .. child.name)
+        end
+    else
+        assert(attr.size == node.attr.size, "source size changed: " .. node.path)
+    end
+    if destination then
+        local dest_attr = assert(lfs.symlinkattributes(destination))
+        assert(dest_attr.mode == attr.mode and (node.children or dest_attr.size == attr.size),
+            "destination size mismatch: " .. destination)
+    end
+end
+
+local function fileopRemove(path)
+    local mode = lfs.symlinkattributes(path, "mode")
+    if mode == "directory" then
+        for __, name in ipairs(fileopEntries(path)) do
+            fileopRemove(path .. "/" .. name)
+        end
+        assert(lfs.rmdir(path))
+    elseif mode then
+        assert(os.remove(path))
+    end
+end
+
+local function fileopCopyFile(node, destination)
+    local input = assert(io.open(node.path, "rb"))
+    local output, open_err = io.open(destination, "wb")
+    if not output then
+        input:close()
+        error(open_err)
+    end
+    local ok, err = pcall(function()
+        local bytes = 0
+        while true do
+            local chunk, read_err = input:read(64 * 1024)
+            assert(not read_err, read_err)
+            if not chunk then break end
+            assert(output:write(chunk))
+            bytes = bytes + #chunk
+            assert(bytes <= node.attr.size, "source grew while copying: " .. node.path)
+        end
+        assert(bytes == node.attr.size, "copied size mismatch: " .. node.path)
+    end)
+    -- Both handles must be closed even when reading, writing or closing fails.
+    local input_closed, input_result = pcall(input.close, input)
+    local output_closed, output_result = pcall(output.close, output)
+    assert(ok, err)
+    assert(input_closed and input_result and output_closed and output_result, "file close failed")
+    assert(lfs.attributes(destination, "size") == node.attr.size, "written size mismatch: " .. destination)
+    assert(lfs.touch(destination, node.attr.access, node.attr.modification))
+end
+
+local function fileopCopyTree(node, destination)
+    if not node.children then
+        fileopCopyFile(node, destination)
+        return
+    end
+    assert(lfs.mkdir(destination))
+    for __, child in ipairs(node.children) do
+        fileopCopyTree(child.node, destination .. "/" .. child.name)
+    end
+    assert(lfs.touch(destination, node.attr.access, node.attr.modification))
+end
+
+local function fileopRun(from, to, move, recursive)
+    local staging = {}
+    local function newStage(destination)
+        local parent = ffiUtil.dirname(destination)
+        -- mkdir reserves the temporary name without truncating an existing file.
+        for __ = 1, 100 do
+            fileop_serial = fileop_serial + 1
+            local path = parent .. "/.koreader-fileop-" .. os.time() .. "-" .. fileop_serial
+            local ok, err = lfs.mkdir(path)
+            if ok then
+                staging[#staging + 1] = path
+                return path .. "/payload"
+            end
+            assert(lfs.symlinkattributes(path), err)
+        end
+        error("cannot reserve temporary directory")
+    end
+
+    local function copy(node, destination, replace_directory)
+        local attr = lfs.symlinkattributes(destination)
+        assert(not attr or attr.mode == node.attr.mode, "destination type mismatch: " .. destination)
+        if node.children and attr and not replace_directory then
+            -- Like cp -r, merging can partially complete: each file replacement is
+            -- atomic, unrelated entries survive, and we stop at the first failure.
+            for __, child in ipairs(node.children) do
+                copy(child.node, destination .. "/" .. child.name)
+            end
+            assert(lfs.touch(destination, node.attr.access, node.attr.modification))
+        else
+            local temporary = newStage(destination)
+            fileopCopyTree(node, temporary)
+            fileopVerify(node, temporary)
+            local current = lfs.symlinkattributes(destination)
+            assert(not current or current.mode == node.attr.mode, "destination type changed: " .. destination)
+            -- The UI already obtained overwrite confirmation. A complete file
+            -- replaces the old file in one rename; failed copies leave it intact.
+            -- External concurrent filesystem writers are not serialized here.
+            assert(os.rename(temporary, destination))
+        end
+    end
+
+    local ok, err = pcall(function()
+        from = from:gsub("/+$", "")
+        to = to:gsub("/+$", "")
+        if from == "" then from = "/" end
+        if to == "" then to = "/" end
+        local source_attr = assert(lfs.symlinkattributes(from))
+        assert(source_attr.mode == "file" or (recursive and source_attr.mode == "directory"), "unsupported source")
+        from = assert(ffiUtil.realpath(from))
+        local to_attr = lfs.symlinkattributes(to)
+        assert(not to_attr or to_attr.mode == "file" or to_attr.mode == "directory", "unsupported destination")
+        if to_attr and to_attr.mode == "directory" then
+            to = ffiUtil.joinPath(to, ffiUtil.basename(from))
+        end
+        local parent = assert(ffiUtil.realpath(ffiUtil.dirname(to)))
+        assert(lfs.attributes(parent, "mode") == "directory", "destination parent is not a directory")
+        to = ffiUtil.joinPath(parent, ffiUtil.basename(to))
+        assert(to ~= from and (source_attr.mode ~= "directory"
+            or (from ~= "/" and to:sub(1, #from + 1) ~= from .. "/")),
+            "cannot copy or move into the source")
+        to_attr = lfs.symlinkattributes(to)
+        assert(not to_attr or (to_attr.mode == source_attr.mode
+            and (to_attr.dev ~= source_attr.dev or to_attr.ino ~= source_attr.ino)), "invalid destination")
+        local node = fileopSnapshot(from)
+        if move then
+            -- mv replaces empty directories, but never merges nonempty ones.
+            if node.children and to_attr then
+                assert(#fileopEntries(to) == 0, "destination directory is not empty")
+            end
+            if os.rename(from, to) then return end
+        end
+        copy(node, to, move)
+        if move then
+            -- Verify the entire copy before deleting any source entry. If removal
+            -- subsequently fails, retain the complete destination to prevent loss.
+            fileopVerify(node, to)
+            fileopRemove(from)
+        end
+    end)
+    for __, path in ipairs(staging) do
+        local cleaned, cleanup_err = pcall(fileopRemove, path)
+        if not cleaned then
+            logger.warn("FileManager temporary cleanup failed:", path, cleanup_err)
+            ok = false
+        end
+    end
+    if not ok then logger.warn("FileManager in-process file operation failed:", err) end
+    return ok
+end
+
+--- Move a file or directory, in-process on devices that cannot fork.
 -- @treturn boolean result of mv command
 function FileManager:moveFile(from, to)
+    if not Device:canForkProcesses() then
+        return fileopRun(from, to, true, true)
+    end
     return ffiUtil.execute(self.mv_bin, from, to) == 0
 end
 
 --- A shortcut to execute cp.
 -- @treturn boolean result of cp command
 function FileManager:copyFileFromTo(from, to)
+    if not Device:canForkProcesses() then
+        return fileopRun(from, to, false, false)
+    end
     return ffiUtil.execute(self.cp_bin, from, to) == 0
 end
 
 --- A shortcut to execute cp recursively.
 -- @treturn boolean result of cp command
 function FileManager:copyRecursive(from, to)
+    if not Device:canForkProcesses() then
+        return fileopRun(from, to, false, true)
+    end
     return ffiUtil.execute(self.cp_bin, "-r", from, to ) == 0
 end
 

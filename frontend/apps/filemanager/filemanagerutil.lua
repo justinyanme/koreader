@@ -330,6 +330,7 @@ end
 
 -- Generate "Execute script" file dialog button
 function filemanagerutil.genExecuteScriptButton(file, caller_callback)
+    if not Device:canForkProcesses() then return end
     return {
         -- @translators This is the script's programming language (e.g., shell or python)
         text = T(_("Execute %1 script"), util.getScriptType(file)),
@@ -340,6 +341,7 @@ function filemanagerutil.genExecuteScriptButton(file, caller_callback)
 end
 
 function filemanagerutil.executeScript(file, caller_callback)
+    if not Device:canForkProcesses() then return end
     if caller_callback then
         caller_callback()
     end
