@@ -78,6 +78,11 @@ PNG 文件字节一致比逐像素一致更严格；没有把截图比较称为�
 `readertypesetpanel_spec.lua`（接缝 A，横竖屏及 inset 高度变化后同一正文位置）。
 未做 Leaf5 实机验收。Lua 文件仅做 loadfile 语法解析，diff 做空白检查。
 
+按 implement 技能做了两路只读 code-review（基线 `4f3ff7d1d`）：Standards
+无硬性问题，1 项可选的触控矩形重复代码建议保留现状；Spec 找到 1 项软件旋转后把
+逻辑宽高误作物理宽高的问题，已在 `5ae104e77` 修复并补 spec，原审查者复核通过。
+该复核没有运行测试；B1 后的实际 iOS 验证仍须完成。
+
 B1 合并并收到通知前，未改 base、platform/ios、Project.swift、kodev、make。
 下列原生事项尚未完成，不能据此声称 #92 已满足全部验收：
 
