@@ -549,6 +549,7 @@ function ShelfView:buildCell(book, clip)
             end
         end,
         clip = clip,
+        a11y = { label = book.title }, -- VoiceOver: a double tap runs the callback
         VerticalGroup:new{
             align = "left",
             cover,

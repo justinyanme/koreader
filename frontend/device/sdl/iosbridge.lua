@@ -77,6 +77,14 @@ keychainDelete(key) -> true | nil, error
     strings. Keys are opaque references, never credentials. Native storage uses
     generic passwords, AfterFirstUnlockThisDeviceOnly, without synchronization.
     Errors contain only numeric OSStatus; no credential or system error text.
+accessibilitySet{generation, pixel_width, screen_changed, elements} -> true | nil, error
+    Replaces the VoiceOver elements over SDL's view (device/sdl/iosaccessibility). elements, in
+    VoiceOver order: {x, y, w, h, label, value, adjustable}, rects in screen pixels of a screen
+    pixel_width wide. screen_changed: a new screen rather than a change on the same one.
+accessibilityPoll() -> {{generation, index, action}} | nil, error
+    The activations since the last poll, oldest first: index of the element (from 1) in the set of
+    that generation, action "activate", "increment" or "decrement". The overlay wakes the input wait
+    with an SDL user event when it queues one; it never calls Lua.
 --]]
 
 local Bridge = {}
@@ -111,13 +119,15 @@ function Bridge.new()
         keychainGet = unsupported,
         keychainSet = unsupported,
         keychainDelete = unsupported,
+        accessibilitySet = unsupported,
+        accessibilityPoll = unsupported,
     }
 end
 
 --- The production bridge on iOS: the defaults above, with each feature's FFI adapter laid over
 -- them. An adapter is device/sdl/iosnative/<feature>.lua returning a table of the functions it
 -- implements, so tickets wiring different features never edit the same file.
-Bridge.features = { "safearea", "brightness", "links", "share", "files", "background", "download", "keychain", "keyboard", "memory" }
+Bridge.features = { "safearea", "brightness", "links", "share", "files", "background", "download", "keychain", "keyboard", "memory", "accessibility" }
 
 function Bridge.native()
     local bridge = Bridge.new()

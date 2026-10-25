@@ -283,6 +283,7 @@ function TocPage:buildRow(m)
     }
     local row = Tappable:new{
         callback = function() self:jump(self.entries[m.index]) end,
+        a11y = { label = m.title, value = m.page }, -- VoiceOver: a double tap runs the callback
         VerticalGroup:new{
             align = "left",
             LeftContainer:new{

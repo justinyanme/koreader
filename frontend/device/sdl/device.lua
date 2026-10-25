@@ -592,10 +592,13 @@ function IOS:initKeyboard()
     local backend = self.input.input
     local function afterWait(...)
         local has_input_timer = self.input.timer_callbacks and self.input.timer_callbacks[1]
-        if self:updateKeyboardState() and not has_input_timer
+        local changed = self:updateKeyboardState()
+        -- VoiceOver activations, which wake the wait with an SDL user event (C3)
+        local acted = self.accessibility ~= nil and self.accessibility:dispatch()
+        if (changed or acted) and not has_input_timer
             and select(1, ...) == false and select(2, ...) == ffi.C.EINTR then
-            -- Let UIManager paint changes requested by the hotplug handlers
-            -- before blocking again. Do not discard input batches or errors.
+            -- Let UIManager paint changes requested by the hotplug handlers, or run
+            -- the activations, before blocking again. Do not discard input batches or errors.
             -- With a gesture timer pending, ETIME would incorrectly tell Input
             -- that its requested polling deadline has already elapsed.
             return false, ffi.C.ETIME, select(3, ...)
@@ -606,6 +609,8 @@ function IOS:initKeyboard()
     -- shared ffi/input_SDL3 waitForEvent used by Desktop and Emulator.
     self.input.input = setmetatable({
         waitForEvent = function(...)
+            -- UIManager has painted: hand what is on screen to VoiceOver.
+            if self.accessibility then self.accessibility:publish() end
             -- Check even when SDL reports EINTR for an event discarded by the
             -- Lua adapter (keyboard hotplug, window focus). No extra wakeups.
             return afterWait(backend.waitForEvent(...))
@@ -673,6 +678,7 @@ end
 function IOS:UIManagerReady(uimgr)
     Device.UIManagerReady(self, uimgr)
     self.lifecycle = require("device/sdl/ioslifecycle").new(self, uimgr)
+    self.accessibility = require("device/sdl/iosaccessibility").new(self, uimgr)
 end
 
 function IOS:handleLifecycleEvent(code)
