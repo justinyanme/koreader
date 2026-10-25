@@ -136,3 +136,10 @@ grilling 记录，2026-10-23 起。依据 [可行性报告](../iOS-feasibility.m
 | # | 决定 |
 | --- | --- |
 | Q49 | 更正 Q9："我"页的"版本更新"自 #64 起只显示当前版本，点开是 About 和安装说明，从不检查或执行 OTA，因此不按 `hasOTAUpdates` 隐藏。Leaf5、Emulator 保持现有版本行和 APK 说明；iOS 同样保留版本行，由设备提供安装说明，显示"更新请在 TestFlight 中安装新版本。"（英文 gettext 原文为 `To update it, install the new build from TestFlight.`）。原版菜单的 OTA 入口仍按 `hasOTAUpdates` 判断。刷新、残影与色温的能力位规则不变。 |
+
+## 实施中的补充（Q50–Q51，2026-10-25，编排者依 owner 授权）
+
+| # | 决定 |
+| --- | --- |
+| Q50 | Q12 列出的 fork 调用点漏了两处，补进对应的票：书源封面缩略图 `booksourceview:fetchThumbs` 归 B6（#94），no-fork 时走同一个下载桥和同一组 hop/follow 策略，否则 iOS 上书源网格是空白的；"文件"页的移动、复制（`/bin/mv`、`/bin/cp`）以及"执行脚本"入口另开 C8（#144）。 |
+| Q51 | B0 的 P6（新打开的书在选边距之前不受 38 字上限约束）在墨水屏横屏上同样存在，修它会改变墨水屏行为，B4 不做，留给 owner 决定是否另开票。B4 的其他 iPad 观察项（P1–P5）以 Emulator 竖屏和横屏渲染逐像素不变为前提处理。 |
