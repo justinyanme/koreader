@@ -1126,6 +1126,291 @@ describe("书源 (OPDS as a remote shelf)", function()
         end)
     end)
 
+    -- Without subprocesses (iOS): books and covers come through Device.bridge, here seam C's fake
+    -- (spec/unit/iosbridge), which answers one hop at a time from the same fake server.
+    describe("downloading through the bridge", function()
+        local Device, mime
+        local fork_stub, saved_bridge, saved_part_dir
+        local live -- bridge handle -> URL, for jobs started and not yet released
+        local starts -- jobs the bridge was asked to start
+
+        -- the snapshots the bridge gives for one GET, as URLSession would: the body (a 3xx's too) lands at path
+        local function respond(request)
+            logRequest{ url = request.url, headers = request.headers }
+            local parsed = require("socket.url").parse(request.url)
+            local path = parsed.path .. (parsed.query and "?" .. parsed.query or "")
+            if parsed.host == "cdn.example" then
+                path = "/files/book3.epub"
+            elseif parsed.host ~= "nas.example" then
+                return { { state = "pending", received = 0 }, { state = "failed", error = "host not found" } }
+            end
+            if server.bridge_end and path:match("^/opds/download/") then
+                return { { state = "pending", received = 0 }, { state = "downloading", received = 10 }, server.bridge_end }
+            end
+            local code, headers, body, _status, slow = route("GET", path)
+            if not code then return { { state = "pending", received = 0 }, { state = "failed", error = "timeout" } } end
+            local f = assert(io.open(request.path, "wb"))
+            f:write(body or "")
+            f:close()
+            local snapshots = { { state = "pending", received = 0 } }
+            for i = 1, slow and 1000 or 1 do -- the slow one keeps going until the test is done with it
+                table.insert(snapshots, { state = "downloading", received = math.min(#body, i * 1000), total = #body })
+            end
+            local lowered = {}
+            for name, value in pairs(headers) do lowered[name:lower()] = value end
+            table.insert(snapshots, { state = "completed", status = code, headers = lowered, received = #body,
+                total = #body })
+            return snapshots
+        end
+
+        local function liveUrls(pattern)
+            local urls = {}
+            for _, u in pairs(live) do
+                if u:find(pattern) then table.insert(urls, u) end
+            end
+            return urls
+        end
+
+        local function partFiles()
+            local files = {}
+            if not lfs.attributes(BookSource.part_dir, "mode") then return files end
+            for name in lfs.dir(BookSource.part_dir) do
+                if name ~= "." and name ~= ".." then table.insert(files, name) end
+            end
+            return files
+        end
+
+        local function downloadsTo(url_prefix)
+            local list = {}
+            for _, r in ipairs(requestsTo(url_prefix)) do
+                if not r.url:find("/opds/cover", 1, true) then table.insert(list, r) end
+            end
+            return list
+        end
+
+        local function lastText()
+            return UIManager._window_stack[#UIManager._window_stack].widget.text
+        end
+
+        setup(function()
+            Device = require("device")
+            mime = require("mime")
+        end)
+
+        before_each(function()
+            fork_stub = stub(Device, "canForkProcesses", function() return false end)
+            saved_bridge, saved_part_dir = Device.bridge, BookSource.part_dir
+            BookSource.part_dir = tmp .. "/parts" .. run
+            live, starts = {}, 0
+            local responses = {}
+            local bridge = require("iosbridge").new{ responses = responses }
+            local start, cancel = bridge.downloadStart, bridge.downloadCancel
+            bridge.downloadStart = function(request)
+                starts = starts + 1
+                responses[request.url] = respond(request)
+                local handle = start(request)
+                live[handle] = request.url
+                return handle
+            end
+            bridge.downloadCancel = function(handle)
+                live[handle] = nil
+                return cancel(handle)
+            end
+            Device.bridge = bridge
+        end)
+
+        after_each(function()
+            fork_stub:revert()
+            Device.bridge, BookSource.part_dir = saved_bridge, saved_part_dir
+        end)
+
+        it("downloads several books at once into the cache, moves each home, marks the tiles and opens nothing", function()
+            local view = openSources(openFM())
+            tap(view, "Book 1")
+            tap(view, "Book 4")
+            local dl = view.downloads["urn:uuid:book-1"]
+            assert.are.equal(BookSource.part_dir, dl.part:match("^(.*)/[^/]+$"))
+            assert.is_not_nil(view.downloads["urn:uuid:book-4"])
+            waitFor(function() return next(view.downloads) == nil end, "both downloads")
+            local f = assert(io.open(home .. "/Author 1 - Book 1.epub", "rb"))
+            assert.are.equal("BOOK /opds/download/1/epub/", f:read("*a"):sub(1, 27))
+            f:close()
+            assert.are.equal("file", lfs.attributes(home .. "/Author 4 - Book 4.epub", "mode"))
+            assert.are.equal(home .. "/Author 1 - Book 1.epub", savedSources()[1].downloaded["urn:uuid:book-1"])
+            assert.is_true(marked(view, "Book 1"))
+            assert.is_true(marked(view, "Book 4"))
+            assert.are.same({}, opened)
+            assert.is_true(UIManager:isWidgetShown(view))
+            assert.are.same({}, partFiles())
+            assert.are.same({}, liveUrls("/download/"))
+            -- one GET, no HEAD: the name and size come with the answer; Basic auth as socket.http sends it
+            local sent = downloadsTo(ROOT .. "/download/1/")
+            assert.are.equal(1, #sent)
+            assert.are.equal("identity", sent[1].headers["Accept-Encoding"])
+            assert.are.equal("Basic " .. mime.b64("reader:secret"), sent[1].headers.Authorization)
+            assert.are.equal("id.access", sent[1].headers["CF-Access-Client-Id"])
+            assert.are.equal("token", sent[1].headers["CF-Access-Client-Secret"])
+        end)
+
+        it("shows pending, then trustworthy progress, and cancels at once on a second tap", function()
+            local view = openSources(openFM())
+            view:turnPage(math.ceil(9 / view:top().per_page)) -- the page with Book 9, the slow one
+            tap(view, "Book 9")
+            local dl = view.downloads["urn:uuid:book-9"]
+            assert.is_true(has(view, T(_("Downloading %1%"), 0))) -- pending, sized from the feed
+            flush() -- pending
+            flush() -- 1000 bytes of the server's total
+            flush()
+            assert.are.equal(2000, dl.done)
+            assert.are.equal(dl.job.total, dl.size)
+            assert.is_true(has(view, T(_("Downloading %1%"), math.floor(2000 / dl.size * 100))))
+            assert.are.equal("file", lfs.attributes(dl.part, "mode"))
+            tap(view, "Book 9")
+            assert.is_nil(view.downloads["urn:uuid:book-9"])
+            assert.are.same({}, liveUrls("/download/"))
+            assert.is_nil(lfs.attributes(dl.part, "mode"))
+            assert.are.equal(T(_("Download canceled: %1"), "Book 9"), lastText())
+            flush()
+            assert.is_false(has(view, _("Downloading…")))
+            assert.is_nil(lfs.attributes(home .. "/Author 9 - Book 9.epub", "mode"))
+        end)
+
+        for _, failure in ipairs{
+            { name = "a server error", server = { fail_downloads = true }, result = { state = "http", code = 500 } },
+            { name = "a timeout", server = { bridge_end = { state = "failed", error = "timeout" } },
+                result = { state = "unreachable" } },
+            { name = "a lost connection",
+                server = { bridge_end = { state = "failed", error = "The network connection was lost." } },
+                result = { state = "unreachable" } },
+            { name = "a download the system canceled", server = { bridge_end = { state = "cancelled" } },
+                result = { state = "unreachable" } },
+            { name = "background time running out", server = { bridge_end = { state = "failed", error = "background" } },
+                result = { state = "background" } },
+        } do
+            it("says why after " .. failure.name .. ", leaves no file anywhere, and retries on a tap", function()
+                for k, v in pairs(failure.server) do server[k] = v end
+                local view = openSources(openFM())
+                tap(view, "Book 5")
+                local dl = view.downloads["urn:uuid:book-5"]
+                waitFor(function() return view.downloads["urn:uuid:book-5"] == nil end, failure.name)
+                assert.are.equal(T(_("Download failed: %1"), BookSource.failureText(failure.result)), lastText())
+                assert.is_nil(lfs.attributes(dl.part, "mode"))
+                assert.are.same({}, partFiles())
+                assert.are.same({}, liveUrls("/download/"))
+                assert.is_nil(lfs.attributes(home .. "/Author 5 - Book 5.epub", "mode"))
+                assert.is_nil(savedSources()[1].downloaded)
+                assert.is_false(marked(view, "Book 5"))
+                assert.are.same({}, opened)
+
+                server = { mode = "ok" }
+                tap(view, "Book 5")
+                waitFor(function() return view.downloads["urn:uuid:book-5"] == nil end, "the retry")
+                assert.are.equal("file", lfs.attributes(home .. "/Author 5 - Book 5.epub", "mode"))
+                assert.is_true(marked(view, "Book 5"))
+            end)
+        end
+
+        it("hands a 302 back to OPDSClient, which drops the credentials off the source's origin", function()
+            local view = openSources(openFM())
+            view:download(view:top(), view:top().result.books[3], view:top().result.books[3].formats[1])
+            waitFor(function() return next(view.downloads) == nil end, "book 3")
+            local first = downloadsTo(ROOT .. "/download/3/")
+            assert.are.equal(1, #first)
+            assert.are.equal("id.access", first[1].headers["CF-Access-Client-Id"])
+            local cdn = requestsTo("https://cdn.example/")
+            assert.are.equal(1, #cdn)
+            assert.is_nil(cdn[1].headers.Authorization)
+            assert.is_nil(cdn[1].headers["CF-Access-Client-Id"])
+            assert.is_nil(cdn[1].headers["CF-Access-Client-Secret"])
+            local f = assert(io.open(savedSources()[1].downloaded["urn:uuid:book-3"], "rb"))
+            assert.are.equal("BOOK /files/book3.epub", f:read("*a"):sub(1, 22)) -- not the redirect's body
+            f:close()
+
+            view:download(view:top(), view:top().result.books[4], view:top().result.books[4].formats[1])
+            waitFor(function() return next(view.downloads) == nil end, "book 4")
+            local same = requestsTo(ORIGIN .. "/files/book4.epub")
+            assert.are.equal(1, #same)
+            assert.are.equal("Basic " .. mime.b64("reader:secret"), same[1].headers.Authorization)
+            assert.are.equal("id.access", same[1].headers["CF-Access-Client-Id"])
+            assert.are.same({}, partFiles())
+            assert.are.same({}, liveUrls("/"))
+        end)
+
+        for _, failure in ipairs{
+            { name = "an HTTPS downgrade", location = "http://nas.example/files/book5.epub", code = 302, count = 1 },
+            { name = "a redirect loop", location = ROOT .. "/download/5/epub/", code = nil, count = 5 },
+        } do
+            it("reports " .. failure.name .. " as the subprocess does, leaving no file", function()
+                server.redirects = { ["/opds/download/5/epub/"] = failure.location }
+                local view = openSources(openFM())
+                tap(view, "Book 5")
+                waitFor(function() return next(view.downloads) == nil end, failure.name)
+                local result = BookSource.downloadResult(failure.code, "", nil, home)
+                assert.are.equal(T(_("Download failed: %1"), BookSource.failureText(result)), lastText())
+                assert.are.equal(failure.count, #downloadsTo(ROOT .. "/download/5/epub/"))
+                assert.are.same({}, requestsTo("http://nas.example/"))
+                assert.are.same({}, partFiles())
+                assert.are.same({}, liveUrls("/download/"))
+                assert.is_nil(savedSources()[1].downloaded)
+            end)
+        end
+
+        it("names the book from the answer's headers when the source keeps server names", function()
+            writeSources{ nas{ raw_names = true } }
+            local view = openSources(openFM())
+            tap(view, "Book 2")
+            waitFor(function() return view.downloads["urn:uuid:book-2"] == nil end, "the download")
+            assert.are.equal(home .. "/server_name.epub", savedSources()[1].downloaded["urn:uuid:book-2"])
+            for _, r in ipairs(requests()) do assert.are.equal("GET", r.method) end
+        end)
+
+        it("fetches the covers two at a time with the source's auth, and repaints the grid once", function()
+            local view = openSources(openFM())
+            local most = 0
+            local cells = view.cells
+            waitFor(function()
+                most = math.max(most, #liveUrls("/opds/cover"))
+                for _, cell in ipairs(cells) do
+                    if not BookSource.cachedThumb(cell.book.thumbnail) then return false end
+                end
+                return next(view.thumb_jobs) == nil
+            end, "the covers")
+            assert.are.equal(2, most)
+            assert.are.same({}, liveUrls("/opds/cover"))
+            local covers = requestsTo(ROOT .. "/cover")
+            assert.is_true(#covers >= #cells)
+            assert.are.equal("id.access", covers[1].headers["CF-Access-Client-Id"])
+            for name in lfs.dir(BookSource.thumb_dir) do assert.is_nil(name:match("%.part$")) end
+        end)
+
+        it("cancels every download and cover fetch when the page closes", function()
+            local view = openSources(openFM())
+            view:turnPage(math.ceil(9 / view:top().per_page))
+            tap(view, "Book 9")
+            local dl = view.downloads["urn:uuid:book-9"]
+            flush()
+            assert.are.equal("file", lfs.attributes(dl.part, "mode"))
+            view:close()
+            assert.are.equal(_("Download canceled"), lastText())
+            assert.are.same({}, liveUrls("/"))
+            assert.are.same({}, partFiles())
+            assert.is_nil(next(view.thumb_jobs))
+            flush()
+            assert.are.same({}, liveUrls("/"))
+        end)
+
+        it("leaves devices that can fork on the subprocess", function()
+            fork_stub:revert()
+            fork_stub = stub(Device, "canForkProcesses", function() return true end)
+            local view = openSources(openFM())
+            tap(view, "Book 1")
+            assert.is_nil(view.downloads["urn:uuid:book-1"].job)
+            waitFor(function() return next(view.downloads) == nil end, "the download")
+            assert.are.equal("file", lfs.attributes(home .. "/Author 1 - Book 1.epub", "mode"))
+            assert.are.equal(0, starts)
+        end)
+    end)
+
     describe("shared request policy", function()
         for _, path in ipairs{
             { name = "catalog browsing", from = "/opds/new", to = "/opds/books", count = 2,

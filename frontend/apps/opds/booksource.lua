@@ -15,6 +15,10 @@ links in its feeds included, go without them, and OPDSClient drops them on any
 redirect away from that origin. Feeds are parsed by the original browser's
 parser (opdsbrowser.lua), which stays untouched.
 
+Without subprocesses (iOS), books and thumbnails come through the device's
+download bridge instead (BookSource.bridgeDownload): the bridge fetches one hop,
+and the same OPDSClient policy decides each next hop and what it carries.
+
 The OPDS plugin's modules are required lazily: this module loads even when the
 plugin is disabled.
 ]]
@@ -27,6 +31,7 @@ local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 local ltn12 = require("ltn12")
 local md5 = require("ffi/sha2").md5
+local mime = require("mime")
 local socketutil = require("socketutil")
 local url = require("socket.url")
 local util = require("util")
@@ -35,6 +40,8 @@ local T = require("ffi/util").template
 
 local BookSource = {
     thumb_dir = DataStorage:getDataDir() .. "/cache/opds-thumbs",
+    -- where the download bridge writes a book until it is moved into its folder
+    part_dir = DataStorage:getDataDir() .. "/cache/opds-downloads",
     thumb_cache_limit = 50 * 1024 * 1024,
     -- download format preference; other formats come after these
     formats = { "epub", "azw3", "mobi", "fb2", "pdf" },
@@ -96,13 +103,88 @@ function BookSource.authorize(source, request)
     return request
 end
 
-function BookSource.request(source, request)
-    local client = clients[source.url]
-    if not client then
-        client = require("opdsclient"):new{ cookie_jar = require("cookiejar"):new() }
-        clients[source.url] = client
+local function client(source)
+    if not clients[source.url] then
+        clients[source.url] = require("opdsclient"):new{ cookie_jar = require("cookiejar"):new() }
     end
-    return client:request(BookSource.authorize(source, request))
+    return clients[source.url]
+end
+
+function BookSource.request(source, request)
+    return client(source):request(BookSource.authorize(source, request))
+end
+
+-- A GET through the download bridge (see BookSource.bridgeDownload).
+local BridgeJob = {}
+BridgeJob.__index = BridgeJob
+
+--- Starts a GET of `request` into the file `part` through `bridge` (Device.bridge, see device/sdl/iosbridge),
+-- without blocking: call job:poll() from the UI loop. OPDSClient decides every hop, as for BookSource.request.
+-- It fails when no data comes for `timeout` seconds; like the subprocess's file sink, a slow transfer that keeps
+-- moving is not cut off.
+function BookSource.bridgeDownload(bridge, source, request, part, timeout)
+    local job = setmetatable({ bridge = bridge, client = client(source), request = BookSource.authorize(source, request),
+        part = part, timeout = timeout, hops = 0, received = 0 }, BridgeJob)
+    job:start(request.url)
+    return job
+end
+
+function BridgeJob:start(request_url)
+    self.hops = self.hops + 1
+    self.url = request_url
+    local headers, user, password = self.client:hop(self.request, request_url)
+    if user and password then -- as socket.http sends them
+        headers.Authorization = "Basic " .. mime.b64(user .. ":" .. url.unescape(password))
+    end
+    self.handle, self.error = self.bridge.downloadStart{ url = request_url, headers = headers, path = self.part,
+        timeout = self.timeout }
+end
+
+--- nil while running, with job.received and job.total (nil when unknown) in bytes; then the answer as
+-- OPDSClient:request gives it: { code, headers, status }, code being the bridge's error text on a failure.
+-- The file stays at job.part until job:cancel(), which every caller does once done with it.
+function BridgeJob:poll()
+    if self.result then return self.result end
+    if not self.handle then
+        self.result = { code = self.error or "unsupported" }
+        return self.result
+    end
+    local snapshot, err = self.bridge.downloadPoll(self.handle)
+    if not snapshot then
+        self.result = { code = err }
+    elseif snapshot.state == "completed" then
+        local next_url = self.client:follow(self.url, snapshot.status, snapshot.headers)
+        if not next_url then
+            self.result = { code = snapshot.status, headers = snapshot.headers }
+        else
+            self.bridge.downloadCancel(self.handle) -- the redirect's own body
+            self.handle = nil
+            if self.hops >= require("opdsclient").max_hops then
+                self.result = { status = "Too many redirects" }
+            else
+                self:start(next_url)
+            end
+        end
+    elseif snapshot.state == "failed" or snapshot.state == "cancelled" then
+        self.result = { code = snapshot.error or snapshot.state }
+    else
+        self.received, self.total = snapshot.received or 0, snapshot.total
+    end
+    return self.result
+end
+
+--- Stops the transfer, releases the bridge's handle and removes what is left at job.part. Safe to repeat.
+function BridgeJob:cancel()
+    if self.handle then self.bridge.downloadCancel(self.handle) end
+    self.handle = nil
+    self.result = self.result or { code = "cancelled" }
+    os.remove(self.part)
+end
+
+--- The server's name for `format`, from the headers of its answer, as the original browser names it.
+function BookSource.serverFileName(format, headers)
+    local parser = setmetatable({ fetchFeed = function() return headers end }, { __index = browser() })
+    return browser().getServerFileName(parser, format.href, format.ext)
 end
 
 --- Drops the source's cookies, e.g. once its address or credentials changed (an old Access cookie would hide a bad token).
@@ -339,15 +421,20 @@ function BookSource.fetchThumbs(source, thumb_urls)
             socketutil:set_timeout(BookSource.block_timeout, BookSource.total_timeout)
             local code, headers = BookSource.request(source, { url = thumb_url, sink = ltn12.sink.file(file) })
             socketutil:reset_timeout()
-            -- servers often send covers as octet-stream or untyped; drawing them (thumbFor) weeds out the rest
-            local content_type = (headers and headers["content-type"] or ""):lower()
-            if code == 200 and (content_type == "" or content_type:match("^%s*image/")
-                    or content_type:match("^%s*application/octet%-stream")) then
-                os.rename(path .. ".part", path)
-            else
-                os.remove(path .. ".part")
-            end
+            BookSource.keepThumb(path, code, headers)
         end
+    end
+end
+
+--- Moves a fetched thumbnail from path .. ".part" into the cache if it may be an image, else removes it.
+function BookSource.keepThumb(path, code, headers)
+    -- servers often send covers as octet-stream or untyped; drawing them (thumbFor) weeds out the rest
+    local content_type = (headers and headers["content-type"] or ""):lower()
+    if code == 200 and (content_type == "" or content_type:match("^%s*image/")
+            or content_type:match("^%s*application/octet%-stream")) then
+        os.rename(path .. ".part", path)
+    else
+        os.remove(path .. ".part")
     end
 end
 
@@ -403,6 +490,8 @@ end
 function BookSource.downloadResult(code, status, content_type, dir)
     if code == "nowrite" then
         return { state = "nowrite", detail = dir }
+    elseif code == "background" then -- the bridge's: the app was suspended before the download ended
+        return { state = "background" }
     elseif code == 200 and content_type and content_type:lower():match("^%s*text/html") then
         return { state = "not_book" }
     elseif code == 200 then
@@ -439,6 +528,9 @@ function BookSource.describe(result)
     elseif state == "not_book" then
         return { title = _("Not a book"),
             reason = _("The server sent a web page instead of the book. Check the source's login.") }
+    elseif state == "background" then
+        return { title = _("Download interrupted"),
+            reason = _("The download stopped while the app was in the background. Tap the cover to try again.") }
     elseif state == "nowrite" then
         return { title = _("Cannot save the book"),
             reason = T(_("Cannot write to the download folder %1. Choose another one in the source's menu."),

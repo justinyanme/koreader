@@ -538,6 +538,43 @@ describe("OPDS module", function()
                 assertNoCredentials(requests[1])
             end)
         end
+
+        -- hop() and follow() are request()'s own steps, which the download bridge path takes one at a time
+        describe("one hop at a time", function()
+            it("sends credentials on the original origin only, with the jar's cookies instead of the request's", function()
+                request.headers = { Cookie = "forged=1", Accept = "*/*" }
+                client.cookie_jar:store("https://cdn.example.test/x", { ["set-cookie"] = "cdn=1; Path=/" })
+                local headers, user, password = client:hop(request, "https://example.test:443/book.epub")
+                assert.are.equal("reader", user)
+                assert.are.equal("secret", password)
+                assert.are.equal("id.access", headers["CF-Access-Client-Id"])
+                assert.are.equal("token", headers["CF-Access-Client-Secret"])
+                assert.are.equal("*/*", headers.Accept)
+                assert.is_nil(headers.Cookie)
+                headers, user, password = client:hop(request, "https://cdn.example.test/book.epub")
+                assert.is_nil(user)
+                assert.is_nil(password)
+                assert.is_nil(headers["CF-Access-Client-Id"])
+                assert.is_nil(headers["CF-Access-Client-Secret"])
+                assert.are.equal("cdn=1", headers.Cookie)
+                assert.are.same({ Cookie = "forged=1", Accept = "*/*" }, request.headers)
+            end)
+
+            it("follows redirects to absolute URLs, stops at an answer or an HTTPS downgrade, and keeps cookies", function()
+                local from = "https://example.test/catalog"
+                assert.are.equal("https://example.test/book.epub",
+                    client:follow(from, 302, { location = "/book.epub", ["set-cookie"] = "s=1; Path=/" }))
+                assert.are.equal("s=1", client.cookie_jar:headerFor("https://example.test/book.epub"))
+                for _, code in ipairs{ 301, 303, 307, 308 } do
+                    assert.are.equal("https://cdn.example.test/b", client:follow(from, code, { location = "https://cdn.example.test/b" }))
+                end
+                assert.is_nil(client:follow(from, 200, { location = "/elsewhere" }))
+                assert.is_nil(client:follow(from, 302, {}))
+                assert.is_nil(client:follow(from, 302, { location = "http://example.test/book.epub" }))
+                assert.is_nil(client:follow(from, nil, nil))
+                assert.are.equal(5, OPDSClient.max_hops)
+            end)
+        end)
     end)
 
     describe("OPDS parser module", function()

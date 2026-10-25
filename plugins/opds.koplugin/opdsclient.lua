@@ -54,31 +54,45 @@ function OPDSClient:new(options)
     return setmetatable(options, self)
 end
 
+OPDSClient.max_hops = 5
+
+--- What one hop of `request` sends to `request_url`: its headers, with the jar's cookies instead of its own, then
+-- the Basic auth user and password. Like Basic auth, auth_headers (e.g. Cloudflare Access tokens) only go to the
+-- original origin. Every request path, the download bridge's included, asks this for every hop.
+function OPDSClient:hop(request, request_url)
+    local headers = {}
+    for name, value in pairs(request.headers or {}) do
+        if name:lower() ~= "cookie" then headers[name] = value end
+    end
+    local cookies = self.cookie_jar:headerFor(request_url)
+    if cookies then headers.Cookie = cookies end
+    if not OPDSClient.isSameOrigin(request_url, request.url) then return headers end
+    for name, value in pairs(request.auth_headers or {}) do headers[name] = value end
+    return headers, request.username, request.password
+end
+
+--- Takes the answer from `request_url`: stores its cookies and returns the URL of the next hop,
+-- or nil when this is the final answer (not a redirect, or a redirect from https to http).
+function OPDSClient:follow(request_url, code, response_headers)
+    self.cookie_jar:store(request_url, response_headers)
+    if not redirect_codes[code] or not response_headers or not response_headers.location then return end
+    local redirected_url = url.absolute(request_url, response_headers.location)
+    if not isHttpsDowngrade(request_url, redirected_url) then return redirected_url end
+end
+
 function OPDSClient:request(request)
     local request_url = request.url
-    local original_headers = request.headers or {}
 
-    for _ = 1, 5 do
-        local headers = {}
-        for name, value in pairs(original_headers) do
-            if name:lower() ~= "cookie" then headers[name] = value end
-        end
-        local cookies = self.cookie_jar:headerFor(request_url)
-        if cookies then headers.Cookie = cookies end
-
-        local same_origin = OPDSClient.isSameOrigin(request_url, request.url)
-        -- like Basic auth, auth_headers (e.g. Cloudflare Access tokens) only go to the original origin
-        if same_origin then
-            for name, value in pairs(request.auth_headers or {}) do headers[name] = value end
-        end
+    for _ = 1, OPDSClient.max_hops do
+        local headers, user, password = self:hop(request, request_url)
         local function makeRequest()
             return socket.skip(1, http.request {
                 url = request_url,
                 method = request.method,
                 headers = headers,
                 sink = request.sink,
-                user = same_origin and request.username or nil,
-                password = same_origin and request.password or nil,
+                user = user,
+                password = password,
                 redirect = false,
                 response_headers = function(response_code)
                     return redirect_codes[response_code]
@@ -90,17 +104,12 @@ function OPDSClient:request(request)
         if code == socketutil.SSL_HANDSHAKE_CODE and isIdempotentRequest(request.method) then
             code, response_headers, status = makeRequest()
         end
-        self.cookie_jar:store(request_url, response_headers)
 
-        if not redirect_codes[code] or not response_headers or not response_headers.location then
+        local next_url = self:follow(request_url, code, response_headers)
+        if not next_url then
             return code, response_headers, status
         end
-
-        local redirected_url = url.absolute(request_url, response_headers.location)
-        if isHttpsDowngrade(request_url, redirected_url) then
-            return code, response_headers, status
-        end
-        request_url = redirected_url
+        request_url = next_url
     end
 
     return nil, nil, "Too many redirects"
