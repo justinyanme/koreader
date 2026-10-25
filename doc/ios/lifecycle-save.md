@@ -61,18 +61,33 @@ lockf -t 7200 /tmp/justreader-ios-build.lock ./kodev build ios
 
 构建结束即释放锁。安装、启动、截图和观察均对已构建 `.app` 使用 `xcrun simctl`，不持构建锁；禁止打开、切换或退出 Simulator.app。GUI 才能操作的检查全部交 owner 真机复核并标为未验收。
 
-## 待执行的模拟器冒烟与真机复核
+## 模拟器冒烟（2026-10-25）
+
+Release 构建成功，`nm` 门禁 **478/478**，无 loose dylib。原生接线源码对应 `374fc7c71`，base 为 `0a34ba2983b06beb8f4cde12f9aa5b3bdb3d1de2`。构建启动时尚未提交接线，因此包内版本串仍含 `8a6d94ebe`；编译的接线内容与 `374fc7c71` 相同。没有为修改版本串重复全量构建。
+
+| 设备 | iOS 27.0 模拟器 UDID |
+| --- | --- |
+| iPhone 17 Pro Max | `B9DD56C5-C419-4FF0-8245-F51DD88CF640` |
+| iPad Pro 11 英寸 M5 | `3213427E-A264-4B7F-8CA0-A9C90DC94587` |
+
+使用与 T0 相同的 Apple EPUB，只读复制进各自 Documents。沙盒中的一次性 userpatch 只通过实际 GotoPage、选区和 saveHighlight API 改变阅读数据，记录事件与快照；**不调用** ReaderUI saveSettings、UIManager flushSettings 或 DocSettings flush 来帮助通过。中断场景在真实临时写入/rename 路径设置暂停点后，由外部 `simctl terminate` 结束进程；恢复由正式加载器完成。没有修改发行包源码或从原生回调 Lua。
+
+原始日志、驱动和截图在本 worktree 的忽略目录 `koreader-93-evidence/`：`build-ios.log`、`results.jsonl`、两台 `*-console.log`、`*-reading.png`，以及各自沙盒的 `93-events.tsv`。通过 `simctl io screenshot /tmp/...` 采集后复制回目录；截图已目视检查为实际中文正文/插图，没有错误对话框。全程没有打开、切换或退出 Simulator.app。
 
 两台模拟器均记录版本、UDID、运行时、书籍路径、进度（PDF 页码 / EPUB xpointer）、笔记数量与可辨识内容，并在重新打开后核对 `.sdr` 可读及数据。
 
 | 场景 | 操作与判定 | 当前状态 |
 | --- | --- | --- |
-| 切其他 App | 修改进度与笔记，立刻切后台，再返回；检查 watcher 入队、同步保存、结束续时及 Resume。 | 待冒烟 |
+| 切其他 App | 划线与进度改到第 83 页、2 条笔记后，用 simctl 启动 Settings，再启动 Just Reader；两台均观察到 259/260 入队、同步保存、结束续时及 Resume，内存和磁盘的 xpointer、note、pos0/pos1 逐项匹配。 | 两台通过 |
 | 锁屏 | 当前 simctl CLI 没有锁屏/解锁操作，屏幕 power off 不等同系统锁屏。交 owner 真机执行。 | 未验收 |
-| 后台终止 | 修改后后台等待约 5 秒，`simctl terminate` 后重开；恢复进度/笔记。 | 待冒烟 |
-| 覆盖安装 | 保存后保留沙盒，用 `simctl install` 安装新包再重开；数据不损坏。 | 待冒烟 |
-| 保存中断 | 在临时写入、备份 rename 后、替换后分别终止；重开只能读到完整旧版或新版，必要时通过 `.old` 恢复。不可把未执行的时序当结果。 | 待冒烟 |
+| 后台终止 | 第 86 页、3 条笔记后切后台，等待 5 秒，terminate 后重开；两台均恢复到第 86 页、3 条，xpointer 和笔记范围/内容匹配。 | 两台通过 |
+| 覆盖安装 | simctl install 更换了 Data/Application UUID。3 条笔记的原 metadata 完整迁入新容器，但集中 `.sdr` 的路径键包含旧 UUID；以新 Documents 路径打开书，两台均回到第 1 页、0 条。 | **未通过，B3 #91 存储身份/路径迁移依赖** |
+| 保存中断 | 写入一半、替换前、备份 rename 后三处 terminate，两台重开均恢复完整旧版（90/93/96 页，1/2/3 条）；替换 rename 后、目录 fsync 前 terminate，两台恢复完整新版（100 页、5 条）。每次均核对 xpointer、数量、note、pos0/pos1；备份窗口还确认目标缺失时 `.old` 完整可读。 | 两台四个阶段通过 |
 | 无续时 / 过期 / 写入失败 | 假桥 spec 覆盖同步保存、必要项先写、可选项跳过、结束续时与前台补做；不按成功运行报告。 | 已编写，Q46 未运行 |
 | 秒级合并与缓存清理 | spec 覆盖持续变更不推迟 3 秒截止、关书取消、内存警告清缓存后书与笔记仍可读。 | 已编写，Q46 未运行 |
+
+正常合并保存另做实际冒烟：第 80 页新增第 1 条划线后，不调用保存、不切后台，应用日志从“变更完成”到“保存结束”为 iPhone **2.983212 s**、iPad **2.985091 s**；主机每 100 ms 检查磁盘记录，确认完整版本所需时间分别为 3.085 s / 3.067 s（包含轮询误差）。
+
+覆盖安装的失败不是写入截断：旧 metadata 中第 86 页和 3 条笔记全部可读。当前 master 尚无 B3 的 Q10 沙盒与文档路径身份处理，本票未擅自迁移 `.sdr` 或改书籍身份；须协调 #91 后重做升级场景，不能把它标成通过。覆盖安装后的中断冒烟使用新路径下的独立记录，未改旧路径中保留下来的 3 条笔记。
 
 真机复核由 owner 执行：来电打断与系统真实内存回收，以及上述五种场景；模拟器 terminate 不能代替真实系统回收。按 Q46，Docker 全量与 Leaf5 验收留给 TestFlight 前批量回归。
