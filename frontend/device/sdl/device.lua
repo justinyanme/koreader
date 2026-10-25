@@ -493,10 +493,22 @@ function IOS:initKeyboard()
     }, { __index = backend })
 end
 
+--- memavailable, memtotal for util.calcFreeMem: 85% of the headroom, the Linux MemAvailable margin.
+-- No total: Cache:memoryPressureCheck stays off; releasing caches is left to B5's memory warnings.
+function IOS:freeMemory()
+    local available = self.bridge.memoryAvailable()
+    if available then
+        return math.floor(available * 0.85), nil
+    end
+    return nil, nil
+end
+
 function IOS:init()
     -- The storage layout (device/sdl/iosstorage) first: nothing may read the home folder before it.
     self.container = os.getenv("HOME")
     self.home_dir = require("device/sdl/iosstorage").setup(G_reader_settings, self.container)
+    -- Before anything sizes a cache (DocCache sizes itself when first required).
+    require("util").freeMemProvider = function() return self:freeMemory() end
     Device.init(self)
     -- SDL must be initialized before querying its keyboard state.
     self:initKeyboard()

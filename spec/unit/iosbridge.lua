@@ -72,6 +72,11 @@ function FakeBridge.new(options)
         return util.tableDeepCopy(options.insets or { top = 0, right = 0, bottom = 0, left = 0 })
     end
 
+    function bridge.memoryAvailable()
+        if options.memory_available == nil then return nil, "unsupported" end
+        return options.memory_available
+    end
+
     function bridge.brightnessGet() return brightness end
     function bridge.brightnessSet(value)
         brightness = math.max(0, math.min(100, value))

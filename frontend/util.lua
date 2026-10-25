@@ -726,6 +726,9 @@ end
     fi
 --]]
 
+--- Function returning memavailable, memtotal where /proc/meminfo is missing, set by the device (iOS).
+util.freeMemProvider = nil
+
 --- Computes the currently available memory
 ---- @treturn tuple of ints: memavailable, memtotal (or nil, nil on unsupported platforms).
 function util.calcFreeMem()
@@ -778,7 +781,10 @@ function util.calcFreeMem()
         end
         meminfo:close()
     else
-        -- Not on Linux?
+        -- Not on Linux? Use the device's figures if it provides them (iOS).
+        if util.freeMemProvider then
+            return util.freeMemProvider()
+        end
         return nil, nil
     end
 
