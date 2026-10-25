@@ -30,9 +30,24 @@ Desktop / Emulator 继续使用原来的输入 backend，墨水屏的输入实�
   断开、重连、unsupported、设备状态隔离、等待参数与全部返回值保留、共享 backend
   不变、EPUB/PDF 首个左右键翻页、热插拔后的 Esc 和触控翻页。
 - 按 Q46，所有测试均未运行；不做逐票 Leaf5 验收。
-- B1 合并前不改 base、Tuist 工程或构建脚本，不构建 iOS，不声明模拟器验收通过。
-- B1 合并后需 rebase，在其 SDL FFI 导出清单确认保留 `SDL_HasKeyboard`，然后用
-  `./kodev build ios` 构建并完成下面的模拟器冒烟。
+- 已 rebase 到 B1（PR #146）合并后的 master，base 为 `bcda5a60`；本票只在
+  `platform/ios/ffi-symbols.txt` 增加 `SDL_HasKeyboard`，无需 Swift 或 Info.plist 改动。
+- 2026-10-25，Xcode 27.1：`./kodev build ios` 的模拟器 Release 构建成功，
+  两次符号门禁均为 **472/472**，没有独立动态库。首次全量构建结束后，后续原生构建
+  按 advisor 的共享 `lockf` 和 `CCACHE_BASEDIR` 约定执行。
+- 两台自建 iOS 27.0 模拟器均安装并打开 `test/leaves.epub`；iPad 另用共享锁内的
+  `./kodev run -b -- ios -d Documents/leaves.epub` 验证安装与启动路径。
+  临时观察补丁只记录真实 SDL 状态、能力位及页码，不产生输入、不加定时器、不入提交。
+  两台均记录到 `native=false / hasKeys=false / hasKeyboard=false` 随 SDL 初始化通知
+  变为全部 `true`，并显示 EPUB 第 1 页。
+- **键盘连接/断开、左右键、Esc 与触控的 GUI 冒烟仍待完成**：advisor 已批准 GUI 独占和
+  CLI 打开自己设备的窗口，但电脑控制接口持续报 `cgWindowNotFound`。CLI 启动和截图正常，
+  没有把这部分启动证据算作按键验收通过。等待 advisor 恢复 GUI 窗口。
+
+| 自建模拟器 | UDID | 启动截图 |
+| --- | --- | --- |
+| 100-iPad Pro 11-inch M5 | `43F1761A-93D5-427B-9655-62E318E15CE5` | [EPUB](external-keyboard/ipad-startup.png) |
+| 100-iPhone 17 Pro Max | `66DFB562-7845-4609-B2AC-15885D9B34A5` | [EPUB](external-keyboard/iphone-startup.png) |
 
 ## 模拟器冒烟（B1 合并后）
 
