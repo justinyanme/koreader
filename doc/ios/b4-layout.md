@@ -189,3 +189,20 @@ spec，复核通过。末次复核也确认旧事件尺寸不会再混入当前 
 | iPhone 去重后的首次启动 | iPad 去重后的首次启动 |
 | --- | --- |
 | ![iPhone startup](b4-layout/review-1/iphone-startup.png) | ![iPad startup](b4-layout/review-1/ipad-startup.png) |
+
+### B3 合并后的 rebase
+
+Rebase 到 `48ff25c21`（包含 #153），保留 B3 的单一 `IOS:init`：先设置存储，再进入
+包含 B4 屏幕设置的 `Device.init`，最后初始化键盘。plist、桥 features 和符号条目均保留
+双方内容。base gitlink 保持已合入 fork 的 `64c1fe253`；l10n `cd88caef5` 包含导入与
+TestFlight 双方文案。布局 spec 隔离存储迁移，不访问宿主 HOME；按 Q46 未运行。
+
+顶层 `58ce0216b` 的锁内增量构建成功：479 个导出符号、无松散动态库。两台 CLI 安装
+启动截图均确认底栏完整；倍率、安全区与此前一致，自然启动各收到 2 条窗口通知，
+额外 buffer 重建和重排通知均为 0。B3 的设备主目录与设置主目录均为 `Documents`。
+临时观察 patch 已移除，仅本票两台模拟器用 CLI 关机。
+[本次状态及 PNG SHA](b4-layout/rebase-b3/manifest.json)。
+
+| iPhone rebase 后启动 | iPad rebase 后启动 |
+| --- | --- |
+| ![iPhone rebase startup](b4-layout/rebase-b3/iphone-startup.png) | ![iPad rebase startup](b4-layout/rebase-b3/ipad-startup.png) |
