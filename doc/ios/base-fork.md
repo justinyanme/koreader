@@ -13,8 +13,10 @@
 | `ios: enable monolibtic` | iOS 固定 `MONOLIBTIC=1`；Apple 平台不链 `librt`。 | `Makefile.defs`、`thirdparty/cmake_modules/koreader_thirdparty_libs.cmake` |
 | `czmq: gate clock_gettime/-lrt detection on NOT APPLE` | czmq 在 Apple 平台不探测 `-lrt`。 | `thirdparty/czmq/cmake_tweaks.patch` |
 | `ios: link everything statically into the app executable` | iOS 上不产出任何 dylib：monolibtic 用 `ld -r` 预链接成一个保留全部全局符号的 `libkoreader-monolibtic.o`，SDL3 和 LuaJIT 编成静态库，跳过 macOS 的 `koreader` 启动程序。另外修了 meson 原生工具链把 `ar` 写成 `strip` 的问题（iOS 的 meson 探测会踩到）。 | `Makefile.defs`、`thirdparty/cmake_modules/koreader_targets.cmake`、`thirdparty/sdl3/CMakeLists.txt` |
+| B4：SDL 安全区与 viewport 重建 | 转发 `SDL_EVENT_WINDOW_SAFE_AREA_CHANGED`（像素尺寸事件原来已转发）；resize 释放旧 view 的完整 allocation，清除旧 viewport 后由设备层重建；夜间反色变化时更新完整 texture，包括安全区外底色，flash shadow 不消耗最终画面的状态。 | `ffi/SDL3.lua`、`ffi/framebuffer_SDL3.lua` |
+| B4：iOS 首帧窗口坐标 | `SDL_SyncWindow` 后仅在 `SDL_GetPlatform() == "iOS"` 时查询 `SDL_GetWindowSize`，把 `win_w/h` 从 display mode 的像素改成实际窗口 point，保证第一帧 dp 标尺和输入缩放成立；桌面、Emulator（包括 Retina 全屏）保持原值。 | `ffi/SDL3.lua` |
 
-上游文件的改动都包在 `IOS` 条件里，非 iOS 目标的行为不变。唯一的例外是 meson 原生工具链的 `ar`：原来写成 `strip`，改成 `ar` 是对所有目标都成立的修正。
+B1 构建改动包在 `IOS` 条件里；meson 原生工具链的 `ar` 从 `strip` 改成 `ar` 是所有目标都适用的修正。B4 的首帧 point 查询也只在 iOS 生效；viewport allocation 释放和边缘反色修正适用于 SDL 的 viewport 路径，不改变无 viewport 的桌面渲染，也不改墨水屏 framebuffer。
 
 ## 每月合并上游
 
