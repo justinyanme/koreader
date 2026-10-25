@@ -20,6 +20,7 @@ end
 
 local function yes() return true end
 local function no() return false end
+local function hasExternalKeyboard(self) return self._keyboard_connected == true end
 local function notOSX() return jit.os ~= "OSX" end
 
 local function isUrl(s)
@@ -183,9 +184,9 @@ local IOS = Device:extend{
     isEmulator = no,
     hasFrontlight = yes,
     hasNaturalLight = no,
-    hasKeys = no,
+    hasKeys = hasExternalKeyboard,
     hasDPad = no,
-    hasKeyboard = no,
+    hasKeyboard = hasExternalKeyboard,
     hasSymKey = no,
     useDPadAsActionKeys = no,
     supportsGamepad = no,
@@ -410,6 +411,51 @@ function Device:init()
     Generic.init(self)
 end
 
+function IOS:updateKeyboardState()
+    local connected = self.bridge.keyboardConnected()
+    if connected == nil or connected == self:hasKeys() then return end
+    self._keyboard_connected = connected
+    if not connected then
+        -- A removed keyboard may never send the releases for keys held at unplug.
+        local modifiers = {}
+        for key in pairs(self.input.modifiers) do modifiers[key] = false end
+        self.input.modifiers = modifiers
+        self.input.repeat_count = 0
+        self.input.last_repeat_time = nil
+        self.input.keyboard_toggle_tapped = nil
+    end
+    if self._keyboard_uimgr then
+        -- Like the externalkeyboard plugin, update static bindings before live widgets.
+        require("ui/widget/inputtext").initInputEvents()
+        self._keyboard_uimgr:broadcastEvent(Event:new(
+            connected and "PhysicalKeyboardConnected" or "PhysicalKeyboardDisconnected"))
+    end
+end
+
+function IOS:initKeyboard()
+    self:updateKeyboardState()
+    local backend = self.input.input
+    local function afterWait(...)
+        self:updateKeyboardState()
+        return ...
+    end
+    -- Keep this wrapper on the iOS instance. In particular, do not replace the
+    -- shared ffi/input_SDL3 waitForEvent used by Desktop and Emulator.
+    self.input.input = setmetatable({
+        waitForEvent = function(...)
+            -- Check even when SDL reports EINTR for an event discarded by the
+            -- Lua adapter (keyboard hotplug, window focus). No extra wakeups.
+            return afterWait(backend.waitForEvent(...))
+        end,
+    }, { __index = backend })
+end
+
+function IOS:init()
+    Device.init(self)
+    -- SDL must be initialized before querying its keyboard state.
+    self:initKeyboard()
+end
+
 function Device:setDateTime(year, month, day, hour, min, sec)
     if hour == nil or min == nil then return true end
     local command
@@ -444,6 +490,11 @@ end
 
 function Device:UIManagerReady(uimgr)
     UIManager = uimgr
+end
+
+function IOS:UIManagerReady(uimgr)
+    Device.UIManagerReady(self, uimgr)
+    self._keyboard_uimgr = uimgr
 end
 
 function Device:setEventHandlers(uimgr)

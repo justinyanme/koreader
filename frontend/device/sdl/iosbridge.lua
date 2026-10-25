@@ -38,6 +38,9 @@ safeAreaInsets() -> {top, right, bottom, left} | nil, error
 brightnessGet() -> number | nil, error
 brightnessSet(number) -> true | nil, error
     System brightness on the inclusive 0..100 scale used by PowerD.
+keyboardConnected() -> boolean | nil, error
+    Whether an external hardware keyboard is connected (SDL_HasKeyboard).
+    Query after SDL input waits; the on-screen keyboard does not count.
 --]]
 
 local Bridge = {}
@@ -59,13 +62,14 @@ function Bridge.new()
         safeAreaInsets = unsupported,
         brightnessGet = unsupported,
         brightnessSet = unsupported,
+        keyboardConnected = unsupported,
     }
 end
 
 --- The production bridge on iOS: the defaults above, with each feature's FFI adapter laid over
 -- them. An adapter is device/sdl/iosnative/<feature>.lua returning a table of the functions it
 -- implements, so tickets wiring different features never edit the same file.
-Bridge.features = { "safearea", "brightness", "links", "share", "files", "background", "download", "keychain" }
+Bridge.features = { "safearea", "brightness", "links", "share", "files", "background", "download", "keychain", "keyboard" }
 
 function Bridge.native()
     local bridge = Bridge.new()
