@@ -6,8 +6,9 @@ home (search field, 分类 sheet, cover grid), category lists and book lists
 below it, 简介 text, and the source list (管理书源). Going back uses the
 loaded pages; nothing is fetched again.
 
-Tapping a cover downloads its preferred format in a subprocess, with progress on
-the tile; tapping it again cancels. A finished download marks the tile, so
+Tapping a cover downloads its preferred format in a subprocess (through the
+download bridge where there are none, see BookSource.bridgeDownload), with
+progress on the tile; tapping it again cancels. A finished download marks the tile, so
 several can run at once; tapping a marked cover opens the book. Holding a cover
 opens its sheet (other formats, re-download).
 
@@ -56,6 +57,7 @@ local ffiUtil = require("ffi/util")
 local filemanagerutil = require("apps/filemanager/filemanagerutil")
 local lfs = require("libs/libkoreader-lfs")
 local md5 = require("ffi/sha2").md5
+local socketutil = require("socketutil")
 local util = require("util")
 local Screen = Device.screen
 local T = ffiUtil.template
@@ -77,6 +79,7 @@ local PAGER_H = EinkControls.BottomBar.height
 local ROW_H = dp(56)
 local BAND_H = dp(24)
 local THUMB_WAIT = 3 -- seconds before the grid shows the covers that arrived
+local THUMB_JOBS = 2 -- thumbnails fetched at once through the download bridge
 
 local function text(str, face, color, max_width, bold)
     return TextWidget:new{ text = str, face = Font:getFace(face), fgcolor = color or Palette.ink,
@@ -166,6 +169,7 @@ function BookSourceView:init()
     self.thumbs = {} -- thumbnail URL -> blitbuffer, scaled to the grid's cover size
     self.thumb_tried = {}
     self.downloads = {} -- book key -> running download
+    self.thumb_jobs = {} -- download bridge jobs fetching thumbnails -> true
     self.ges_events = {
         TapBlock = { GestureRange:new{ ges = "tap", range = self.dimen } }, -- nothing reaches the page below
         Swipe = { GestureRange:new{ ges = "swipe", range = self.dimen } },
@@ -222,6 +226,10 @@ function BookSourceView:close(no_refresh)
     for key in pairs(self.downloads) do
         self:cancelDownload(key, true)
     end
+    for job in pairs(self.thumb_jobs) do
+        job:cancel()
+    end
+    self.thumb_jobs = {}
     if no_refresh then
         UIManager:close(self)
     else
@@ -734,10 +742,16 @@ function BookSourceView:fetchThumbs(page, books)
     end
     if #missing == 0 then return end
     local source = page.source
-    local pid = ffiUtil.runInSubProcess(function()
-        BookSource.fetchThumbs(source, missing)
-    end)
-    if not pid then return end
+    local isDone
+    if Device:canForkProcesses() then
+        local pid = ffiUtil.runInSubProcess(function()
+            BookSource.fetchThumbs(source, missing)
+        end)
+        if not pid then return end
+        isDone = function() return ffiUtil.isSubProcessDone(pid) end
+    else
+        isDone = self:bridgeThumbs(source, missing)
+    end
     -- only the latest grid page's covers repaint the grid: an earlier page's late ones just stay cached
     self.thumb_gen = self.thumb_gen + 1
     local gen, page_no = self.thumb_gen, page.page_no
@@ -745,7 +759,7 @@ function BookSourceView:fetchThumbs(page, books)
     local painted = false
     local poll
     poll = function()
-        local done = ffiUtil.isSubProcessDone(pid)
+        local done = isDone()
         if not painted and not self.closed then
             local arrived, all = 0, true
             for _, thumb_url in ipairs(missing) do
@@ -770,6 +784,33 @@ function BookSourceView:fetchThumbs(page, books)
         end
     end
     UIManager:scheduleIn(0.25, poll)
+end
+
+--- Fetches thumbnails through the download bridge, THUMB_JOBS at a time, into the cache as BookSource.fetchThumbs
+-- does. Returns a function to call from the UI loop: it moves them along and says whether all are done.
+function BookSourceView:bridgeThumbs(source, thumb_urls)
+    util.makePath(BookSource.thumb_dir)
+    local queue, running = { unpack(thumb_urls) }, {}
+    return function()
+        for thumb_url, job in pairs(running) do
+            local result = job:poll()
+            if result then
+                running[thumb_url] = nil
+                self.thumb_jobs[job] = nil
+                BookSource.keepThumb(BookSource.thumbPath(thumb_url), result.code, result.headers)
+                job:cancel()
+            end
+        end
+        -- a closed page canceled its jobs and starts no more
+        while queue[1] and util.tableSize(running) < THUMB_JOBS and not self.closed do
+            local thumb_url = table.remove(queue, 1)
+            local job = BookSource.bridgeDownload(Device.bridge, source, { url = thumb_url },
+                BookSource.thumbPath(thumb_url) .. ".part", BookSource.block_timeout)
+            running[thumb_url] = job
+            self.thumb_jobs[job] = true
+        end
+        return next(running) == nil
+    end
 end
 
 -- Lists (categories) and text
@@ -1038,6 +1079,9 @@ function BookSourceView:download(page, book, format)
             BookSource.failureText{ state = "nowrite", detail = dir }) })
         return
     end
+    if not Device:canForkProcesses() then
+        return self:bridgeDownload(page, book, format, dir)
+    end
     local part = dir .. "/." .. md5(book.key) .. ".part"
     local pid, fd = ffiUtil.runInSubProcess(function(_pid, write_fd)
         local code, status, content_type = BookSource.downloadTo(source, format, part, function(size, server_name)
@@ -1058,8 +1102,42 @@ function BookSourceView:download(page, book, format)
     UIManager:scheduleIn(1, dl.poll)
 end
 
+--- download() without subprocesses: the download bridge writes the book into the cache, finishDownload moves it.
+function BookSourceView:bridgeDownload(page, book, format, dir)
+    util.makePath(BookSource.part_dir)
+    local part = BookSource.part_dir .. "/" .. md5(book.key) .. ".part"
+    local job = BookSource.bridgeDownload(Device.bridge, page.source,
+        { url = format.href, headers = { ["Accept-Encoding"] = "identity" } },
+        part, socketutil.FILE_BLOCK_TIMEOUT)
+    local dl = { job = job, part = part, dir = dir, book = book, format = format, source = page.source,
+        done = 0, size = format.size }
+    self.downloads[book.key] = dl
+    self:refreshTile(book, "ui")
+    UIManager:show(Toast:new{ text = T(_("Download started: %1. Tap the cover to cancel."), book.title), close_refresh_type = "ui" })
+    dl.poll = function() self:pollDownload(dl) end
+    UIManager:scheduleIn(1, dl.poll)
+end
+
+function BookSourceView:pollBridgeDownload(dl)
+    local result = dl.job:poll()
+    if result then
+        local headers = result.headers or {}
+        -- the name and size the subprocess gets from a HEAD request come with the answer itself
+        dl.server_name = result.code == 200 and BookSource.serverFileName(dl.format, headers) or nil
+        return self:finishDownload(dl, { code = result.code, status = result.status,
+            content_type = headers["content-type"] })
+    end
+    dl.size = dl.job.total or dl.format.size
+    if dl.job.received ~= dl.done then
+        dl.done = dl.job.received
+        if dl.size then self:refreshTile(dl.book, "fast") end
+    end
+    UIManager:scheduleIn(1, dl.poll)
+end
+
 function BookSourceView:pollDownload(dl)
     if self.downloads[dl.book.key] ~= dl then return end
+    if dl.job then return self:pollBridgeDownload(dl) end
     local exited = ffiUtil.isSubProcessDone(dl.pid)
     dl.buffer = dl.buffer .. (exited and ffiUtil.readAllFromFD(dl.fd) or readAvailable(dl.fd))
     if exited then dl.fd = nil end
@@ -1099,6 +1177,7 @@ function BookSourceView:finishDownload(dl, finished)
             result = { state = "nowrite", detail = dl.dir }
         end
     end
+    if dl.job then dl.job:cancel() end -- the book moved first: this releases the bridge's handle
     if result.state ~= "ok" then
         os.remove(dl.part)
         self:refreshTile(dl.book, "ui")
@@ -1129,9 +1208,13 @@ function BookSourceView:cancelDownload(key, quiet)
     if not dl then return end
     self.downloads[key] = nil
     UIManager:unschedule(dl.poll)
-    ffiUtil.terminateSubProcess(dl.pid)
-    self:collect(dl)
-    os.remove(dl.part)
+    if dl.job then
+        dl.job:cancel()
+    else
+        ffiUtil.terminateSubProcess(dl.pid)
+        self:collect(dl)
+        os.remove(dl.part)
+    end
     if not quiet then
         self:refreshTile(dl.book, "ui")
         UIManager:show(Toast:new{ text = T(_("Download canceled: %1"), dl.book.title), close_refresh_type = "ui" })

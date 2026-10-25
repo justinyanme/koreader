@@ -200,6 +200,9 @@ k2pdfopt_optimize_bmp
 k2pdfopt_reflow_bmp
 k2pdfopt_tocr_end
 k2pdfopt_tocr_single_word
+ko_ios_download_cancel
+ko_ios_download_poll
+ko_ios_download_start
 lodepng_decode
 lodepng_decode_file
 lodepng_decode_memory
