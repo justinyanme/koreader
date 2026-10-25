@@ -4,6 +4,7 @@ describe("iOS point ruler and safe viewport (seam C)", function()
     local BB, Device, FakeBridge, FB, SDL, factory, UIManager, IosStorage
     local device, screen, insets, window_w, window_h, scale, events
     local saved_settings, saved_window, saved_sdl, resizes
+    local util, saved_free_memory_provider
 
     setup(function()
         require("commonrequire")
@@ -14,12 +15,14 @@ describe("iOS point ruler and safe viewport (seam C)", function()
         SDL = require("ffi/SDL3")
         factory = require("ffi/framebuffer_SDL3")
         IosStorage = require("device/sdl/iosstorage")
+        util = require("util")
         -- Initialize its device callback before each case installs a fake.
         -- Otherwise the first FileManager require can overwrite that fake.
         UIManager = require("ui/uimanager")
     end)
 
     before_each(function()
+        saved_free_memory_provider = util.freeMemProvider
         saved_settings = {}
         for _, key in ipairs{ "night_mode", "screen_dpi", "closed_rotation_mode" } do
             saved_settings[key] = G_reader_settings:readSetting(key)
@@ -70,6 +73,8 @@ describe("iOS point ruler and safe viewport (seam C)", function()
     end)
 
     after_each(function()
+        -- C9 installs a provider for this initialized iOS instance.
+        util.freeMemProvider = saved_free_memory_provider
         IosStorage.setup:revert()
         factory.new:revert()
         SDL.gameControllerRumble:revert()
