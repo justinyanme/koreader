@@ -138,6 +138,8 @@ TARGET:
     bookeen
     cervantes
     emulator                  Default if no TARGET is given
+    ios                       iPhone & iPad simulator Release app
+    ios-device                iPhone & iPad device Release app, signed for Team V88UWDRASU
     kindle                    Compatible with all Kindle models >= Kindle4
     kindlehf                  Compatible with all Kindles with FW >= 5.16.3
     kindlepw2                 With compiler optimizations for Kindle models >= Paperwhite 2
@@ -171,6 +173,15 @@ function setup_target() {
         linux) is_system Linux ;;
         macos) is_system macOS ;;
         win32) is_system Windows ;;
+        ios)
+            is_system macOS
+            export IOS_PLATFORM=iphonesimulator
+            ;;
+        ios-device)
+            is_system macOS
+            TARGET=ios
+            export IOS_PLATFORM=iphoneos
+            ;;
         # Devices.
         android-arm | android-arm64 | android-x86 | android-x86_64) ;;
         bookeen) ;;
@@ -426,6 +437,7 @@ function kodev-run() {
     HELP="
 USAGE: $0 ${CMD} <OPTIONS> <EMULATOR ARGS>
        $0 ${CMD} <OPTIONS> <ANDROID TARGET> [ANDROID APK]
+       $0 ${CMD} <OPTIONS> ios [READER ARGS]
 
 $(build_options_help_msg '' 'use existing build' 'default' '')
 
@@ -452,6 +464,12 @@ EMULATOR OPTIONS:
 ANDROID TARGET:
 
     Install and run KOReader on an Android device connected through ADB.
+
+ios:
+
+    Install and run the simulator Release app in the booted simulator, or the
+    one named by IOS_SIMULATOR (name or UDID). Extra arguments go to reader.lua;
+    relative paths are in the app's data container, e.g. Documents/book.epub.
 "
     local short_opts="tg:::cW:H:D:s:w:"
     local long_opts="disable-touch,gdb::,valgrind::,callgrind,screen-width:,screen-height:,screen-dpi:,simulate:,wrap:"
@@ -573,9 +591,13 @@ ANDROID TARGET:
     set -- "${ARGS[@]}"
     # Setup target.
     local target=''
-    if [[ "$1" = android-* ]]; then
+    if [[ "$1" = android-* || "$1" = ios ]]; then
         target="$1"
         shift
+    fi
+    if [[ "${target}" = ios ]]; then
+        # The app is always a Release build.
+        KODEBUG=
     fi
     setup_target "${target}"
     # Build command prefix.
@@ -588,7 +610,12 @@ ANDROID TARGET:
     fi
     # Build the final make command.
     local margs=()
-    if [[ "${TARGET}" = android-* ]]; then
+    if [[ "${TARGET}" = ios ]]; then
+        if [[ ${#rwrap[@]} -gt 0 ]]; then
+            show_help 1>&2
+            exit ${E_OPTERR}
+        fi
+    elif [[ "${TARGET}" = android-* ]]; then
         if [[ "$1" = *.apk ]]; then
             margs+=(ANDROID_APK="$1")
             NO_BUILD=1
