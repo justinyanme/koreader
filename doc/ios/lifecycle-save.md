@@ -46,15 +46,20 @@
 | `profiles.koplugin` Resume | 执行用户设置的恢复配置；Dispatcher 执行前检查能力，不可用的 suspend/reboot/Wi-Fi 等动作会被过滤。 |
 | `kosync.koplugin` 动态 Suspend / Resume | Resume 安排拉取；Suspend 上传为可选工作。本票传入保存上下文时将上传延后并允许过期跳过；关 Wi-Fi 已由 `hasWifiManager` 保护。未传上下文时沿用原行为。 |
 
-## B1 合并后集成
+## 原生集成
 
-当前 `platform/ios/Background.swift` 独立于 D0 源码目录，未改 Project.swift、base、kodev 或 make；不能据此声明模拟器验证通过。
+已 rebase 到 B1/B2/B7/C4 合并后的 master。`Background.swift` 进入 `platform/ios/JustReader/Sources/`，由 B1 工程自动收录；`main.swift` 在 Lua 启动前初始化 SDL events 并安装 watcher。六个桥符号进入 `ffi-symbols.txt`。构建脚本显式转发 `CCACHE_BASEDIR`，避免 `env -i` 清除跨 worktree 缓存配置。
 
-1. 收到 B1 完成通知后 rebase master，按 B1 的桥头文件导入 SDL，编译 Background.swift。在 SDL 初始化后、运行 Lua 前调用 `ko_ios_background_install()`，失败须记录并作为冒烟失败处理。
-2. 将以下六个符号加入 B1 的保留/导出清单并通过 Release `nm` 门禁：`ko_ios_background_install`、`ko_ios_background_begin`、`ko_ios_background_end`、`ko_ios_background_expired`、`ko_ios_background_save_incomplete`、`ko_ios_background_set_save_incomplete`。Lua 适配器在 `iosnative/background.lua`；已有 iosbridge 契约和 features 包含本票五函数，无需修改其他功能的实现。
-3. 在 base fork 单独开只增改动的小 PR：把标记信封和直接排队的生命周期通知转为 `EV_SDL`。信封为 `SDL_EVENT_USER`，`user.windowID=0x4B4F4935`，`user.code` 为原始 SDL app event，范围 TERMINATING 到 DID_ENTER_FOREGROUND；检查标记和范围，不把普通用户事件误转为生命周期事件。app 事件在 Lua 主循环取出时立即交设备层处理，不再另排 nextTick 保存。
-4. `./kodev build ios`，创建 `93-` 前缀的 iPhone 17 Pro Max 与 iPad Pro 11 英寸 M5 / iOS 27.0，CLI 安装、启动、截图。不得复用其他 builder 的模拟器；需要 Simulator GUI 时先向 advisor 申请。
-5. 将下面场景合入 `acceptance.md` 并记录实际结果；代码和文档审查完成后再 push 并对 master 开 PR，正文写 `Closes #93` 与“测试已编写、按 Q46 未运行”。不合并 PR。
+base 补丁为 [fork PR #3](https://github.com/justinyanme/koreader-base/pull/3)，本分支 pin `0a34ba2983b06beb8f4cde12f9aa5b3bdb3d1de2`，未合并 PR。只给 `ffi/SDL3.lua` 增加转发分支：信封为 `SDL_EVENT_USER`，`user.windowID=0x4B4F4935`，`user.code` 为原始 SDL app event，范围 TERMINATING 到 DID_ENTER_FOREGROUND；同时检查标记和范围。app 事件在 Lua 主循环取出时立即交设备层处理，不再另排 nextTick 保存。
+
+构建只在共享锁内执行：
+
+```sh
+export CCACHE_BASEDIR=/Volumes/T5/github/koreader-wt
+lockf -t 7200 /tmp/justreader-ios-build.lock ./kodev build ios
+```
+
+构建结束即释放锁。安装、启动、截图和观察均对已构建 `.app` 使用 `xcrun simctl`，不持构建锁；禁止打开、切换或退出 Simulator.app。GUI 才能操作的检查全部交 owner 真机复核并标为未验收。
 
 ## 待执行的模拟器冒烟与真机复核
 
@@ -62,11 +67,11 @@
 
 | 场景 | 操作与判定 | 当前状态 |
 | --- | --- | --- |
-| 切其他 App | 修改进度与笔记，立刻切后台，再返回；检查 watcher 入队、同步保存、结束续时及 Resume。 | WAITING_B1 |
-| 锁屏 | 同样修改后用 CLI 锁屏/解锁；恢复到最后成功保存的版本。若系统 CLI 不支持，申请 GUI 后执行，不伪造为已通过。 | WAITING_B1 |
-| 后台终止 | 修改后后台等待约 5 秒，`simctl terminate` 后重开；恢复进度/笔记。 | WAITING_B1 |
-| 覆盖安装 | 保存后保留沙盒，用 `simctl install` 安装新包再重开；数据不损坏。 | WAITING_B1 |
-| 保存中断 | 在临时写入、备份 rename 后、替换后分别终止；重开只能读到完整旧版或新版，必要时通过 `.old` 恢复。不可把未执行的时序当结果。 | WAITING_B1 |
+| 切其他 App | 修改进度与笔记，立刻切后台，再返回；检查 watcher 入队、同步保存、结束续时及 Resume。 | 待冒烟 |
+| 锁屏 | 当前 simctl CLI 没有锁屏/解锁操作，屏幕 power off 不等同系统锁屏。交 owner 真机执行。 | 未验收 |
+| 后台终止 | 修改后后台等待约 5 秒，`simctl terminate` 后重开；恢复进度/笔记。 | 待冒烟 |
+| 覆盖安装 | 保存后保留沙盒，用 `simctl install` 安装新包再重开；数据不损坏。 | 待冒烟 |
+| 保存中断 | 在临时写入、备份 rename 后、替换后分别终止；重开只能读到完整旧版或新版，必要时通过 `.old` 恢复。不可把未执行的时序当结果。 | 待冒烟 |
 | 无续时 / 过期 / 写入失败 | 假桥 spec 覆盖同步保存、必要项先写、可选项跳过、结束续时与前台补做；不按成功运行报告。 | 已编写，Q46 未运行 |
 | 秒级合并与缓存清理 | spec 覆盖持续变更不推迟 3 秒截止、关书取消、内存警告清缓存后书与笔记仍可读。 | 已编写，Q46 未运行 |
 

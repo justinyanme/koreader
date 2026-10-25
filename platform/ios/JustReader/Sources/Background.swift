@@ -1,7 +1,5 @@
-// B5 implementation, kept outside the D0 shell's source folder until B1 lands.
-// B1 integration: import SDL's declarations through the app bridging header,
-// compile this file, call ko_ios_background_install after SDL_Init and before
-// running Lua, and retain/export all six ko_ios_background_* C ABI symbols.
+// B5 lifecycle bridge. The launcher installs the watcher after SDL event init
+// and before Lua starts. SDL owns the app/scene delegates; no callback enters Lua.
 import Foundation
 import UIKit
 

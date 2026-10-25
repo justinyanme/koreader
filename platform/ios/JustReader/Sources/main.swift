@@ -7,6 +7,12 @@ exit(SDL_RunApp(CommandLine.argc, CommandLine.unsafeArgv, { _, _ in koreaderMain
 /// Sets up the environment and runs reader.lua in the app's only Lua state, with the launch
 /// arguments as its `arg` (`xcrun simctl launch <device> me.justinyan.justreader <book>`).
 nonisolated func koreaderMain() -> Int32 {
+    // SDL's UIKit notifications only reach event watchers in the pinned SDL3.
+    // Install before running Lua so even a startup interruption gets queued.
+    guard SDL_Init(SDL_INIT_EVENTS), backgroundInstall() else {
+        print("[JustReader] cannot install lifecycle watcher: \(String(cString: SDL_GetError()))")
+        return EXIT_FAILURE
+    }
     guard let resources = Bundle.main.resourcePath, let executable = Bundle.main.executablePath else {
         print("[JustReader] no bundle paths")
         return EXIT_FAILURE

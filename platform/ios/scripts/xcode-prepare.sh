@@ -13,5 +13,6 @@ done
 # Start make from a clean environment: Xcode exports build settings such as INSTALL_DIR that the
 # KOReader makefiles would pick up, and under `kodev build ios` the outer make's jobserver too.
 exec env -i HOME="${HOME}" USER="${USER}" TMPDIR="${TMPDIR}" PATH="${path}" DEVELOPER_DIR="${DEVELOPER_DIR}" \
+    CCACHE_BASEDIR="${CCACHE_BASEDIR:-}" \
     make -C "${KO_ROOT}" TARGET=ios KODEBUG= IOS_PLATFORM="${PLATFORM_NAME}" \
     IOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET}" IOS_GATE_DROP="${IOS_GATE_DROP:-}" xcode-prepare
