@@ -1,7 +1,7 @@
 -- Seam C: real iOS device initialization and input dispatch, with a fake bridge
 -- and an offscreen framebuffer in place of the SDL window. Q46: do not run here.
 describe("iOS point ruler and safe viewport (seam C)", function()
-    local BB, Device, FakeBridge, FB, SDL, factory, UIManager
+    local BB, Device, FakeBridge, FB, SDL, factory, UIManager, IosStorage
     local device, screen, insets, window_w, window_h, scale, events
     local saved_settings, saved_window, saved_sdl, resizes
 
@@ -13,6 +13,7 @@ describe("iOS point ruler and safe viewport (seam C)", function()
         FB = require("ffi/framebuffer")
         SDL = require("ffi/SDL3")
         factory = require("ffi/framebuffer_SDL3")
+        IosStorage = require("device/sdl/iosstorage")
         -- Initialize its device callback before each case installs a fake.
         -- Otherwise the first FileManager require can overwrite that fake.
         UIManager = require("ui/uimanager")
@@ -38,6 +39,9 @@ describe("iOS point ruler and safe viewport (seam C)", function()
         }, { __index = saved_sdl })
         local bridge = FakeBridge.new()
         bridge.safeAreaInsets = function() return insets end
+        -- Storage migration has its own spec; layout initialization must not
+        -- read or migrate the host HOME when it enters B3's IOS:init.
+        stub(IosStorage, "setup", function() return "spec/front/unit/data" end)
         device = Device:createVariant{ platform = "iOS", native_bridge = bridge }
         device.window = { width = window_w, height = window_h }
         stub(factory, "new", function()
@@ -66,6 +70,7 @@ describe("iOS point ruler and safe viewport (seam C)", function()
     end)
 
     after_each(function()
+        IosStorage.setup:revert()
         factory.new:revert()
         SDL.gameControllerRumble:revert()
         device:UIManagerReady(UIManager)
