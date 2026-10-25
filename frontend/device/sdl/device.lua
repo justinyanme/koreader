@@ -275,10 +275,16 @@ function IOS:resizeWindow(w, h)
     self.window.width, self.window.height = SDL.win_w, SDL.win_h
     -- resize returns a full buffer, with the previous viewport released. Keep
     -- screen_size physical: framebuffer coordinate translation depends on it.
+    -- SDL preserves software rotation (including a saved orientation). Build
+    -- the safe view in physical coordinates first, then restore logical axes.
+    local rotation = self.screen.bb:getRotation()
+    self.screen.bb:setRotation(0)
     local full_size = self.screen:getSize()
     self.screen.screen_size.w, self.screen.screen_size.h = full_size.w, full_size.h
     self:setupScreen()
     self.screen:setViewport(self.viewport)
+    self.screen.bb:setRotation(rotation)
+    self.screen.full_bb:setRotation(rotation)
     self.viewport_touch_offset.x = -self.viewport.x
     self.viewport_touch_offset.y = -self.viewport.y
     self:notifyScreenResize()

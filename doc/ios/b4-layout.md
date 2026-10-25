@@ -73,7 +73,8 @@ PNG 文件字节一致比逐像素一致更严格；没有把截图比较称为�
 ## 验证与待完成项
 
 测试已编写、按 Q46 未运行：`ioslayout_spec.lua`（接缝 C，真实设备初始化及
-输入分发配假桥/假窗口）；`narrowscreen_spec.lua`（接缝 B 书架及共享规则）；
+输入分发配假桥/假窗口，包括已保存的非零逻辑旋转，物理安全区重建后恢复逻辑轴）；
+`narrowscreen_spec.lua`（接缝 B 书架及共享规则）；
 `readertypesetpanel_spec.lua`（接缝 A，横竖屏及 inset 高度变化后同一正文位置）。
 未做 Leaf5 实机验收。Lua 文件仅做 loadfile 语法解析，diff 做空白检查。
 

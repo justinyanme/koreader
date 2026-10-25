@@ -35,10 +35,12 @@ describe("iOS point ruler and safe viewport (seam C)", function()
             -- Models the B1-followup framebuffer contract: resize owns and releases
             -- the old full buffer and its view, then returns a fresh full buffer.
             function screen:resize()
+                local rotation = self.bb:getRotation()
                 self.bb:free()
                 if self.full_bb then self.full_bb:free() end
                 self.full_bb, self.viewport = nil, nil
                 self.bb = BB.new(window_w * scale, window_h * scale, BB.TYPE_BBRGB32)
+                self.bb:setRotation(rotation)
                 SDL.win_w, SDL.win_h = window_w, window_h
             end
             return screen
@@ -104,6 +106,21 @@ describe("iOS point ruler and safe viewport (seam C)", function()
             local ev = { type = C.EV_ABS, code = C.ABS_MT_POSITION_Y, value = 300 }
             device.input:eventAdjustHook(ev)
             assert.are.equal(300 - top * scale, ev.value)
+        end
+    end)
+
+    it("keeps the physical point ruler and safe rectangle after a saved software rotation", function()
+        screen:setRotationMode(screen.DEVICE_ROTATED_CLOCKWISE)
+        local rotation = screen.bb:getRotation()
+        for _, event in ipairs{ SDL.SDL.SDL_EVENT_WINDOW_SAFE_AREA_CHANGED, SDL.SDL.SDL_EVENT_WINDOW_RESIZED } do
+            dispatch(event)
+            assert.are.equal(132, screen:scaleBySize(44))
+            assert.are.equal(480, screen:getDPI())
+            assert.are.same({ w = 1320, h = 2868 }, screen.screen_size)
+            assert.are.same({ x = 0, y = 186, w = 1320, h = 2580 }, device.viewport)
+            assert.are.same({ w = 2580, h = 1320 }, screen:getRawSize())
+            assert.are.equal(rotation, screen.bb:getRotation())
+            assert.are.equal(rotation, screen.full_bb:getRotation())
         end
     end)
 
