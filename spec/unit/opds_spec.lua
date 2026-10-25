@@ -388,6 +388,158 @@ describe("OPDS module", function()
         socketutil.FILE_TOTAL_TIMEOUT = orig_ftt
     end)
 
+    describe("OPDS client redirect policy", function()
+        local client, request, requests, responses, request_stub
+
+        before_each(function()
+            client = OPDSClient:new{ cookie_jar = CookieJar:new() }
+            request = {
+                url = "https://example.test/catalog",
+                username = "reader",
+                password = "secret",
+                auth_headers = {
+                    ["CF-Access-Client-Id"] = "id.access",
+                    ["CF-Access-Client-Secret"] = "token",
+                },
+            }
+            requests, responses = {}, {}
+            request_stub = stub(require("socket.http"), "request", function(req)
+                table.insert(requests, req)
+                local response = table.remove(responses, 1)
+                assert.is_not_nil(response, "unexpected HTTP request: " .. req.url)
+                assert.is_false(req.redirect)
+                req.response_headers(response[1], response[2])
+                return 1, response[1], response[2], "HTTP " .. response[1]
+            end)
+        end)
+
+        after_each(function()
+            request_stub:revert()
+        end)
+
+        local function assertCredentials(req)
+            assert.are.equal("reader", req.user)
+            assert.are.equal("secret", req.password)
+            assert.are.equal("id.access", req.headers["CF-Access-Client-Id"])
+            assert.are.equal("token", req.headers["CF-Access-Client-Secret"])
+        end
+
+        local function assertNoCredentials(req)
+            assert.is_nil(req.user)
+            assert.is_nil(req.password)
+            assert.is_nil(req.headers["CF-Access-Client-Id"])
+            assert.is_nil(req.headers["CF-Access-Client-Secret"])
+        end
+
+        it("keeps credentials on a relative same-origin 302", function()
+            responses = { { 302, { location = "/book.epub" } }, { 200, {} } }
+            assert.are.equal(200, (client:request(request)))
+            assert.are.equal(2, #requests)
+            assert.are.equal("https://example.test/book.epub", requests[2].url)
+            assertCredentials(requests[1])
+            assertCredentials(requests[2])
+        end)
+
+        for _, origins in ipairs{
+            { "https://example.test", "https://example.test:443" },
+            { "https://example.test:443", "https://example.test" },
+            { "http://example.test", "http://example.test:80" },
+            { "http://example.test:", "http://example.test" },
+            { "http://example.test", "http://example.test:" },
+            { "HTTPS://EXAMPLE.TEST", "https://example.test" },
+        } do
+            it("keeps credentials from " .. origins[1] .. " to " .. origins[2], function()
+                request.url = origins[1] .. "/catalog"
+                responses = { { 302, { location = origins[2] .. "/book.epub" } }, { 200, {} } }
+                assert.are.equal(200, (client:request(request)))
+                assert.are.equal(2, #requests)
+                assertCredentials(requests[1])
+                assertCredentials(requests[2])
+            end)
+        end
+
+        for _, destination in ipairs{
+            "https://cdn.example.test/book.epub",
+            "https://example.test:8443/book.epub",
+        } do
+            it("strips credentials on a 302 to " .. destination, function()
+                responses = { { 302, { location = destination } }, { 200, {} } }
+                assert.are.equal(200, (client:request(request)))
+                assert.are.equal(2, #requests)
+                assertCredentials(requests[1])
+                assertNoCredentials(requests[2])
+            end)
+        end
+
+        it("rechecks credentials against the original origin on every hop", function()
+            responses = {
+                { 302, { location = "https://cdn.example.test/book.epub" } },
+                { 302, { location = "/another.epub" } },
+                { 302, { location = "https://example.test:443/book.epub" } },
+                { 200, {} },
+            }
+            assert.are.equal(200, (client:request(request)))
+            assert.are.equal(4, #requests)
+            assertCredentials(requests[1])
+            assertNoCredentials(requests[2])
+            assertNoCredentials(requests[3])
+            assertCredentials(requests[4])
+        end)
+
+        it("does not send credentials across a scheme change", function()
+            request.url = "http://example.test/catalog"
+            responses = { { 302, { location = "https://example.test/book.epub" } }, { 200, {} } }
+            assert.are.equal(200, (client:request(request)))
+            assert.are.equal(2, #requests)
+            assertCredentials(requests[1])
+            assertNoCredentials(requests[2])
+        end)
+
+        for _, scheme in ipairs{ "http", "HTTP" } do
+            it("refuses an HTTPS downgrade to " .. scheme .. " without requesting the insecure URL", function()
+                local destination = scheme .. "://example.test/book.epub"
+                responses = { { 302, { location = destination } } }
+                local code, headers, status = client:request(request)
+                assert.are.equal(302, code)
+                assert.are.equal(destination, headers.location)
+                assert.are.equal("HTTP 302", status)
+                assert.are.equal(1, #requests)
+            end)
+        end
+
+        it("fails after five requests in a redirect loop", function()
+            for _ = 1, 5 do
+                table.insert(responses, { 302, { location = "/catalog" } })
+            end
+            local code, headers, status = client:request(request)
+            assert.is_nil(code)
+            assert.is_nil(headers)
+            assert.are.equal("Too many redirects", status)
+            assert.are.equal(5, #requests)
+        end)
+
+        it("can finish on the fifth request", function()
+            for _ = 1, 4 do
+                table.insert(responses, { 302, { location = "/catalog" } })
+            end
+            table.insert(responses, { 200, {} })
+            assert.are.equal(200, (client:request(request)))
+            assert.are.equal(5, #requests)
+        end)
+
+        for _, invalid_url in ipairs{
+            "/catalog", "//example.test/catalog", "file:///catalog",
+            "https://example.test:0/catalog", "https://example.test:65536/catalog",
+        } do
+            it("does not authorize an invalid HTTP origin: " .. invalid_url, function()
+                request.url = invalid_url
+                responses = { { 200, {} } }
+                assert.are.equal(200, (client:request(request)))
+                assertNoCredentials(requests[1])
+            end)
+        end
+    end)
+
     describe("OPDS parser module", function()
         it("should parse OPDS navigation catalog", function()
             local catalog = OPDSParser:parse(navigation_sample)
