@@ -199,7 +199,8 @@ describe("Book end", function()
         ReadHistory.hist = {} -- the finished books counted are only this file's
         -- Marks made one after another are seconds apart, as they are for a reader.
         clock = 0
-        os.time = function(t) return t and real_time(t) or real_time() + clock end -- luacheck: ignore
+        local started = real_time()
+        os.time = function(t) return t and real_time(t) or started + clock end -- luacheck: ignore
         for __, file in ipairs{ "juliet.epub", "sample.pdf" } do
             ffiUtil.copyFile("spec/front/unit/data/" .. file, home .. "/" .. file)
             DocSettings:open(home .. "/" .. file):purge()
