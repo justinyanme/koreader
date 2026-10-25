@@ -2,6 +2,7 @@
 -- A process interrupted between backup and replacement can reopen the .old file.
 local ffiutil = require("ffi/util")
 local lfs = require("libs/libkoreader-lfs")
+local logger = require("logger")
 
 local SettingsWriter = {}
 
@@ -58,7 +59,9 @@ function SettingsWriter.write(data, path)
         return nil, err
     end
     ok, err = ffiutil.fsyncDirectory(path)
-    if not ok then return nil, err end
+    -- Replacement is already committed: do not retry in another location or
+    -- retain old candidates merely because this filesystem cannot sync dirs.
+    if not ok then logger.warn("SettingsWriter: directory sync failed:", path, err) end
     return true
 end
 

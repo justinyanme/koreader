@@ -150,12 +150,12 @@ describe("atomic settings persistence", function()
         assert.is_nil(lfs.attributes(path .. ".tmp"))
     end)
 
-    it("reports directory sync failure while retaining a complete committed version", function()
+    it("accepts a committed replacement when directory sync is unsupported", function()
         local settings = seed()
         stub(ffiutil, "fsyncDirectory", function() return false, "directory sync failed" end)
         local ok, err = settings:saveSetting("position", 20):flush()
-        assert.is_nil(ok)
-        assert.matches("directory sync failed", err)
+        assert.is_true(ok)
+        assert.is_nil(err)
         assert.are.equal(20, LuaSettings:open(path):readSetting("position"))
     end)
 
@@ -180,6 +180,36 @@ describe("atomic settings persistence", function()
         assert.are.equal(10, DocSettings:open(book):readSetting("position"))
         settings:purge()
     end)
+
+    it("purges old candidates after a committed sidecar even if directory sync fails", function()
+        local book = directory .. "/book.epub"
+        local settings = DocSettings:open(book)
+        assert(settings:saveSetting("position", 10):flush())
+        settings = DocSettings:open(book)
+        local old_sidecar = settings.doc_sidecar_dir .. "/" .. settings.sidecar_filename
+        G_reader_settings:saveSetting("document_metadata_folder", "dir")
+        stub(ffiutil, "fsyncDirectory", function() return false, "directory sync failed" end)
+        assert.are.equal(settings.dir_sidecar_dir, settings:saveSetting("position", 20):flush())
+        assert.is_nil(lfs.attributes(old_sidecar))
+        assert.is_nil(lfs.attributes(old_sidecar .. ".old"))
+        assert.are.equal(20, DocSettings:open(book):readSetting("position"))
+        DocSettings:open(book):purge()
+    end)
+
+    for _, has_candidate in ipairs{ false, true } do
+        it("purges interrupted sidecar temporaries (candidate=" .. tostring(has_candidate) .. ")", function()
+            local book = directory .. "/book.epub"
+            local settings = DocSettings:open(book)
+            if has_candidate then assert(settings:saveSetting("position", 10):flush()) end
+            local sidecar_dir = settings.doc_sidecar_dir
+            util.makePath(sidecar_dir)
+            local temporary = sidecar_dir .. "/" .. settings.sidecar_filename .. ".tmp"
+            assert(util.writeToFile("unfinished", temporary))
+            DocSettings:open(book):purge()
+            assert.is_nil(lfs.attributes(temporary))
+            assert.is_nil(lfs.attributes(sidecar_dir))
+        end)
+    end
 
     it("preserves the 60-second sidecar backup and rejects a failed file sync", function()
         local book = directory .. "/book.epub"

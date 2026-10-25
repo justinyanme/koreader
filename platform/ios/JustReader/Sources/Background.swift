@@ -74,8 +74,8 @@ private enum Background {
             guard let event else { return true }
             let type = event.pointee.type
             if type >= SDL_EVENT_TERMINATING.rawValue && type <= SDL_EVENT_DID_ENTER_FOREGROUND.rawValue {
-                // UIKit lifecycle delivery is on its main thread. Marshalling
-                // other senders also serializes bridge state with expiry.
+                // UIKit lifecycle delivery and Lua bridge calls must stay on
+                // the main queue; never wait on it while SDL holds its watcher lock.
                 onBackgroundMain { Background.observe(type) }
             }
             return true
@@ -85,8 +85,8 @@ private enum Background {
 }
 
 nonisolated private func onBackgroundMain<T: Sendable>(_ action: @MainActor @Sendable () -> T) -> T {
-    if Thread.isMainThread { return MainActor.assumeIsolated { action() } }
-    return DispatchQueue.main.sync { MainActor.assumeIsolated { action() } }
+    dispatchPrecondition(condition: .onQueue(.main))
+    return MainActor.assumeIsolated { action() }
 }
 
 @c(ko_ios_background_install)

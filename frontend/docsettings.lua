@@ -392,6 +392,7 @@ function DocSettings:purge(sidecar_to_keep, data_to_purge)
     if data_to_purge.doc_settings and self.candidates then
         for _, t in ipairs(self.candidates) do
             local candidate_path = t.path
+            os.remove(candidate_path .. ".tmp")
             if isFile(candidate_path) then
                 if (not sidecar_to_keep)
                         or (candidate_path ~= sidecar_to_keep and candidate_path ~= sidecar_to_keep .. ".old") then
@@ -415,6 +416,10 @@ function DocSettings:purge(sidecar_to_keep, data_to_purge)
     -- Remove empty sidecar dirs
     if data_to_purge.doc_settings or data_to_purge.custom_cover_file or data_to_purge.custom_metadata_file then
         for _, dir in ipairs({ self.doc_sidecar_dir, self.dir_sidecar_dir, self.hash_sidecar_dir }) do
+            if data_to_purge.doc_settings and dir then
+                -- A first write may have been interrupted before any candidate existed.
+                os.remove(dir .. "/" .. self.sidecar_filename .. ".tmp")
+            end
             DocSettings.removeSidecarDir(dir)
         end
     end

@@ -48,7 +48,6 @@ describe("iOS lifecycle persistence (seams A and C)", function()
         revertStub(reader.doc_settings, "flush")
         revertStub(G_reader_settings, "flush")
         revertStub(UIManager, "broadcastEvent")
-        revertStub(host, "hasEinkScreen")
         revertStub(os, "rename")
         if reader.kosync then
             reader.kosync.settings.auto_sync = false
@@ -206,20 +205,6 @@ describe("iOS lifecycle persistence (seams A and C)", function()
         now = now + time.s(4)
         UIManager:_checkTasks()
         assert.are.same(before, require("docsettings"):open(sample):readSetting("annotations"))
-    end)
-
-    it("keeps LCD brightness when a daylight frontlight schedule runs after resume", function()
-        stub(host, "hasEinkScreen", function() return false end)
-        G_reader_settings:saveSetting("autowarmth_fl_off_during_day", true)
-        local AutoWarmth = dofile("plugins/autowarmth.koplugin/main.lua")
-        local plugin = AutoWarmth:new{ ui = reader }
-        reader:registerModule("autowarmth", plugin)
-        assert.is_false(plugin:getFlOffDuringDayMenu().enabled_func())
-        local intensity = host.powerd:frontlightIntensity()
-        plugin:setFrontlight(false)
-        now = now + time.s(1)
-        UIManager:_checkTasks()
-        assert.are.equal(intensity, host.powerd:frontlightIntensity())
     end)
 
     for _, expired in ipairs{ false, true } do

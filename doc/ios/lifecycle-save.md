@@ -5,10 +5,10 @@
 ## 保存顺序与恢复边界
 
 - `LuaSettings:flush()` 与 `DocSettings:flush()` 的主 metadata 文件共用 `settingswriter`：同目录 `.tmp` → 检查 write、flush、fsync、close → 满足原有 60 秒规则时将目标 rename 为 `.old` → rename 临时文件为目标 → fsync 目录。
-- 临时写入失败时目标不变；备份 rename 失败则不替换目标；替换失败会把 `.old` 改回目标。如果回滚也失败，保留完整 `.old`，加载器仍能恢复。两个 rename 之间中断，加载器会回退 `.old`；残留 `.tmp` 不参与加载，由下一次写入覆盖/清理。目录同步失败会向上传递失败，但不会破坏已经替换的完整文件。
+- 临时写入失败时目标不变；备份 rename 失败则不替换目标；替换失败会把 `.old` 改回目标。如果回滚也失败，保留完整 `.old`，加载器仍能恢复。两个 rename 之间中断，加载器会回退 `.old`；残留 `.tmp` 不参与加载，由下一次写入覆盖或 purge 清理（包括首次写入中断、没有候选文件的情况）。rename 提交后的目录 fsync 失败只记录日志并返回成功，不再误触发回退位置写入、跳过 purge 或前台重试。
 - `ioslifecycle` 只由 iOS 设备安装。will-resign-active 对应的 SDL WILL_ENTER_BACKGROUND 立即同步保存；同一次失活的后续通知不重复保存成功的数据，但仍释放 watcher 可能取得的续时。
 - 必要项顺序为：ReaderUI 的 SaveSettings（收集进度与笔记）→ `.sdr` → 全局设置 → UIManager 的 FlushSettings 广播。可选上下文防止广播再次保存同一个 ReaderUI。自动笔记导出、metadata 归档、DocCache 序列化和 KOSync 的 Suspend 上传延后到必要项之后，每项开始前检查过期；必要项失败时也跳过可选项。
-- 续时未获准仍保存；过期仍尝试必要项。原生过期回调立即结束任务并置 sticky 标志，不回调 Lua。Lua 无论保存成功或抛错均结束续时；失败或跳过工作保留未完成标志，回前台补做。
+- 续时未获准仍保存；过期仍尝试必要项。原生过期回调执行时立即结束任务并置 sticky 标志，不回调 Lua。同步保存期间主 run loop 被 Lua 占用，过期回调须等本次保存结束才能运行，因此“过期后跳过可选项”仅对事件出队前已经过期的情况生效；保存中被系统杀死由原子写入保护已落盘版本。Lua 无论保存成功或抛错均结束续时；失败或跳过工作保留未完成标志，回前台补做。
 - watcher 已申请但 Lua 尚未领取的句柄单独保留；即使先过期，Lua 领取的仍是原句柄，不能被一次新申请掩盖过期。同一次失活期间的过期状态一直保留到回前台，已排队的 WILL/DID 重复通知不能重新开启可选工作。FlushSettings 的插件处理器向 LuaSettings 传递可选上下文；写入失败会标记未完成，并保留插件 dirty 标志供前台补做。未传上下文时沿用各处理器原行为。
 - PageUpdate、PosUpdate、AnnotationsModified 在 ReaderUI 的分发完成后调用设备可选钩子。从首次变更起 3 秒到期，后续连续变更不推迟截止时间；关书/失活时取消定时器。普通设备没有该钩子。
 - 内存警告仅清 DocCache 的 RAM/已登记磁盘缓存、GlyphCache、ImageCache 并 GC；不递归删除数据根目录，不释放仍被控件引用的图像。
@@ -17,7 +17,7 @@
 
 ## Suspend / Resume 审计
 
-审计范围为 `frontend/`、`plugins/` 中的定义、别名和动态安装，包括 `_onSuspend` / `_onResume`；不是只搜函数声明。下表为 B1 合并前的 Lua 审计，PR 正文应链接此表并注明新增门控。
+审计范围为 `frontend/`、`plugins/` 中的定义、别名和动态安装，包括 `_onSuspend` / `_onResume`；不是只搜函数声明。下表结合 B1 的 `make/ios.mk` 打包排除列表审计；未对不进 iOS 包的插件添加能力门控，保留其他平台原行为。
 
 不广播 `RequestSuspend`：DeviceListener 会调用 `UIManager:suspend()`，下一 tick 进入 SDLPowerD 的 `beforeSuspend()`，再走设备 `_beforeSuspend()` 的 flush、Suspend、输入抑制、关闭按键重复。iOS 需要在当前事件中同步保存，并由 UIKit 管理系统休眠，因此只在必要项之后广播一次 Suspend；回前台广播 Resume。重复 UIKit/scene 恢复通知不重复广播；首个恢复通知仍可触发 B3 sweep。
 
@@ -35,7 +35,7 @@
 | `toast.lua`、`notification.lua` Resume 别名 | 消费输入相关事件以免传给 InputContainer；不做设备动作，顶层广播仍会传给其他窗口。 |
 | `autosuspend.koplugin` Suspend / Resume | 会安排 suspend/shutdown/standby；模块加载已有 `canSuspend` 门控，iOS 禁用；内部 shutdown/standby 另有能力门。 |
 | `autodim.koplugin` 动态 Suspend / Resume | 停止亮度渐变、恢复用户主动启用的自动调暗计时；需要 `hasFrontlight`。只恢复自己之前改变的亮度，不进入休眠/关闭系统屏幕。 |
-| `autowarmth.koplugin` 动态 Suspend / Resume | 温度由 `hasNaturalLight` 控制；夜间反色可保留。**新增 `hasEinkScreen` 门控**：白天关前光的菜单、定时安排和执行只对墨水屏启用，LCD Resume 不修改 `fl_was_on`。 |
+| `autowarmth.koplugin` 动态 Suspend / Resume | B1 的 `make/ios.mk` 明确排除该插件，不进 iOS 包，不会在 iOS 执行日间关前光。撤销本票最初加入的 `hasEinkScreen` 门控，保留 Android LCD 等非 iOS 平台的原行为。 |
 | `autoturn.koplugin` Suspend / Resume | 暂停/恢复当前自动翻页，保存自身偏好；无设备休眠动作。 |
 | `statistics.koplugin` Suspend / Resume | 保存统计数据库、暂停/恢复阅读计时；保留。 |
 | `systemstat.koplugin` 与其 Widget Suspend / Resume | 记录时间与次数；无电源动作。 |
@@ -48,7 +48,7 @@
 
 ## 原生集成
 
-已 rebase 到 B1/B2/B7/C4 合并后的 master。`Background.swift` 进入 `platform/ios/JustReader/Sources/`，由 B1 工程自动收录；`main.swift` 在 Lua 启动前初始化 SDL events 并安装 watcher。六个桥符号进入 `ffi-symbols.txt`。构建脚本显式转发 `CCACHE_BASEDIR`，避免 `env -i` 清除跨 worktree 缓存配置。
+已 rebase 到 B1/B2/B7/C4 合并后的 master。`Background.swift` 进入 `platform/ios/JustReader/Sources/`，由 B1 工程自动收录；`main.swift` 在 Lua 启动前初始化 SDL events 并安装 watcher。六个桥符号进入 `ffi-symbols.txt`。watcher 与桥函数用 `dispatchPrecondition(.onQueue(.main))` 断言主队列，不通过 `main.sync` 跨线程等待，避免与 SDL watcher 锁互锁。构建脚本显式转发 `CCACHE_BASEDIR`，避免 `env -i` 清除跨 worktree 缓存配置。
 
 base 补丁为 [fork PR #3](https://github.com/justinyanme/koreader-base/pull/3)，本分支 pin `0a34ba2983b06beb8f4cde12f9aa5b3bdb3d1de2`，未合并 PR。只给 `ffi/SDL3.lua` 增加转发分支：信封为 `SDL_EVENT_USER`，`user.windowID=0x4B4F4935`，`user.code` 为原始 SDL app event，范围 TERMINATING 到 DID_ENTER_FOREGROUND；同时检查标记和范围。app 事件在 Lua 主循环取出时立即交设备层处理，不再另排 nextTick 保存。
 
