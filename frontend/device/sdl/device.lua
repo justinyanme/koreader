@@ -558,7 +558,7 @@ function Device:createVariant(options)
     }
     if variant == Desktop then device.model = platform end
     if variant == IOS then
-        device.bridge = options.native_bridge or require("device/sdl/iosbridge").new()
+        device.bridge = options.native_bridge or require("device/sdl/iosbridge").native()
     end
     return device
 end

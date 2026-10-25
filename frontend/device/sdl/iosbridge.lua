@@ -62,4 +62,20 @@ function Bridge.new()
     }
 end
 
+--- The production bridge on iOS: the defaults above, with each feature's FFI adapter laid over
+-- them. An adapter is device/sdl/iosnative/<feature>.lua returning a table of the functions it
+-- implements, so tickets wiring different features never edit the same file.
+Bridge.features = { "safearea", "brightness", "links", "share", "files", "background", "download", "keychain" }
+
+function Bridge.native()
+    local bridge = Bridge.new()
+    for _, feature in ipairs(Bridge.features) do
+        local name = "device/sdl/iosnative/" .. feature
+        if package.searchpath(name, package.path) then
+            for key, fn in pairs(require(name)) do bridge[key] = fn end
+        end
+    end
+    return bridge
+end
+
 return Bridge
