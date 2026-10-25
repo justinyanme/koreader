@@ -73,7 +73,7 @@ KOReader is an offline, open-source reader with deep typesetting control (crengi
 
 ## Accessibility & Inclusion
 
-- iOS uses a 44pt minimum touch target, including invisible extensions around smaller drawn controls. R05 supplies five interface font sizes. Initial native keyboard/picker/share UI follows the system; VoiceOver’s five-flow minimum is a later milestone (Q21), not an implemented capability here.
+- iOS targets a 44pt minimum touch size. Smaller Tappable and PillButton controls gain invisible hit-area extensions; this extension does not cover Toggle, TickTrack or Segmented controls. R05 supplies five interface font sizes. Initial native keyboard/picker/share UI follows the system; VoiceOver’s five-flow minimum is a later milestone (Q21), not an implemented capability here.
 - At narrow widths, covers keep their reference size in fewer columns; crowded typesetting tracks advance one stop toward a tap rather than requiring precise selection of overlapping stops.
 
 - Large touch targets, because e-ink touch is imprecise and slow to confirm.

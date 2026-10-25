@@ -156,3 +156,19 @@ spec，复核通过。末次复核也确认旧事件尺寸不会再混入当前 
 系统键盘遮挡仍**未验收**。owner 指示禁止 builder 操作 Simulator.app，GUI 项移交
 [acceptance.md 的真机复核](acceptance.md#两台设备分别复核)。对应逻辑已有 spec，
 不将“写了 spec”记作运行通过。P1/P6 的后续决定见上表。
+
+### 第 1 轮审查修正
+
+- 修正三处 spec：夜间页边检查 `getPixelP` 的原始字节；SDL texture mock 读取
+  `SDL_Rect.w/h`；首帧 SDL mock 补齐无条件调用的 `SDL_EnableScreenSaver`。
+  allocation 用例确认旧完整 buffer 从拥有内存变为已释放，不再断言从未拥有内存的 view。
+- iOS 在重建前比较当前 window point、renderer pixel 和计算后的 viewport；三者均未
+  变化时跳过 buffer/texture 重建、三次广播和 FileManager reinit。补写启动的重复事件、
+  一次旋转的三个事件、仅像素变化、点标尺变化而像素几何不变的 spec。
+- 通用 SDL resize 重新应用已配置的 `EMULATE_READER_VIEWPORT`，保留软件旋转和
+  原有触摸平移；补写窗口缩放和非零软件旋转的覆盖。未改无 viewport 的桌面行为。
+- PRODUCT 的命中范围说明收窄到 Tappable、PillButton；没有声称 Toggle、TickTrack、
+  Segmented 也获得了扩展。
+
+本轮 spec 同样按 Q46 只编写、不运行；原有 PNG/SHA 记录仍对应前述构建，不作为
+本轮新增 spec 已通过的证据。

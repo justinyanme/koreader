@@ -252,17 +252,21 @@ function IOS:setupScreen()
     screen.scaleBySize = pointsToPixels
     screen.scaleByDPI = pointsToPixels
 
+    self.viewport = self:getSafeViewport(screen.screen_size.w, screen.screen_size.h, self.pixel_ratio)
+end
+
+function IOS:getSafeViewport(width, height, pixel_ratio)
     local insets, err = self.bridge.safeAreaInsets()
     if not insets then
         logger.warn("iOS safe area unavailable:", err)
         insets = { top = 0, right = 0, bottom = 0, left = 0 }
     end
     -- Round inward so fractional point edges never expose an unsafe pixel.
-    local left = math.ceil(insets.left * self.pixel_ratio)
-    local top = math.ceil(insets.top * self.pixel_ratio)
-    local right = math.floor(screen.screen_size.w - insets.right * self.pixel_ratio)
-    local bottom = math.floor(screen.screen_size.h - insets.bottom * self.pixel_ratio)
-    self.viewport = Geom:new{ x = left, y = top, w = right - left, h = bottom - top }
+    local left = math.ceil(insets.left * pixel_ratio)
+    local top = math.ceil(insets.top * pixel_ratio)
+    local right = math.floor(width - insets.right * pixel_ratio)
+    local bottom = math.floor(height - insets.bottom * pixel_ratio)
+    return Geom:new{ x = left, y = top, w = right - left, h = bottom - top }
 end
 
 function IOS:setScreenDPI()
@@ -274,6 +278,25 @@ function IOS:resizeWindow()
     -- Several resize events may be queued while UIKit has already moved on.
     -- Match the current renderer pixels to current window points, not to an
     -- older event's point dimensions. Desktop keeps its existing payload path.
+    local window_w, window_h = ffi.new("int[1]"), ffi.new("int[1]")
+    local pixel_w, pixel_h = ffi.new("int[1]"), ffi.new("int[1]")
+    if not SDL.SDL.SDL_GetWindowSize(SDL.screen, window_w, window_h)
+        or not SDL.SDL.SDL_GetCurrentRenderOutputSize(SDL.renderer, pixel_w, pixel_h) then
+        logger.warn("iOS resize dimensions unavailable:", ffi.string(SDL.SDL.SDL_GetError()))
+        return
+    end
+    window_w, window_h = tonumber(window_w[0]), tonumber(window_h[0])
+    pixel_w, pixel_h = tonumber(pixel_w[0]), tonumber(pixel_h[0])
+    if window_w <= 0 or window_h <= 0 or pixel_w <= 0 or pixel_h <= 0 then return end
+    local viewport = self:getSafeViewport(pixel_w, pixel_h, pixel_w / window_w)
+    -- UIKit commonly emits all three window events for the same geometry,
+    -- including at startup. Rebuild buffers and notify readers only once.
+    if self.window.width == window_w and self.window.height == window_h
+        and self.screen.screen_size.w == pixel_w and self.screen.screen_size.h == pixel_h
+        and self.viewport == viewport then
+        return
+    end
+
     self.screen:resize()
     self.window.width, self.window.height = SDL.win_w, SDL.win_h
     -- resize returns a full buffer, with the previous viewport released. Keep
@@ -296,8 +319,17 @@ end
 function Device:resizeWindow(w, h)
     self.screen:resize(w, h)
     self.window.width, self.window.height = w, h
+    local rotation = self.screen.bb:getRotation()
+    if self.viewport then self.screen.bb:setRotation(0) end
     local size = self.screen:getSize()
     self.screen.screen_size.w, self.screen.screen_size.h = size.w, size.h
+    if self.viewport then
+        -- SDL resize releases its old view. Reapply EMULATE_READER_VIEWPORT
+        -- in physical coordinates, keeping the existing touch translation.
+        self.screen:setViewport(self.viewport)
+        self.screen.bb:setRotation(rotation)
+        self.screen.full_bb:setRotation(rotation)
+    end
     self:notifyScreenResize()
 end
 
