@@ -15,7 +15,8 @@ downloadPoll(handle) -> snapshot | nil, error
     NEVER follow redirects or apply credential/URL policy here (ADR-0004).
     Completed snapshots remain readable until downloadCancel releases the handle.
     A failed snapshot's error is "timeout" (no data within timeout), "background"
-    (background time ran out while it ran), or the system's text.
+    (background time ran out while it ran; reported once the app is active again,
+    "downloading" until then), or the system's text.
 downloadCancel(handle) -> true | nil, error
     Cancels/releases the job and removes its temporary file, including partial
     files after failure. Safe to repeat. Lua moves a successful file before release.
