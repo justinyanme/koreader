@@ -20,6 +20,7 @@ reader is already a "full" refresh.
 
 local CenterContainer = require("ui/widget/container/centercontainer")
 local ConfirmLayer = require("ui/widget/confirmlayer")
+local Device = require("device")
 local Event = require("ui/event")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
@@ -238,7 +239,16 @@ function ShelfView:pollExtraction()
     for i = 1, math.min(EXTRACT_CHUNK, #pending) do
         chunk[i] = { filepath = pending[i], cover_specs = self.cover_specs }
     end
-    ext.launched = self.bim:extractInBackground(chunk)
+    local on_extracted
+    if not Device:canForkProcesses() then
+        on_extracted = function()
+            if self.extracting ~= ext then return end
+            self.books = Shelf.load(self.scanned, self.bim, self.cover_specs)
+            ext.done = ext.total - #self:pendingFiles()
+            if self:isShowing() then self:update("title") end
+        end
+    end
+    ext.launched = self.bim:extractInBackground(chunk, on_extracted)
     if not ext.launched then -- fork failed
         self.extracting = nil
         return

@@ -82,6 +82,7 @@ function ReaderThumbnail:addToMainMenu(menu_items)
             self:onShowBookMap(true)
         end,
     }
+    if not Device:canForkProcesses() then return end
     menu_items.page_browser = {
         text = _("Page browser"),
         callback = function()
@@ -100,6 +101,7 @@ function ReaderThumbnail:onShowBookMap(overview_mode)
 end
 
 function ReaderThumbnail:onShowPageBrowser()
+    if not Device:canForkProcesses() then return true end
     local PageBrowserWidget = require("ui/widget/pagebrowserwidget")
     UIManager:show(PageBrowserWidget:new{
         ui = self.ui,
@@ -255,6 +257,10 @@ function ReaderThumbnail:cancelPageThumbnailRequests(batch_id)
 end
 
 function ReaderThumbnail:getPageThumbnail(page, width, height, batch_id, when_generated_callback)
+    if not Device:canForkProcesses() then
+        when_generated_callback(nil, batch_id, false)
+        return false
+    end
     self:setupCache()
     self.current_target_size_tag = string.format("w%d_h%d", width, height)
     if self.ui.rolling and Screen.night_mode and self.ui.document.configurable.nightmode_images == 1 then
@@ -338,6 +344,7 @@ function ReaderThumbnail:ensureTileGeneration()
 end
 
 function ReaderThumbnail:startTileGeneration(request)
+    if not Device:canForkProcesses() then return false end
     local pid, parent_read_fd = ffiutil.runInSubProcess(function(pid, child_write_fd)
         -- Get page image as if drawn on the screen
         local bb = self:_getPageImage(request.page)

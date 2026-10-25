@@ -27,10 +27,10 @@ local band = bit.band
 --   shared_state[1] = 0 or 1, set by subprocess when rendering done, waiting to save cache
 --   shared_state[2] = 0 or 1, set by main process when subprocess can go on saving cache
 local ffi = require("ffi")
-local shared_state_data = ffi.C.mmap(nil, 3*ffi.sizeof("uint32_t"), bit.bor(ffi.C.PROT_READ, ffi.C.PROT_WRITE),
-                                       bit.bor(ffi.C.MAP_SHARED, ffi.C.MAP_ANONYMOUS), -1, 0)
-local shared_state = ffi.cast("uint32_t*", shared_state_data)
-local koreader_pid = ffi.C.getpid()
+-- Allocate only when actually starting a subprocess. Devices without fork
+-- neither need shared memory nor enter the parent/child coordination protocol.
+local shared_state
+local koreader_pid
 
 --[[
     Rolling is just like paging in page-based documents except that
@@ -341,7 +341,9 @@ function ReaderRolling:onSaveSettings()
     self.ui.doc_settings:delSetting("last_percent") -- deprecated
     self.ui.doc_settings:saveSetting("last_xpointer", self.xpointer)
     self.ui.doc_settings:saveSetting("hide_nonlinear_flows", self.hide_nonlinear_flows)
-    self.ui.doc_settings:saveSetting("partial_rerendering", self.partial_rerendering)
+    if Device:canForkProcesses() then
+        self.ui.doc_settings:saveSetting("partial_rerendering", self.partial_rerendering)
+    end
 end
 
 function ReaderRolling:onReaderReady()
@@ -350,9 +352,9 @@ function ReaderRolling:onReaderReady()
         self.ui.document:cacheFlows()
     end
     self.setupXpointer()
-    if self.partial_rerendering then
+    if Device:canForkProcesses() and self.partial_rerendering then
         UIManager:nextTick(function()
-            if self.ui.document then -- (could have disappeared with unit tests)
+            if self.ui.document and Device:canForkProcesses() then -- (could have disappeared with unit tests)
                 self.ui.document:enablePartialRerendering(true)
             end
         end)
@@ -444,6 +446,7 @@ function ReaderRolling:addToMainMenu(menu_items)
             help_text = hide_nonlinear_text,
         }
     end
+    if not Device:canForkProcesses() then return end
     menu_items.partial_rerendering = {
         text = _("Enable partial renderings"),
         enabled_func = function()
@@ -1038,7 +1041,7 @@ function ReaderRolling:updatePos(force)
         logger.dbg("rendering hash changed:", self.rendering_hash, ">", new_rendering_hash)
         self.rendering_hash = new_rendering_hash
 
-        if self.ui.document:isRerenderingDelayed(true) then
+        if Device:canForkProcesses() and self.ui.document:isRerenderingDelayed(true) then
             -- Partial rerendering is enabled, rerendering is delayed
             logger.dbg("  but rendering delayed, will do partial renderings on draw")
             -- annotation page numbers must be updated after self.ui:reloadDocument()
@@ -1692,6 +1695,7 @@ function ReaderRolling:handlePartialRerendering()
 end
 
 function ReaderRolling:_waitOrKillCurrentRerenderingSubprocess(wait, kill)
+    if not Device:canForkProcesses() then return true end
     -- No need for an asynchronous collector: we'll explicitly call this and wait
     -- before going on, even when reloading, to avoid having multiple possibly huge
     -- subprocesses at the same time.
@@ -1720,7 +1724,7 @@ function ReaderRolling:_waitOrKillCurrentRerenderingSubprocess(wait, kill)
 end
 
 function ReaderRolling:setupRerenderingAutomation()
-    if self._stepRerenderingAutomation then
+    if not Device:canForkProcesses() or self._stepRerenderingAutomation then
         return
     end
 
@@ -1900,6 +1904,13 @@ function ReaderRolling:tearDownRerenderingAutomation()
 end
 
 function ReaderRolling:_rerenderInBackground()
+    if not Device:canForkProcesses() then return end
+    if not shared_state then
+        local shared_state_data = ffi.C.mmap(nil, 3*ffi.sizeof("uint32_t"), bit.bor(ffi.C.PROT_READ, ffi.C.PROT_WRITE),
+                                               bit.bor(ffi.C.MAP_SHARED, ffi.C.MAP_ANONYMOUS), -1, 0)
+        shared_state = ffi.cast("uint32_t*", shared_state_data)
+        koreader_pid = ffi.C.getpid()
+    end
     Device:enableCPUCores(2)
 
     -- Set up mmap segment to exchange signals between main and sub processes

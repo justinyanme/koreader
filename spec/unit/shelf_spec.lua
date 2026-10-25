@@ -1646,8 +1646,9 @@ describe("Shelf home (FileManager replacement)", function()
                 if get_cover then table.insert(self.cover_reads, file) end
             end
             function stub:isExtractingInBackground() return self.extracting end
-            function stub:extractInBackground(files)
+            function stub:extractInBackground(files, on_extracted)
                 table.insert(self.jobs, files)
+                self.on_extracted = on_extracted
                 self.extracting = true
                 return true
             end
@@ -1973,6 +1974,52 @@ describe("Shelf home (FileManager replacement)", function()
             while topWidget() ~= FileManager.instance do UIManager:close(topWidget()) end
             FileManager.instance:onClose()
             assert(ok, err)
+        end)
+
+        it("shows each in-process cover before the batch finishes and ignores cancelled notifications", function()
+            local Device = require("device")
+            local original_can_fork = Device.canForkProcesses
+            Device.canForkProcesses = function() return false end
+            finally(function() Device.canForkProcesses = original_can_fork end)
+            stub.extracting = false
+            local fm, view = openShelf(home)
+            view:pollExtraction()
+            local notify = stub.on_extracted
+            assert.is_function(notify)
+            local file = stub.jobs[#stub.jobs][1].filepath
+            local old_row = stub.rows[file]
+            finally(function() stub.rows[file] = old_row end)
+            addRow((file:gsub(".*/", "")), { has_cover = "Y" })
+            view.page = 2
+            notify(file, true)
+            local found
+            for __, book in ipairs(view.books) do
+                if book.file == file then found = book end
+            end
+            assert.is_true(found.has_cover)
+            assert.is_false(found.needs_extract)
+            assert.are.equal(2, view.page)
+            assert.is_truthy(view.extracting)
+            view:stop()
+            local books = view.books
+            notify(file, true)
+            assert.are.equal(books, view.books)
+            fm:onClose()
+        end)
+
+        it("does not repaint a hidden shelf when an in-process book finishes", function()
+            local Device = require("device")
+            local original_can_fork = Device.canForkProcesses
+            Device.canForkProcesses = function() return false end
+            finally(function() Device.canForkProcesses = original_can_fork end)
+            stub.extracting = false
+            local fm, view = openShelf(home)
+            view:pollExtraction()
+            local notify = stub.on_extracted
+            view.isShowing = function() return false end
+            view.update = function() error("hidden shelf rebuilt") end
+            notify(stub.jobs[#stub.jobs][1].filepath, true)
+            fm:onClose()
         end)
 
         it("extracts in chunks and re-queues books a killed job left behind", function()

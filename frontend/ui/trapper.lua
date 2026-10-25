@@ -10,6 +10,7 @@ Mostly done with coroutines, but hides their usage for simplicity.
 
 
 local ConfirmBox = require("ui/widget/confirmbox")
+local Device = require("device")
 local InfoMessage = require("ui/widget/infomessage")
 local TrapWidget = require("ui/widget/trapwidget")
 local UIManager = require("ui/uimanager")
@@ -499,8 +500,8 @@ Notes and limitations:
 ]]
 function Trapper:dismissableRunInSubprocess(task, trap_widget_or_string, task_returns_simple_string)
     local _coroutine = coroutine.running()
-    if not _coroutine then
-        logger.warn("unwrapped dismissableRunInSubprocess(), falling back to blocking in-process run")
+    if not _coroutine or not Device:canForkProcesses() then
+        logger.warn("dismissableRunInSubprocess() unavailable, falling back to blocking in-process run")
         return true, task()
     end
 
