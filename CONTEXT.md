@@ -141,6 +141,10 @@ _Avoid_：partial、局部刷新（这个词容易被理解成面积）
 
 ## iPhone 与 iPad
 
+**Just Reader**：
+本 fork 在 iPhone 和 iPad 上的 App 名称，和墨水屏上的改版是同一套界面和代码，不是另一个产品。
+_Avoid_：iOS 版 KOReader、KOReader iOS
+
 **窄屏**：
 比最小的墨水屏面板还窄的屏幕宽度等级，目前只有 iPhone。布局沿用按比例的规则，只为放不下的组件补规则。
 _Avoid_：手机布局、小屏、iPhone 版
