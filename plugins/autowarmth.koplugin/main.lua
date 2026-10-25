@@ -196,7 +196,7 @@ function AutoWarmth:_onResume()
 
     local resume_date = os.date("*t")
 
-    if self.fl_off_during_day then
+    if self.fl_off_during_day and Device:hasEinkScreen() then
         -- We handle the frontlight state ourself.
         Powerd.fl_was_on = false
     end
@@ -430,7 +430,7 @@ function AutoWarmth:scheduleToggleFrontlight(now_s)
 
     UIManager:unschedule(self.setFrontlight)
 
-    if not self.fl_off_during_day then
+    if not Device:hasEinkScreen() or not self.fl_off_during_day then
         return
     end
     -- Reset user fl toggles at sunset or sunrise with offset, as `scheduleNextWarmthChange` gets called only
@@ -450,6 +450,9 @@ end
 -- turns frontlight on or off and notice AutoDim on turning it off
 -- enable ... true to enable frontlight, false/nil to disable it
 function AutoWarmth:setFrontlight(enable, keep_user_toggle)
+    -- LCD system brightness is not an e-reader frontlight that should be
+    -- switched off when a daylight schedule resumes in the foreground.
+    if not Device:hasEinkScreen() then return end
     logger.dbg("AutoWarmth: setFrontlight", enable, keep_user_toggle)
     if not keep_user_toggle then
         AutoWarmth.fl_user_toggle = false
@@ -707,6 +710,7 @@ end
 
 function AutoWarmth:getFlOffDuringDayMenu()
     return {
+        enabled_func = function() return Device:hasEinkScreen() end,
         checked_func = function()
             return self.fl_off_during_day
         end,

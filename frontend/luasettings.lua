@@ -5,7 +5,7 @@ This module handles generic settings as well as KOReader's global settings syste
 local dump = require("dump")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
-local util = require("util")
+local SettingsWriter = require("settingswriter")
 
 local LuaSettings = {}
 
@@ -250,33 +250,23 @@ function LuaSettings:reset(table)
 end
 
 function LuaSettings:backup(file)
-    file = file or self.file
-    local directory_updated
-    if lfs.attributes(file, "mode") == "file" then
-        -- As an additional safety measure (to the ffiutil.fsync* calls used in util.writeToFile),
-        -- we only backup the file to .old when it has not been modified in the last 60 seconds.
-        -- This should ensure in the case the fsync calls are not supported
-        -- that the OS may have itself sync'ed that file content in the meantime.
-        local mtime = lfs.attributes(file, "modification")
-        if mtime < os.time() - 60 then
-            os.rename(file, file .. ".old")
-            directory_updated = true -- fsync directory content
-        end
-    end
-    return directory_updated
+    return SettingsWriter.backup(file or self.file)
 end
 
 --- Writes settings to disk.
 function LuaSettings:flush()
     if not self.file then return end
-    local directory_updated = self:backup()
-    util.writeToFile(dump(self.data, nil, true), self.file, true, true, directory_updated)
+    local ok, err = SettingsWriter.write(dump(self.data, nil, true), self.file)
+    if not ok then
+        logger.warn("LuaSettings: failed saving", self.file, err)
+        return nil, err
+    end
     return self
 end
 
 --- Closes settings file.
 function LuaSettings:close()
-    self:flush()
+    return self:flush()
 end
 
 --- Purges settings file.

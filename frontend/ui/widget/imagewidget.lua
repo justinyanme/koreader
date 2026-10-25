@@ -124,6 +124,11 @@ local ImageWidget = Widget:extend{
     _bb_h = nil,
 }
 
+function ImageWidget.clearCache()
+    -- Cached BBs use GC finalizers; live widgets may still hold references.
+    ImageCache:clear()
+end
+
 function ImageWidget:_loadimage()
     self._bb = self.image
     -- don't touch or free if caller doesn't want that

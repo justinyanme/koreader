@@ -848,15 +848,27 @@ function ReaderUI:onScreenResize(dimen)
     self:updateTouchZonesOnScreenResize(dimen)
 end
 
-function ReaderUI:saveSettings()
+function ReaderUI:saveSettings(context)
+    if context then
+        if context.readers[self] then return end
+        context.readers[self] = true
+        context:required(function()
+            self:handleEvent(Event:new("SaveSettings", context))
+            return true
+        end)
+        context:required(function() return self.doc_settings:flush() end)
+        context:required(function() return G_reader_settings:flush() end)
+        context:defer(function() return DocSettings.saveSettingsArcFile(self.doc_settings, nil, true) end)
+        return
+    end
     self:handleEvent(Event:new("SaveSettings"))
     DocSettings.saveSettingsArcFile(self.doc_settings, nil, true)
     self.doc_settings:flush()
     G_reader_settings:flush()
 end
 
-function ReaderUI:onFlushSettings(show_notification)
-    self:saveSettings()
+function ReaderUI:onFlushSettings(show_notification, context)
+    self:saveSettings(context)
     if show_notification then
         -- Invoked from dispatcher to explicitly flush settings
         Notification:notify(_("Book metadata saved."))
@@ -899,6 +911,7 @@ function ReaderUI:onClose(full_refresh)
 end
 
 function ReaderUI:onCloseWidget()
+    if Device.cancelPendingSettingsSave then Device:cancelPendingSettingsSave(self) end
     if ReaderUI.instance == self then
         logger.dbg("Tearing down ReaderUI", tostring(self))
     else
@@ -984,6 +997,17 @@ end
 
 function ReaderUI:onOpenLastDoc()
     filemanagerutil.openFile(self, self.menu:getPreviousFile())
+end
+
+-- Observe changes after child handlers have updated position/notes, including
+-- events consumed by a child. Devices without the optional hook do no work here.
+function ReaderUI:handleEvent(event)
+    local handled = InputContainer.handleEvent(self, event)
+    if Device.scheduleSettingsSave and (event.handler == "onPageUpdate"
+        or event.handler == "onPosUpdate" or event.handler == "onAnnotationsModified") then
+        Device:scheduleSettingsSave(self)
+    end
+    return handled
 end
 
 function ReaderUI:onAnnotationsModified(items)

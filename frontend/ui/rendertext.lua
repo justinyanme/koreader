@@ -24,6 +24,10 @@ local GlyphCache = Cache:new{
     enable_eviction_cb = false,
 }
 
+function RenderText.clearCache()
+    GlyphCache:clear()
+end
+
 -- iterator over UTF8 encoded characters in a string
 local function utf8Chars(input_text)
     local function read_next_glyph(input, pos)
