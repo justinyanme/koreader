@@ -6,6 +6,7 @@ Just Reader（`me.justinyan.justreader`，iPhone + iPad）有两条发布通道�
 |---|---|
 | `mise run ios:generate` | 用 Tuist 生成 `platform/ios/JustReader.xcworkspace`，不打开 Xcode。生成的工程不入库。 |
 | `mise run ios:tf` | 构建 Release `.ipa` 并上传 TestFlight。等 Apple 处理完后提交 Beta App Review，加入 "External" 组，审核通过后测试者收到邀请。"Internal" 组自动拿到每个 build。What to Test 默认是最后一条提交的标题，可以用 `mise run ios:tf 'changelog:<文字>'` 覆盖。Apple 同一时间只审一个 build：上一个还在审时，新 build 只留在 Internal，lane 会提示，等审核结束后在 App Store Connect 里手动加进 External。 |
+| `./kodev build ios-device` | 运行 fastlane 的 `build_release` lane：构建并导出与 `ios:tf` 相同的 App Store 签名 `.ipa`，但不上传。和 `ios:tf` 一样需要 `.env`，并且会调用一次只读的 App Store Connect 接口取 build number。见 [build.md](build.md)。 |
 | `mise run ios:ota` | 构建开发签名的 Debug `.ipa`，发布到 <https://test.justinyan.app/justreader/>。 |
 | `mise run ios:certs` | 只读安装本 App 的全部签名（App Store 和开发）。 |
 | `mise run ios:refresh_profiles` | 新建或刷新本 App 的两个 match profile，见下文。 |
@@ -16,7 +17,7 @@ Just Reader（`me.justinyan.justreader`，iPhone + iPad）有两条发布通道�
 
 ## 前提
 
-1. **工具链：** 在仓库根运行 `mise trust`（配置会加载 `.env`，mise 要先信任）、`mise install`，再在 `platform/ios/` 里运行 `mise exec -- bundle config set --local path vendor/bundle` 和 `mise exec -- bundle install`。版本固定在根目录的 `mise.toml`：tuist 4.155.3、ruby 4.0、xcbeautify 3.2.1；fastlane 由 `platform/ios/Gemfile.lock` 固定。
+1. **工具链：** 在仓库根运行 `mise trust`（配置会加载 `.env`，mise 要先信任）、`mise install`，再在 `platform/ios/` 里运行 `mise exec -- bundle config set --local path vendor/bundle` 和 `mise exec -- bundle install`。版本固定在根目录的 `mise.toml`：tuist 4.155.3、ruby 4.0、xcbeautify 3.2.1；fastlane 由 `platform/ios/Gemfile.lock` 固定。lane 构建 App 时，Xcode 的预构建脚本会先构建 koreader-base，所以还需要 [build.md](build.md#前提) 里的 Homebrew 构建依赖；第一次构建 base 要十几分钟。
 2. **Xcode：** 用 Xcode 27.1。`xcode-select -p` 不指向它时，命令前加 `DEVELOPER_DIR=/Applications/Xcode-27.1.0.app/Contents/Developer`。
 3. **环境变量：** 仓库根的 `.env`（已在 `.gitignore`）提供
    - `ASC_KEY_ID`、`ASC_ISSUER_ID`；
@@ -42,7 +43,7 @@ Just Reader（`me.justinyan.justreader`，iPhone + iPad）有两条发布通道�
   - 第一次在真机上用 Xcode 运行之前，先 `mise run ios:certs`：除了签名钥匙串，它还把开发证书装进登录钥匙串，Xcode 从那里找。
   - Release 用于 TestFlight，用 App Store profile。
 - **导出：** 每次导出都显式写明 profile（`skip_profile_detection`）。
-- **模拟器构建**不用 match：Debug 的证书和 profile 只对 `iphoneos` 生效，模拟器包做 ad-hoc 签名。
+- **模拟器构建**不用 match：两种配置的证书和 profile 都只对 `iphoneos` 生效，模拟器包做 ad-hoc 签名。
 
 **App ID 能力变了或新增设备后，刷新 profile：**
 
