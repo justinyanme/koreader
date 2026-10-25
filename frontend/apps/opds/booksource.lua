@@ -225,7 +225,7 @@ function BookSource.fetch(source, feed_url)
     })
     socketutil:reset_timeout()
     if code ~= 200 then
-        logger.info("BookSource: cannot get feed", type(code) == "number" and code or 0)
+        logger.info("BookSource: cannot get feed", code)
         return BookSource.failure(code, status, block_timeout, total_timeout)
     end
     local body = table.concat(sink)

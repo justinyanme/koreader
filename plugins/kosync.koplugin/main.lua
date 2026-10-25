@@ -89,13 +89,22 @@ function KOSync:saveAccount(username, userkey)
     local draft = util.tableDeepCopy(previous)
     draft.username = username
     local ok = CredentialStore.setUserkey(draft, userkey)
+    local primary_committed = false
+    local __err
     if ok then
         KOSync.settings_obj:saveSetting("settings", draft)
-        ok = CredentialStore.flush(KOSync.settings_obj)
+        ok, __err, primary_committed = CredentialStore.flush(KOSync.settings_obj)
     end
     if not ok then
-        KOSync.settings_obj:saveSetting("settings", previous)
-        UIManager:show(InfoMessage:new{ text = _("Could not save credentials. Please try again.") })
+        if primary_committed then
+            self.settings = draft
+            self.updated = true
+            CredentialStore.delete(previous.userkey_ref)
+        else
+            KOSync.settings_obj:saveSetting("settings", previous)
+            if draft.userkey_ref ~= previous.userkey_ref then CredentialStore.delete(draft.userkey_ref) end
+        end
+        UIManager:show(InfoMessage:new{ text = _("Could not save or clean up credentials. Please try again.") })
         return
     end
     self.settings = draft

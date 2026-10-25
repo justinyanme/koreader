@@ -4,6 +4,7 @@ local DataStorage = require("datastorage")
 local Device = require("device")
 local LuaSettings = require("luasettings")
 local lfs = require("libs/libkoreader-lfs")
+local util = require("util")
 
 local Store = {}
 local source_fields = { "password", "access_client_id", "access_client_secret" }
@@ -104,18 +105,18 @@ end
 -- Retry on every launch, even when the primary file already contains only refs.
 function Store.flush(settings)
     local ok, result = pcall(settings.flush, settings)
-    if not ok or not result then return nil, "save_failed" end
+    if not ok or not result then return nil, "save_failed", false end
     if Store.available() and settings.file then
         local backup = LuaSettings:wrap(settings.data)
         backup.file = settings.file .. ".old"
         backup.backup = function() end
         ok, result = pcall(backup.flush, backup)
-        if not ok or not result then return nil, "save_failed" end
+        if not ok or not result then return nil, "save_failed", true end
     end
-    return true
+    return true, nil, true
 end
 
-local function migrateSource(source)
+local function migrateSource(source, changes)
     for _, field in ipairs(source_fields) do
         if source[field] ~= nil then
             -- A prior interrupted/older write may leave both a ref and plaintext.
@@ -123,31 +124,59 @@ local function migrateSource(source)
             for _, key in ipairs(source_fields) do
                 if source[key] ~= nil then credentials[key] = source[key] end
             end
-            return Store.setSource(source, credentials)
+            local previous = util.tableDeepCopy(source)
+            local ok = Store.setSource(source, credentials)
+            if ok then
+                table.insert(changes, { record = source, previous = previous, ref_field = "credential_ref" })
+                return true
+            end
+            return nil
         end
     end
+end
+
+local function migrateAccount(account, changes)
+    if account and account.userkey ~= nil then
+        local previous = util.tableDeepCopy(account)
+        if not Store.setUserkey(account, account.userkey) then return nil end
+        table.insert(changes, { record = account, previous = previous, ref_field = "userkey_ref" })
+    end
+    return true
+end
+
+local function saveMigration(settings, changes)
+    local saved, err, primary_committed = Store.flush(settings)
+    for _, change in ipairs(changes) do
+        if primary_committed then
+            Store.delete(change.previous[change.ref_field])
+        else
+            Store.delete(change.record[change.ref_field])
+            for key in pairs(change.record) do change.record[key] = nil end
+            for key, value in pairs(change.previous) do change.record[key] = value end
+        end
+    end
+    return saved, err, primary_committed
 end
 
 function Store.migrateSettings(settings, kind)
     if not Store.available() then return true end
     local complete = true
+    local changes = {}
     if kind == "opds" then
         for _, source in ipairs(settings:readSetting("servers") or {}) do
-            if migrateSource(source) == nil then
+            local migrated = migrateSource(source, changes)
+            if migrated == nil then
                 for _, field in ipairs(source_fields) do
                     if source[field] ~= nil then complete = false end
                 end
             end
         end
     else
-        local account = settings:readSetting("settings")
-        if account and account.userkey ~= nil then
-            complete = Store.setUserkey(account, account.userkey) == true
-        end
+        complete = migrateAccount(settings:readSetting("settings"), changes) == true
     end
-    local saved = Store.flush(settings)
-    if complete and saved then return true end
-    return nil, "migration_incomplete"
+    local saved, __err, primary_committed = saveMigration(settings, changes)
+    if complete and saved then return true, nil, primary_committed end
+    return nil, "migration_incomplete", primary_committed
 end
 
 function Store.migrate()
@@ -163,11 +192,14 @@ function Store.migrate()
     if G_reader_settings then
         local legacy_sources = G_reader_settings:readSetting("opds_servers")
         local legacy_sync = G_reader_settings:readSetting("kosync")
-        if legacy_sources then
-            for _, source in ipairs(legacy_sources) do migrateSource(source) end
+        if legacy_sources or legacy_sync then
+            local changes = {}
+            for _, source in ipairs(legacy_sources or {}) do
+                migrateSource(source, changes)
+            end
+            migrateAccount(legacy_sync, changes)
+            saveMigration(G_reader_settings, changes)
         end
-        if legacy_sync and legacy_sync.userkey ~= nil then Store.setUserkey(legacy_sync, legacy_sync.userkey) end
-        Store.flush(G_reader_settings)
     end
 end
 

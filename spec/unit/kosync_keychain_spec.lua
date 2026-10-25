@@ -79,6 +79,31 @@ describe("KOSync Keychain account lifecycle", function()
         assert.are.equal(count, #requests)
     end)
 
+    it("deletes a new item if the primary save fails, retaining the previous account", function()
+        sync:doLogin("reader", "old-password")
+        local ref = sync.settings.userkey_ref
+        local failed = stub(Sync.settings_obj, "flush", function() return nil, "disk full" end)
+        finally(function() failed:revert() end)
+        sync:doLogin("reader", "new-password")
+        assert.are.equal(ref, sync.settings.userkey_ref)
+        assert.are.equal(ref, next(options.keychain))
+        assert.is_nil(next(options.keychain, ref))
+        assert.are.equal(require("ffi/sha2").md5("old-password"), sync:getUserkey())
+    end)
+
+    it("retains a committed account and its Keychain item when backup cleanup fails", function()
+        local flush = LuaSettings.flush
+        local failed = stub(LuaSettings, "flush", function(object, ...)
+            if object.file == sync.settings_file .. ".old" then return nil, "disk full" end
+            return flush(object, ...)
+        end)
+        finally(function() failed:revert() end)
+        sync:doLogin("reader", "saved-password")
+        local saved = LuaSettings:open(sync.settings_file):readSetting("settings")
+        assert.are.equal(saved.userkey_ref, sync.settings.userkey_ref)
+        assert.are.equal(require("ffi/sha2").md5("saved-password"), sync:getUserkey())
+    end)
+
     it("does not log an error response containing credentials, even with debug enabled", function()
         local logger = require("logger")
         local logged = {}

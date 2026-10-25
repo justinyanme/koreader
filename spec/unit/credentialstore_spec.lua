@@ -75,6 +75,49 @@ describe("Credential migration through the device bridge", function()
         absent(settings.file, { "basic-canary", "id-canary", "secret-canary" })
     end)
 
+    it("deletes a mixed record's superseded Keychain item only after persisting its replacement", function()
+        options.keychain["previous-source-ref"] = '{"password":"old-password"}'
+        settings.data.servers[1].credential_ref = "previous-source-ref"
+        assert.is_true(Store.migrateSettings(settings, "opds"))
+        assert.is_nil(options.keychain["previous-source-ref"])
+        assert.are.equal("basic-canary", Store.source(LuaSettings:open(settings.file):readSetting("servers")[1]).password)
+
+        options.keychain["previous-sync-ref"] = "old-digest"
+        local sync = LuaSettings:wrap{ settings = { userkey = "new-digest", userkey_ref = "previous-sync-ref" } }
+        sync.file = dir .. "/kosync.lua"
+        assert.is_true(Store.migrateSettings(sync, "kosync"))
+        assert.is_nil(options.keychain["previous-sync-ref"])
+        assert.are.equal("new-digest", Store.userkey(LuaSettings:open(sync.file):readSetting("settings")))
+    end)
+
+    it("does not rewrite unrelated global settings on startup when there are no legacy credential keys", function()
+        local original_settings = G_reader_settings
+        local global = LuaSettings:wrap{ unrelated = "preserved" }
+        global.file = dir .. "/global.lua"
+        global:flush()
+        local fs = require("libs/libkoreader-lfs")
+        local previous = os.time() - 120
+        assert(fs.touch(global.file, previous, previous))
+        G_reader_settings = global
+        finally(function() G_reader_settings = original_settings end)
+        local paths = stub(require("datastorage"), "getSettingsDir", function() return dir end)
+        finally(function() paths:revert() end)
+        Store.migrate()
+        assert.are.equal(previous, fs.attributes(global.file, "modification"))
+        assert.is_nil(fs.attributes(global.file .. ".old"))
+    end)
+
+    it("removes newly allocated migration items when the primary cannot commit", function()
+        local failed = stub(settings, "flush", function() return nil, "disk full" end)
+        finally(function() failed:revert() end)
+        local ok, __err, committed = Store.migrateSettings(settings, "opds")
+        assert.is_nil(ok)
+        assert.is_false(committed)
+        assert.is_nil(next(options.keychain))
+        assert.are.equal("basic-canary", settings.data.servers[1].password)
+        assert.is_nil(settings.data.servers[1].credential_ref)
+    end)
+
     it("migrates KOSync's reusable password digest and treats a restored device as logged out", function()
         local sync = LuaSettings:wrap{ settings = { username = "reader", userkey = "digest-canary", auto_sync = true } }
         sync.file = dir .. "/kosync.lua"
