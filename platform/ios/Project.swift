@@ -19,6 +19,15 @@ let project = Project(
                 "ITSAppUsesNonExemptEncryption": false,
                 "LSApplicationCategoryType": "public.app-category.books",
                 "UILaunchScreen": [:],
+                // B4: app chrome owns time/battery; the SDL safe area is the viewport.
+                "UIStatusBarHidden": true,
+                "UIViewControllerBasedStatusBarAppearance": false,
+                "UIRequiresFullScreen": true,
+                "UISupportedInterfaceOrientations": [
+                    "UIInterfaceOrientationPortrait",
+                    "UIInterfaceOrientationLandscapeLeft",
+                    "UIInterfaceOrientationLandscapeRight",
+                ],
                 "UIApplicationSceneManifest": [
                     "UIApplicationSupportsMultipleScenes": false,
                     "UISceneConfigurations": [

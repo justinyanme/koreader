@@ -345,6 +345,7 @@ SDL_GetPrimaryDisplay
 SDL_GetTouchFingers
 SDL_GetVersion
 SDL_GetWindowSize
+SDL_GetWindowSafeArea
 SDL_HasClipboardText
 SDL_HasKeyboard
 SDL_Init
