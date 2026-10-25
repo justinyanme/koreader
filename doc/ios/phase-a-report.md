@@ -80,6 +80,8 @@ xcodebuild -project KOReader.xcodeproj -scheme KOReader -configuration Release \
 
 三项性能采样时没有同时编译。两台连续阅读并行，每 15 秒注入真实 SDL 按键；每次记录 `InputEvent` 与 `screen_saver_mode=false`，不改自动休眠时间。宿主 `ps` 每约 30 秒记录进程存活和 RSS；这不是 iOS 真机峰值内存或耗电。连续阅读期间另有一次 Swift 原型增量构建和一次只读符号地址检查；没有切书或由驱动补保存，也未拿其间样本重算三项性能。
 
+门禁连续阅读会话（15:35–16:05）运行在 B5 原型构建上，watcher 和生命周期入队均开启，与上述 SDL 输入翻页样本使用同一个构建。
+
 清醒会话（均为 2026-10-25，SGT）：
 
 | 设备 | 起止 | 翻页 / InputEvent | 进程与画面 | 宿主 RSS 采样范围 |
@@ -253,7 +255,7 @@ B4 仍须实现 dp/point 规则；C5 仍须验证真实 PDF 的重排质量。�
 
 仓库 spec 按 Q46 未运行，没有做 Leaf5 验收；构建、模拟器运行、计时、翻页及证据渲染照常执行。用例在 [acceptance.md](acceptance.md)。
 
-本地证据根目录为 `/Volumes/T5/github/ios-phase-a/evidence/`，不作为公开下载链接：
+本地证据根目录为 `/Volumes/T5/github/ios-phase-a/evidence/`，不作为公开下载链接。下表的 `.tsv` 和 console 日志中嵌有宿主机的模拟器容器路径，以后不能原样贴到公开 issue，须先脱敏：
 
 | 证据 | 文件 |
 | --- | --- |
