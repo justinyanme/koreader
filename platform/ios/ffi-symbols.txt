@@ -203,6 +203,8 @@ k2pdfopt_tocr_single_word
 ko_ios_download_cancel
 ko_ios_download_poll
 ko_ios_download_start
+ko_ios_files_pick_poll
+ko_ios_files_pick_start
 lodepng_decode
 lodepng_decode_file
 lodepng_decode_memory
@@ -341,6 +343,7 @@ SDL_HasKeyboard
 SDL_Init
 SDL_InitSubSystem
 SDL_IsGamepad
+SDL_IsTablet
 SDL_OpenGamepad
 SDL_Quit
 SDL_QuitSubSystem

@@ -112,6 +112,24 @@ local function initDataDir()
         "styletweaks",
     }
     local datadir = DataStorage:getDataDir()
+    -- iOS (Q10): rebuildable caches live in Library/Caches, which the system may empty, so the cache
+    -- folder is a link into it, and its target is made again at every start. So is the link: its target
+    -- is absolute, and the container's path can change.
+    local cache_home = os.getenv("KO_CACHE_HOME")
+    if cache_home then
+        if lfs.attributes(cache_home, "mode") ~= "directory" then
+            lfs.mkdir(cache_home)
+        end
+        local cache_link = datadir .. "/cache"
+        local mode = lfs.symlinkattributes(cache_link, "mode")
+        if mode == "link" then
+            os.remove(cache_link)
+            mode = nil
+        end
+        if not mode then
+            lfs.link(cache_home, cache_link, true)
+        end
+    end
     for _, dir in ipairs(sub_data_dirs) do
         local sub_data_dir = string.format("%s/%s", datadir, dir)
         if lfs.attributes(sub_data_dir, "mode") ~= "directory" then

@@ -9,6 +9,7 @@ local ffi = require("ffi")
 local logger = require("logger")
 local time = require("ui/time")
 local util = require("util")
+local T = require("ffi/util").template
 local _ = require("gettext")
 
 -- SDL computes WM_CLASS on X11/Wayland based on process's binary name.
@@ -201,10 +202,39 @@ local IOS = Device:extend{
     canExternalDictLookup = no,
     getExternalDictLookupList = function() return {} end,
     doExternalDictLookup = function() end,
+    hasSandboxedHome = yes,
+    canImportFiles = yes,
+    importFile = function(folder) require("apps/shelf/bookimport").pick(folder) end,
 }
 
 function IOS:getUpdateInstructions()
     return _("To update it, install the new build from TestFlight.")
+end
+
+--- Moves what the system left in its inboxes into the home folder: "Open with" while the app was not
+-- running (SDL's drop event comes before SDL is initialized, and is lost), and leftovers.
+function IOS:sweepImports()
+    local inboxes = require("device/sdl/iosstorage").inboxes(self.container)
+    return require("apps/shelf/bookimport").sweep(inboxes, self.home_dir)
+end
+
+local is_tablet
+local function isTablet()
+    if is_tablet == nil then
+        local ok, result = pcall(function()
+            ffi.cdef("bool SDL_IsTablet(void);")
+            return SDL.SDL.SDL_IsTablet()
+        end)
+        is_tablet = ok and result or false
+    end
+    return is_tablet
+end
+
+--- 导入's 从电脑传书 (Q30, Q43): the Files app's folder and Finder's file sharing.
+function IOS:getTransferInstructions()
+    -- @translators %1 is iPhone or iPad. "On My iPhone" and Just Reader are the folder names the Files app shows; Files is the tab of the device's window in Finder.
+    return T(_("In the Files app, put books in On My %1 › Just Reader. From a Mac, connect the %1, select it in Finder, then drag books onto Just Reader in the Files tab."),
+        isTablet() and "iPad" or "iPhone")
 end
 
 function Device:init()
@@ -329,8 +359,12 @@ function Device:init()
             elseif ev.code == SDL.SDL.SDL_EVENT_DROP_FILE then
                 local dropped_file_path = ev.value
                 if dropped_file_path and dropped_file_path ~= "" then
-                    local ReaderUI = require("apps/reader/readerui")
-                    ReaderUI:doShowReader(dropped_file_path)
+                    if self:hasSandboxedHome() then -- "Open with": the system's copy goes into the home folder first
+                        require("apps/shelf/bookimport").open(dropped_file_path, self.home_dir)
+                    else
+                        local ReaderUI = require("apps/reader/readerui")
+                        ReaderUI:doShowReader(dropped_file_path)
+                    end
                 end
             elseif ev.code == SDL.SDL.SDL_EVENT_WINDOW_RESIZED then
                 device_input.device.screen.resize(device_input.device.screen, ev.value.data1, ev.value.data2)
@@ -460,6 +494,9 @@ function IOS:initKeyboard()
 end
 
 function IOS:init()
+    -- The storage layout (device/sdl/iosstorage) first: nothing may read the home folder before it.
+    self.container = os.getenv("HOME")
+    self.home_dir = require("device/sdl/iosstorage").setup(G_reader_settings, self.container)
     Device.init(self)
     -- SDL must be initialized before querying its keyboard state.
     self:initKeyboard()

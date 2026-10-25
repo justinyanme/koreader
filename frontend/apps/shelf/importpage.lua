@@ -4,6 +4,8 @@ section per way of putting books into the home folder, and a circled × centered
 WeChat routes are replaced by KOReader's own: 浏览设备文件 (to 文件), 从书源下载 (to 书源, with the OPDS
 plugin only) and 从电脑传书 (USB, or calibre's wireless connection with its plugin), which names the real home
 folder. Each section ends with a gray tile, where the reference has its illustration, that takes the route.
+Where the home folder is the app's sandbox (iOS), the first route is the system's document picker instead, which
+copies books in (apps/shelf/bookimport), and the device says how to transfer books from a computer.
 
 The page copies nothing itself. 书源 opens over it, so leaving 书源 comes back here; 文件 shows in the file
 manager under it, so the page closes and shows again when 文件 is left. The calibre tile starts the plugin's
@@ -80,8 +82,14 @@ end
 --- The routes, each { title, text, path, tile = { icon, text, callback } }; path and tile are optional.
 function ImportPage:routes()
     local fm = self.ui
+    local sandboxed = Device:hasSandboxedHome()
     local routes = {
-        {
+        sandboxed and {
+            title = _("Import from Files"),
+            text = _("Pick books in the Files app, including iCloud Drive. They're copied into the home folder."),
+            tile = { icon = "eink/folder", text = _("Choose files"),
+                callback = function() Device.importFile(Shelf.homeDir()) end },
+        } or {
             title = _("Browse device files"),
             text = _("Find books in any folder on the device, then open them or copy them into the home folder."),
             tile = { icon = "eink/folder", text = _("Files"), callback = function() self:openFiles() end },
@@ -100,8 +108,12 @@ function ImportPage:routes()
         text = _("Copy books into the home folder over USB."),
         path = Shelf.homeDir(),
     }
-    if fm.calibre then
+    if sandboxed then
+        computer.text, computer.path = Device:getTransferInstructions(), nil
+    elseif fm.calibre then
         computer.text = _("Copy books into the home folder over USB, or send them from calibre wirelessly.")
+    end
+    if fm.calibre then
         computer.tile = { icon = "eink/computer", text = _("Calibre wireless connection"),
             callback = function() self:connectCalibre() end }
     end

@@ -78,6 +78,23 @@ function FakeBridge.new(options)
         return true
     end
 
+    -- options.picks is a sequence of picker sessions, each a sequence of snapshots advanced by polls.
+    local picks, picking = util.tableDeepCopy(options.picks or {}), nil
+    bridge.picker_requests = {}
+    function bridge.pickFilesStart(request)
+        if picking then return nil, "busy" end
+        table.insert(bridge.picker_requests, util.tableDeepCopy(request))
+        picking = { snapshots = table.remove(picks, 1) or { { state = "cancelled" } }, index = 0 }
+        return true
+    end
+    function bridge.pickFilesPoll()
+        if not picking then return { state = "idle" } end
+        picking.index = math.min(picking.index + 1, #picking.snapshots)
+        local snapshot = util.tableDeepCopy(picking.snapshots[picking.index])
+        if snapshot.state ~= "pending" then picking = nil end
+        return snapshot
+    end
+
     -- Native-side expiry stimulus for lifecycle scenarios, never a callback into Lua.
     function bridge.expireBackground(handle)
         if tasks[handle] then

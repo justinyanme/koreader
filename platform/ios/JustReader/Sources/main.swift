@@ -11,7 +11,8 @@ nonisolated func koreaderMain() -> Int32 {
         print("[JustReader] no bundle paths")
         return EXIT_FAILURE
     }
-    // Settings and notes until B3 (#91) moves to the Q10 layout.
+    // The Q10 layout (frontend/device/sdl/iosstorage.lua): books in Documents, settings and notes in
+    // Application Support, rebuildable caches in Caches (datastorage.lua links them in).
     let home = URL.applicationSupportDirectory.appending(path: "koreader")
     do {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
@@ -21,6 +22,7 @@ nonisolated func koreaderMain() -> Int32 {
     }
     let environment = [
         "KO_HOME": home.path,
+        "KO_CACHE_HOME": URL.cachesDirectory.appending(path: "koreader").path,
         // ios-shim.lua resolves Lua C modules from the executable.
         "KO_IOS_EXECUTABLE": executable,
         // Set so ffi/loadlib.lua doesn't io.popen("brew --prefix").

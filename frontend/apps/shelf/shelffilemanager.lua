@@ -66,8 +66,13 @@ function ShelfFileManager:init()
         self.current_tab = "files"
     end
     FileManager.open_on_files = nil
+    -- before the shelf walks the home folder: books the system left for the app come in first
+    local imports = Device:hasSandboxedHome() and Device:sweepImports()
     FileManager.init(self)
     self.initialized = true
+    if imports and #imports > 0 then
+        UIManager:nextTick(function() require("apps/shelf/bookimport").report(imports) end)
+    end
 end
 
 function ShelfFileManager:setupLayout()
@@ -313,6 +318,26 @@ end
 
 ShelfFileManager.onRefreshContent = ShelfFileManager.onRefresh
 ShelfFileManager.onBookMetadataChanged = ShelfFileManager.onRefresh
+
+--- Books came into the home folder (apps/shelf/bookimport): 文件 lists them, and 书架 now if it shows,
+-- otherwise when it shows next.
+function ShelfFileManager:onBooksImported()
+    self.file_chooser:refreshPath()
+    if self.shelf_view:isShowing() then
+        self.shelf_view:rescan()
+    else
+        self.shelf_view.scanned = nil
+    end
+end
+
+--- Back in the foreground on a sandboxed device: books may have been put in through the Files app or
+-- Finder meanwhile, or left in the system's inboxes.
+function ShelfFileManager:onResume()
+    if not Device:hasSandboxedHome() then return end
+    local bookimport = require("apps/shelf/bookimport")
+    bookimport.report(Device:sweepImports())
+    self:onBooksImported()
+end
 
 --- The reorganized settings (apps/settings/einksettings), on an optional group or row id; 我 → 设置 opens it.
 function ShelfFileManager:onShowEinkSettings(target)

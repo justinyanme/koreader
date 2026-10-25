@@ -57,6 +57,20 @@
 - [ ] 稳定版补验：进程内查询、Keychain、VoiceOver 五个流程、外接键盘；记录内存与性能变化。
 - [ ] 仓库 spec 与全量回归由编排者在提交 TestFlight 前按 Q46 批量运行；本清单不授权逐票运行 spec 或做 Leaf5 实机验收。
 
+### B3 存储与导入（#91）
+
+依据 Q10、Q30、Q33、Q43。两台模拟器各执行一遍；`<data>` 为 `xcrun simctl get_app_container <UDID> me.justinyan.justreader data`。
+
+- [ ] 布局：书在 `<data>/Documents`；设置、笔记、`docsettings/` 在 `<data>/Library/Application Support/koreader`；`<data>/Library/Application Support/koreader/cache` 是指向 `<data>/Library/Caches/koreader` 的软链。Files 的"我的 iPhone/Just Reader"里只有书，没有 `.sdr`、`Inbox` 或 KOReader 自己的文件夹。
+- [ ] Files 放入：在 Files 里把 EPUB 放进"我的 iPhone/Just Reader"，回到 App 后书出现在书架（回前台由 B5 广播 `Resume`；B5 合入前以重启或关掉导入页代替，注明是哪种）。
+- [ ] 缓存清理：删除 `<data>/Library/Caches` 下的全部内容后重启，书、进度、笔记都在，缓存目录自动重建。
+- [ ] 文件选择器：导入页"从“文件”导入"→"选择文件"，系统选择器弹在 App 上（CLI 可验）。在选择器里选书要点按，归入真机复核。
+- [ ] 用 Just Reader 打开（CLI：`xcrun simctl openurl <UDID> file:///<宿主机路径>/x.epub`，App 运行中和未运行时各一次）：书进入 Documents 并打开，`Documents/Inbox` 不残留。打开 App 自己 Documents 里的书时，系统直接给原路径，书原地打开、不能被移动或删除。PDF 默认由系统"预览"打开（我们注册为 Alternate），需要在分享菜单里选 Just Reader。
+- [ ] 重名：再次导入同一本书，提示"已在这里"并保留原书；导入内容不同但同名的书，存为"X (2).epub"并明确提示，原书不变。
+- [ ] "文件"页：根为 Documents，面包屑从主目录开始，在主目录按返回离开"文件"，没有"上一级"。导入页"从电脑传书"写 Files 路径和 Finder 文件共享，不出现 USB、Android 路径或沙盒绝对路径；iPad 上写"我的 iPad"。
+- [ ] 容器路径变化：读过几本书后用 `xcrun simctl install` 覆盖安装（模拟器上数据容器的 UUID 每次都会变），启动后 `settings.reader.lua`、`history.lua`、`settings/*.lua`（文件头注释除外）里没有旧 UUID，sidecar 在 `docsettings/<新容器>/Documents/` 下，`cache` 软链指向新容器，书架、进度、划线都在（迁移见 `frontend/device/sdl/iosstorage.lua`）。
+- [ ] 备份（Q33）：数据目录不做备份排除，没有设置 `isExcludedFromBackup`。凭据（书源密码、KOSync）首版以明文随 iCloud/Finder 备份；iCloud 备份由 Apple 加密，Finder 备份是否加密取决于用户在 Finder 里的设置，不能假定。
+
 ## 真机复核
 
 由 owner 在需要体验时执行，建议 B1–B8 完成后首轮、C6 再做完整一轮。模拟器的速度、宿主进程 RSS 与供电状态不能替代真机结果。
@@ -73,6 +87,10 @@
 - [ ] iPhone 17 Pro Max 与 iPad Pro 11 英寸（M5）：重新执行上面的三项性能目标与至少 30 分钟连续阅读。记录温度、内存峰值、异常终止和具体操作。
 - [ ] 后台、锁屏、来电打断、系统真实内存回收、升级安装后，进度与划线不丢；不要用手动强退等同于系统回收，记录实际终止方式。
 - [ ] 真实屏幕亮度、中文输入、系统文件选择器、分享、Files/Finder 文件共享与 iCloud 未下载文件。
+- [ ] 文件选择器（B3，模拟器只验到弹出）：在选择器里选 iCloud Drive 和"我的 iPhone"里的书各一本（多选）；书被复制进 Documents 并上架，`tmp/*-Inbox` 不留副本，源文件不变。取消不提示；未下载到本机的云盘文件（断网时选 iCloud 里只在云端的书）给出原因。
+- [ ] Files 放入（B3）：在 Files App 里把书拖进"我的 iPhone/我的 iPad › Just Reader"，回到 App 后出现在书架（B5 接上回前台的 `Resume` 之前，以重启 App 代替）；Files 里看不到 `.sdr`、`Inbox`。Safari 下载、邮件附件的"用 Just Reader 打开"各做一次。
+- [ ] Finder 文件共享（B3）：Mac 连接设备，在 Finder 的设备窗口"文件"标签里把书拖到 Just Reader 上，书出现在书架；反向从 Just Reader 拖出书也可。Files 的"我的 iPhone/我的 iPad › Just Reader"同样核对。
+- [ ] TestFlight/开发包升级安装后，数据容器路径如有变化，进度、划线、历史、收藏都在（B3 的启动迁移）。
 - [ ] 在可比较的亮度、网络和阅读时长下记录耗电；模拟器不提供电池门禁数值。
 - [ ] VoiceOver 实际朗读与操作五个核心流程；外接键盘按最终支持范围验收。
 - [ ] KOPT 重排：用真实的扫描书和文字 PDF 重做上面的 C5 项。确认真机上 `ffi.load("pthread")` 能解析（翻页模式后台预重排生效，日志无报错），记录长页重排位图的内存峰值；#150 合并前后各记一次滚动模式翻页耗时。
