@@ -824,6 +824,37 @@ describe("ReaderTypesetPanel module", function()
             assert.are.equal(ui, topWidget())
         end)
 
+        it("keeps the same text through window rotation and an inset-only reflow", function()
+            ui:handleEvent(Event:new("GotoPage", 20))
+            UIManager:forceRePaint()
+            local anchor = ui.document:getXPointer()
+            local original_bb, original_size = Screen.bb, Screen.screen_size
+            local function resize(w, h)
+                if Screen.bb ~= original_bb then Screen.bb:free() end
+                Screen.bb = Blitbuffer.new(w, h, original_bb:getType())
+                Screen.screen_size = { w = w, h = h }
+                -- This is the sequence shared by SDL size, pixel-size and safe
+                -- area events. ReaderRolling must retain the original passage.
+                local size = Screen:getSize()
+                ui:handleEvent(Event:new("SetDimensions", size))
+                ui:handleEvent(Event:new("ScreenResize", size))
+                ui:handleEvent(Event:new("RedrawCurrentPage"))
+                runTasks()
+                UIManager:forceRePaint()
+                assert.are.equal(ui.document:getCurrentPage(), ui.document:getPageFromXPointer(anchor))
+            end
+            local ok, err = pcall(function()
+                resize(820, 390)
+                resize(820, 366) -- same window orientation, changed safe-area height
+                resize(390, 820)
+            end)
+            if Screen.bb ~= original_bb then Screen.bb:free() end
+            Screen.bb, Screen.screen_size = original_bb, original_size
+            ui:handleEvent(Event:new("SetDimensions", Screen:getSize()))
+            runTasks()
+            assert(ok, err)
+        end)
+
         it("should keep the chosen margin across rotation, widened only to cap the line length", function()
             ui.config:setFontSize(15)
             runTasks()

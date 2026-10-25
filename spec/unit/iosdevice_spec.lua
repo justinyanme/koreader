@@ -176,7 +176,7 @@ describe("SDL device selection (seam C)", function()
     end)
 
     it("reports unsupported native operations until the FFI adapters are installed", function()
-        local device = SDLDevice:createVariant{ platform = "iOS" }
+        local device = SDLDevice:createVariant{ platform = "iOS", native_bridge = require("device/sdl/iosbridge").new() }
         local result, err = device.bridge.downloadStart{ url = "https://example.org/book", path = "unused" }
         assert.is_nil(result)
         assert.are.equal("unsupported", err)

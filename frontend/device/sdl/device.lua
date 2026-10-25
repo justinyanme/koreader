@@ -181,6 +181,7 @@ local UbuntuTouch = Device:extend{
 local IOS = Device:extend{
     model = "iOS",
     isIOS = yes,
+    minimum_touch_size = 44,
     isDesktop = no,
     isEmulator = no,
     hasFrontlight = yes,
@@ -237,6 +238,75 @@ function IOS:getTransferInstructions()
         isTablet() and "iPad" or "iPhone")
 end
 
+-- SDL window dimensions are points on iOS; framebuffer dimensions are pixels.
+-- T0 measured 3 pixels/point on iPhone and 2 on iPad. Derive the ratio rather
+-- than identifying models, and keep this policy on this screen instance only.
+function IOS:setupScreen()
+    local screen = self.screen
+    self.pixel_ratio = screen.screen_size.w / self.window.width
+    self.display_dpi = 160 * self.pixel_ratio -- dp ruler, not physical panel PPI
+    screen:setDPI(self.display_dpi)
+    local function pointsToPixels(_, dp)
+        return math.ceil(dp * self.pixel_ratio)
+    end
+    screen.scaleBySize = pointsToPixels
+    screen.scaleByDPI = pointsToPixels
+
+    local insets, err = self.bridge.safeAreaInsets()
+    if not insets then
+        logger.warn("iOS safe area unavailable:", err)
+        insets = { top = 0, right = 0, bottom = 0, left = 0 }
+    end
+    -- Round inward so fractional point edges never expose an unsafe pixel.
+    local left = math.ceil(insets.left * self.pixel_ratio)
+    local top = math.ceil(insets.top * self.pixel_ratio)
+    local right = math.floor(screen.screen_size.w - insets.right * self.pixel_ratio)
+    local bottom = math.floor(screen.screen_size.h - insets.bottom * self.pixel_ratio)
+    self.viewport = Geom:new{ x = left, y = top, w = right - left, h = bottom - top }
+end
+
+function IOS:setScreenDPI()
+    -- A saved e-ink DPI override must not shrink iOS's point-sized controls.
+    Generic.setScreenDPI(self, self.display_dpi)
+end
+
+function IOS:resizeWindow(w, h)
+    self.screen:resize(w, h)
+    self.window.width, self.window.height = SDL.win_w, SDL.win_h
+    -- resize returns a full buffer, with the previous viewport released. Keep
+    -- screen_size physical: framebuffer coordinate translation depends on it.
+    local full_size = self.screen:getSize()
+    self.screen.screen_size.w, self.screen.screen_size.h = full_size.w, full_size.h
+    self:setupScreen()
+    self.screen:setViewport(self.viewport)
+    self.viewport_touch_offset.x = -self.viewport.x
+    self.viewport_touch_offset.y = -self.viewport.y
+    self:notifyScreenResize()
+end
+
+function Device:resizeWindow(w, h)
+    self.screen:resize(w, h)
+    self.window.width, self.window.height = w, h
+    local size = self.screen:getSize()
+    self.screen.screen_size.w, self.screen.screen_size.h = size.w, size.h
+    self:notifyScreenResize()
+end
+
+function Device:notifyScreenResize()
+    local new_size = self.screen:getSize()
+    logger.dbg("Resizing screen to", new_size)
+    -- ReaderRolling's SetDimensions handler retains internal history across
+    -- reflow, restoring the same text position for resize and safe-area changes.
+    UIManager:broadcastEvent(Event:new("SetDimensions", new_size))
+    UIManager:broadcastEvent(Event:new("ScreenResize", new_size))
+    UIManager:broadcastEvent(Event:new("RedrawCurrentPage"))
+    local FileManager = require("apps/filemanager/filemanager")
+    if FileManager.instance then
+        FileManager.instance:reinit(FileManager.instance.path, FileManager.instance.focused_file)
+    end
+    UIManager:setDirty("all", "ui")
+end
+
 function Device:init()
     -- allows to set a viewport via environment variable
     -- syntax is Lua table syntax, e.g. EMULATE_READER_VIEWPORT="{x=10,w=550,y=5,h=790}"
@@ -268,6 +338,7 @@ function Device:init()
     -- Pickup the updated window sizes if they were enforced in S.open (we'll get the coordinates via the initial SDL_WINDOWEVENT_MOVED)...
     self.window.width = self.screen.w
     self.window.height = self.screen.h
+    if self:isIOS() then self:setupScreen() end
     self.powerd = require("device/sdl/powerd"):new{device = self}
 
     local ok, re = pcall(self.screen.setWindowIcon, self.screen, "resources/koreader.png")
@@ -367,34 +438,11 @@ function Device:init()
                     end
                 end
             elseif ev.code == SDL.SDL.SDL_EVENT_WINDOW_RESIZED then
-                device_input.device.screen.resize(device_input.device.screen, ev.value.data1, ev.value.data2)
-                self.window.width = ev.value.data1
-                self.window.height = ev.value.data2
-
-                local new_size = device_input.device.screen:getSize()
-                device_input.device.screen.screen_size.w = new_size.w
-                device_input.device.screen.screen_size.h = new_size.h
-
-                logger.dbg("Resizing screen to", new_size)
-
-                -- try to catch as many flies as we can
-                -- this means we can't just return one ScreenResize or SetDimensons event
-                UIManager:broadcastEvent(Event:new("SetDimensions", new_size))
-                UIManager:broadcastEvent(Event:new("ScreenResize", new_size))
-                --- @todo Toggle this elsewhere based on ScreenResize?
-
-                -- this triggers paged media like PDF and DjVu to redraw
-                -- CreDocument doesn't need it
-                UIManager:broadcastEvent(Event:new("RedrawCurrentPage"))
-
-                local FileManager = require("apps/filemanager/filemanager")
-                if FileManager.instance then
-                    FileManager.instance:reinit(FileManager.instance.path,
-                        FileManager.instance.focused_file)
-                end
-
-                -- make sure dialogs are displayed
-                UIManager:setDirty("all", "ui")
+                self:resizeWindow(ev.value.data1, ev.value.data2)
+            elseif self:isIOS() and (ev.code == SDL.SDL.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED
+                or ev.code == SDL.SDL.SDL_EVENT_WINDOW_SAFE_AREA_CHANGED) then
+                -- Pixel-size event payloads are pixels, not SDL window points.
+                self:resizeWindow()
             elseif ev.code == SDL.SDL.SDL_EVENT_WINDOW_MOVED then
                 self.window.left = ev.value.data1
                 self.window.top = ev.value.data2

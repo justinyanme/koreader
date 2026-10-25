@@ -230,7 +230,7 @@ The black bubble's two grays (bubble-rule and marker-on-ink) are retired with th
 Generated typographic covers draw from three extra fills: **Cover Stock** (cover-stock, `COLOR_GRAY_D`), the light card ground for the frame and stripe covers; **Cover Tint** (cover-tint, `COLOR_GRAY_B`), the field behind the oversized glyph on split covers; and **Cover Gray** (cover-gray, `COLOR_DARK_GRAY`), the mid-tone block cover. Ink and paper complete the set. These grays appear only on covers.
 
 ### Named Rules
-**The Monochrome Rule.** Color never carries meaning. Every state reads in black, white and gray, because every target panel is monochrome.
+**The Monochrome Rule.** Color never carries meaning in chrome. Every interface state reads in black, white and gray on e-ink and iOS alike. On iOS, illustrations, PDF pages and original cover images retain the engine’s color output; generated typographic covers keep their gray tokens. Night mode inverts the whole display, including content and safe-area background, and does not follow system dark mode (Q6).
 
 **The Job-Only Gray Rule.** A gray must do a named job (rule, track, resting tile, temporary mark, disabled). Never introduce a gray for mood or depth, and never gray secondary text that the reference sets in ink.
 
@@ -273,6 +273,10 @@ The interface font-size setting (小 / 默认 / 大 / 较大 / 特大 = 0.9 / 1.
 
 The design is one layout scaled by proportion; the Leaf5 reference fixes its proportions.
 
+- **iOS ruler and safe area.** 1dp ≈ 1pt on the device screen instance: `ceil(dp × pixel/point)`, for both size and DPI scaling. T0 measured iPhone 3px/pt and iPad 2px/pt; a saved e-ink DPI override does not change this ruler. Controls and content use `Device.viewport`, the SDL safe area converted inward to whole pixels. The background fills the display, including notch and Home-indicator regions. Hide the system status bar; time and battery belong to app chrome and the footer. Window-size, pixel-size and safe-area changes follow the same resize/reflow notifications and retain the reading position through ReaderRolling.
+- **Narrow, about 390dp.** Below 457dp, shelf and source grids use `max(2, floor((W − 2·gutter + gap) / (123 + gap)))` columns, with 123dp-wide covers and spare width centered in the outer margins. At 390dp this gives two covers: shelf 123×178dp with 22dp gap and 61dp margins; sources 123×164dp with 20dp gap and 62dp margins. Source row-fitting shrink is disabled in this range. Other naturally fitting components keep their existing rules.
+- **iPad, about 820dp.** The existing proportional layout remains, with no third layout. B0 P1 remains an observation: column count above the narrow threshold still follows physical-width thresholds, and covers can grow. A width-only cap would also change landscape e-ink, so it is deferred. P2 keeps the font grid’s existing two-to-five columns; P3 keeps full-width contents and personal-page rows; P4 keeps evenly distributed toolbar targets; P5 keeps the intentional centered 458dp import card and 416dp notes column. These match the existing large-panel grammar. P6 (default book margins exceeding 38 characters before a margin is chosen) is deferred for owner decision: it also affects landscape e-ink. No default-margin behavior changes in B4.
+
 - **Bottom band.** The shelf, 书源 and 我 tabs and every new full-screen page end in a 58dp band with a 1dp rule-gray top edge. On the tabs it holds the three tab icons at the left and the joined pager at the right. On full-screen pages it holds the back arrow at the left, optional outline pill actions, and the pager at the right. The reading page has no band; its bottom toolbar appears on request.
 - **Gutter.** About 22dp on the left and right of the shelf, panels, lists and settings. Card pages (notes, lookup) center a column about 416dp wide. The import page centers one card at most 458dp wide.
 - **Shelf.** From the top: a full-width search field (50dp pill) that opens the home search page, then a title row (the 书架 title or the current filter, such as 在读 ▾, at the left; 导入 and 选择 with circled icons at the right), then the cover grid. On the Leaf5 the grid has four columns: covers about 123 × 178dp with a 22dp column gap, then 12dp down to one bold 13dp title line ending in an ellipsis, and about 24dp to the next row. Other panels compute the column count, keeping the cover size and never shrinking a title's touch area.
@@ -283,7 +287,7 @@ The design is one layout scaled by proportion; the Leaf5 reference fixes its pro
 - **Overlay stack.** In order: page (with header, footer and the search bar), toolbars, panel, full-screen page, popover and selection handles, wash with a confirm layer or the thought editor, toast. A sheet opened from a full-screen page (书源's long-press, 分类浏览, edit and menu sheets) stacks above that page.
 - **Rhythm.** Gaps step 4 / 8 / 12 / 18 / 22; 13 is the gap between cards.
 
-**The Proportion Rule.** One design from 6" to 10.3". Change columns and margins with the panel and keep the component sizes.
+**The Proportion Rule.** One design from narrow iPhone (about 390dp) through 6"–10.3" e-ink to iPad (about 820dp). Change columns and margins with the panel and keep the component sizes.
 
 ## Elevation & Depth
 
@@ -322,7 +326,7 @@ A 38dp pill with a 1dp ink outline. Segments are split by 1dp ink rules and the 
 ### Tracks (typesetting and progress)
 A pill track flanked by two 33dp circle buttons (− and +, 1dp ink outline). The track's passed part is ink and the rest is marker gray. On stepped tracks a 1dp paper rule marks each passed step. The knob is a 33dp paper disc with a 1.5dp ink outline, as measured in both references. It shows the real value in 12dp bold (the font size in dp, the weight step), or the row's name (行距, 边距) when the value has no short number. End labels sit inside the track in 12dp bold: paper on ink at the left (小, 细, 紧, 小), ink on gray at the right (大, 粗, 松, 大). Line spacing and margins have more steps than the first round's three. The old 105 / 125 / 145 % and 18 / 28 / 44dp stay on the track, and a value set elsewhere reads back at its own position without being snapped. Each change re-lays the page out with a partial refresh while the panel stays open.
 
-The typesetting tracks sit on 44dp rows, the ± buttons 9dp from the track. − and + go to the next stop below or above, also from a value between two stops; at either end, the button that would go past it turns rule gray. A tap on the track picks the nearest stop. A value past the last stop, set elsewhere, sits at that end with − or + still leading back onto the track. When the knob's label is longer than the disc (other languages), the knob widens to a pill. Every stop is a value KOReader applies as it is, so a knob reads the real setting:
+The typesetting tracks sit on 44dp rows, the ± buttons 9dp from the track. − and + go to the next stop below or above, also from a value between two stops; at either end, the button that would go past it turns rule gray. A tap on the track picks the nearest stop while the stop pitch is at least the 33dp knob diameter. When the pitch is smaller (B0 R2), it advances one stop toward the tapped side, with the same behavior as −/+. The knob, ticks, circle buttons and 44dp row stay unchanged. Each track decides from its actual geometry, including translated end labels. A value past the last stop, set elsewhere, sits at that end with − or + still leading back onto the track. When the knob's label is longer than the disc (other languages), the knob widens to a pill. Every stop is a value KOReader applies as it is, so a knob reads the real setting:
 - **字号:** 15, 16, 17, 18, 19, 20, 22, 24, 26, 28dp (the Reading role's steps), about 41dp apart on a portrait panel. The knob shows the size itself, fractions included (19.5). Sizes past them (KOReader takes 12 and up) stay reachable in the original bottom bar.
 - **字重:** the engine's seven weights −1, −½, 0, +½, +1, +1½, +3, in the order of the original bottom bar's 字重 row. The knob shows the step, 1 to 7, so 3 is regular (0, Regular 400), 5 is +1 (Medium 500) and 7 is +3 (Bold 700). A fine-tuned weight between two steps shows 字重 instead of a number.
 - **行距:** 85 to 165 % in steps of 10.
@@ -448,6 +452,8 @@ These follow their reference screenshots directly, using the parts above:
 - **Footnote popup:** there is no reference sample; KOReader's popup keeps its bottom position, paging and return flow, with document margins inside the card. The card has 4dp horizontal insets to separate its rounded corners from the screen edges. N04 specifies paper, a physical 1px ink outline and the card's 14dp radius. Short notes shrink to their content; long notes keep the bottom third of the screen. Opening and closing use `ui` on the popup's rect; the existing link marker refresh remains in ReaderLink.
 
 ### Refresh mapping
+On iOS LCD/OLED, e-ink waveform choices have no hardware effect. Keep the refresh declarations and regions in the shared Lua path for e-ink; they still describe repaint intent.
+
 Each interaction declares one KOReader refresh type and the smallest rect set it repaints:
 - **partial:** page turns, reflow after a type change (the panel stays open; after 正文首行缩进 in settings, once the settings page closes), and jumps to a chapter, bookmark, note, search hit or the 原进度.
 - **ui:** toolbars and panels (their own rects), the progress knob's drag preview (the track and the position figure), the 加载中… cover and where the 返回原进度 pill was, the 段间距 toggle on its gray card, switching panels, full-screen pages opening, paging and filtering, the image preview showing (dithered), zooming, panning and closing, tab switches, the confirm layer and its wash (and the 更多 list's, from under the top bar to the bottom bar), and the search bar's × (the bar and the hit mark).
@@ -499,7 +505,7 @@ KOReader capabilities that WeChat Read lacks stay reachable from a secondary ent
 - **Do** keep other UI languages, fixed-layout books' own controls, physical page keys and the 原版入口 working; the reference only shows Chinese, touch and reflowable books.
 
 ### Don't:
-- **Don't** use color to carry meaning; the panels are monochrome.
+- **Don't** use color to carry meaning in chrome; original book content may retain color on iOS.
 - **Don't** use drop shadows, blur or gradients for depth, or any scrim other than the wash.
 - **Don't** animate anything on the product surface.
 - **Don't** make lists scroll.

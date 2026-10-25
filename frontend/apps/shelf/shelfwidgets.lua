@@ -68,12 +68,22 @@ local TITLE_GAP = dp(9) -- to the title's line box, whose CJK glyphs start about
 local SHELF_ROW_GAP = dp(20)
 local MIN_PEEK = dp(40)
 
+-- B0 R1: three 123dp covers need 457dp. Below that width keep cover
+-- dimensions, change columns, and put the spare width in the outer margins.
+local function narrowGrid(width, gutter, gap)
+    if width >= dp(457) then return end
+    local cover_w = dp(123)
+    local cols = math.max(2, math.floor((width - 2 * gutter + gap) / (cover_w + gap)))
+    return cols, cover_w, math.floor((width - cols * cover_w - (cols - 1) * gap) / 2)
+end
+
 --- 书架's cover grid for a region `width` wide and `grid_h` tall. `rows` full rows fit; when at least
 -- MIN_PEEK is left under them, `peek` is that height: the next page's first row shows there, cut off.
 local function shelfGrid(width, grid_h)
-    local cols = columnCount()
-    local inner_w = width - 2 * SHELF_GUTTER
-    local cover_w = math.floor((inner_w - SHELF_COL_GAP * (cols - 1)) / cols)
+    local cols, cover_w, gutter = narrowGrid(width, SHELF_GUTTER, SHELF_COL_GAP)
+    cols, gutter = cols or columnCount(), gutter or SHELF_GUTTER
+    local inner_w = width - 2 * gutter
+    cover_w = cover_w or math.floor((inner_w - SHELF_COL_GAP * (cols - 1)) / cols)
     local cover_h = math.floor(cover_w * COVER_RATIO + 0.5)
     local line_h = math.ceil(Font:getFace("ui_label").ftsize:getHeightAndAscender())
     local cell_h = cover_h + TITLE_GAP + line_h
@@ -86,7 +96,7 @@ local function shelfGrid(width, grid_h)
         cover_w = cover_w,
         cover_h = cover_h,
         col_gap = cols > 1 and math.floor((inner_w - cols * cover_w) / (cols - 1)) or 0,
-        gutter = SHELF_GUTTER,
+        gutter = gutter,
         title_gap = TITLE_GAP,
         cell_h = cell_h,
         row_gap = SHELF_ROW_GAP,
@@ -96,14 +106,16 @@ end
 
 --- 书源's cover grid for a region `width` wide (24dp gutters) and `grid_h` tall.
 local function gridGeometry(width, grid_h)
-    local cols = columnCount()
-    local inner_w = width - 2 * GUTTER
-    local cover_w = math.floor((inner_w - COL_GAP * (cols - 1)) / cols)
+    local cols, cover_w, gutter = narrowGrid(width, GUTTER, COL_GAP)
+    local narrow = cols ~= nil
+    cols, gutter = cols or columnCount(), gutter or GUTTER
+    local inner_w = width - 2 * gutter
+    cover_w = cover_w or math.floor((inner_w - COL_GAP * (cols - 1)) / cols)
     local rows = math.floor((grid_h + ROW_GAP) / (math.floor(cover_w * 4 / 3) + TEXT_H + ROW_GAP))
     -- Shrink covers a little to fit one more row rather than leave the bottom empty;
     -- below two rows, accept down to 3/4 of the column width (the prototype's rule).
     local shrunk = math.floor(((grid_h + ROW_GAP) / (rows + 1) - TEXT_H - ROW_GAP) * 3 / 4)
-    if shrunk >= cover_w * (rows < 2 and 0.75 or 0.85) then
+    if not narrow and shrunk >= cover_w * (rows < 2 and 0.75 or 0.85) then
         rows, cover_w = rows + 1, shrunk
     end
     rows = math.max(rows, 1)
@@ -112,6 +124,7 @@ local function gridGeometry(width, grid_h)
         rows = rows,
         cover_w = cover_w,
         cover_h = math.floor(cover_w * 4 / 3),
+        gutter = gutter,
         col_gap = cols > 1 and math.floor((inner_w - cols * cover_w) / (cols - 1)) or 0,
     }
 end
@@ -267,8 +280,16 @@ local Tappable = InputContainer:extend{
 
 function Tappable:init()
     local range = function()
-        if self.clip and self.dimen then return self.dimen:intersect(self.clip) end
-        return self.dimen
+        local rect = self.dimen
+        if not rect then return end
+        local minimum = dp(Device.minimum_touch_size)
+        if minimum > 0 then
+            local dx, dy = math.max(0, minimum - rect.w), math.max(0, minimum - rect.h)
+            rect = Geom:new{ x = rect.x - math.floor(dx / 2), y = rect.y - math.floor(dy / 2),
+                w = rect.w + dx, h = rect.h + dy }
+        end
+        if self.clip then return rect:intersect(self.clip) end
+        return rect
     end
     self.ges_events = {
         Tap = { GestureRange:new{ ges = "tap", range = range } },

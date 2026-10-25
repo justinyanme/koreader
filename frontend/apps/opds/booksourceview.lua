@@ -630,10 +630,11 @@ function BookSourceView:buildGrid(page, body_h, top_y)
     local first = (page.page_no - 1) * per_page
     local grid = VerticalGroup:new{ align = "left", VerticalSpan:new{ width = GRID_TOP } }
     local y = top_y + GRID_TOP
+    local gutter = self.grid.gutter
     local shown = {}
     for r = 1, self.grid.rows do
-        local row = HorizontalGroup:new{ align = "top", HorizontalSpan:new{ width = GUTTER } }
-        local x = GUTTER
+        local row = HorizontalGroup:new{ align = "top", HorizontalSpan:new{ width = gutter } }
+        local x = gutter
         for c = 1, self.grid.cols do
             local book = books[first + (r - 1) * self.grid.cols + c]
             if not book then break end
