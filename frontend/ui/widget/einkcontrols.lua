@@ -27,6 +27,7 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local Device = require("device")
 local Screen = Device.screen
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local function tapEvents(dimen)
     return { TapSelect = { GestureRange:new{ ges = "tap", range = dimen } } }
@@ -566,6 +567,13 @@ function PageCapsule:init()
     self.next_icon = Glyph:new{ icon = "eink/chev.up", width = size, height = size, alpha = true,
         rotation_angle = 180, enabled = self.next_enabled }
     local touch_h = math.max(self.touch_h or 0, Screen:scaleBySize(44))
+    -- VoiceOver (device/sdl/iosaccessibility): swipe up for the next page, down for the previous one
+    self.a11y = {
+        value = function() return T(_("Page %1 of %2"), self.page, self.pages) end,
+        adjust = function(delta)
+            if delta > 0 then self:onTapNext() else self:onTapPrev() end
+        end,
+    }
     self.prev_rect = Geom:new{ w = self.half_w, h = touch_h }
     self.next_rect = Geom:new{ w = self.width - self.half_w, h = touch_h }
     self.ges_events = {
@@ -633,6 +641,7 @@ local BackArrow = InputContainer:extend{
 
 function BackArrow:init()
     self.dimen = Geom:new{ w = self.width, h = self.height }
+    self.a11y = { label = _("Back") } -- VoiceOver: a double tap runs the callback
     local size = Screen:scaleBySize(24)
     local gutter = Screen:scaleBySize(24)
     self[1] = HorizontalGroup:new{

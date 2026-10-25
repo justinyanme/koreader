@@ -208,6 +208,8 @@ k2pdfopt_optimize_bmp
 k2pdfopt_reflow_bmp
 k2pdfopt_tocr_end
 k2pdfopt_tocr_single_word
+ko_ios_a11y_poll
+ko_ios_a11y_set
 ko_ios_brightness_get
 ko_ios_brightness_set
 ko_ios_download_cancel

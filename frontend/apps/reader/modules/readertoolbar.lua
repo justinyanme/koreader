@@ -334,6 +334,14 @@ end
 
 function ReaderToolbar:onReaderReady()
     self:initGesListener()
+    -- VoiceOver (device/sdl/iosaccessibility): the page reads the title and the page number; a double tap
+    -- shows the toolbar, a swipe up or down turns the page.
+    self.view.a11y = {
+        label = function() return self.ui.doc_props.display_title end,
+        value = function() return T(_("Page %1 of %2"), self.ui:getCurrentPage(), self.ui.document:getPageCount()) end,
+        activate = function() self:showToolbar() end,
+        adjust = function(delta) self.ui:handleEvent(Event:new("GotoViewRel", delta)) end,
+    }
     self.view.dogear:free()
     self.view.dogear = require("apps/reader/modules/readertoolbardogear"):new{ view = self.view, ui = self.ui }
     self.view[1] = self.view.dogear
@@ -634,20 +642,21 @@ function ReaderToolbar:buildBottomBar(active, back_only)
         }
     else
         local cell_w = math.floor((sw - BACK_W - rule) / 4)
-        local function cell(icon, name, callback)
+        local function cell(icon, name, label, callback)
             return ToolbarCell:new{
                 icon = name ~= nil and name == active and icon .. ".bold" or icon,
                 width = cell_w, height = row_h, callback = callback,
+                a11y = { label = label }, -- VoiceOver: a double tap runs the callback
             }
         end
         row = HorizontalGroup:new{
             align = "center",
             EinkControls.BackArrow:new{ width = BACK_W, height = row_h, callback = function() self:backToShelf() end },
             LineWidget:new{ dimen = Geom:new{ w = rule, h = RULE_H }, background = Palette.rule },
-            cell("eink/toc", nil, function() self.ui:handleEvent(Event:new("ShowToc")) end),
-            cell("eink/notes", nil, function() self.ui:handleEvent(Event:new("ShowNotes")) end),
-            cell("eink/progress", "progress", function() self:togglePanel("progress") end),
-            cell("eink/font", "font", function() self:togglePanel("font") end),
+            cell("eink/toc", nil, _("Table of contents"), function() self.ui:handleEvent(Event:new("ShowToc")) end),
+            cell("eink/notes", nil, _("Notes"), function() self.ui:handleEvent(Event:new("ShowNotes")) end),
+            cell("eink/progress", "progress", _("Progress"), function() self:togglePanel("progress") end),
+            cell("eink/font", "font", _("Font"), function() self:togglePanel("font") end),
         }
     end
     return FrameContainer:new{

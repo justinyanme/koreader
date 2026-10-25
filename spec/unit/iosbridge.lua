@@ -107,6 +107,28 @@ function FakeBridge.new(options)
         return util.tableDeepCopy(options.insets or { top = 0, right = 0, bottom = 0, left = 0 })
     end
 
+    -- VoiceOver overlay: accessibility_sets records each set; queueAccessibility(generation, index, action)
+    -- stands in for a VoiceOver gesture, returned by the next poll.
+    bridge.accessibility_sets = {}
+    local accessibility_queue = {}
+    function bridge.accessibilitySet(update)
+        local elements = {}
+        for i, e in ipairs(update.elements) do -- what the native overlay gets: no widget
+            elements[i] = { x = e.x, y = e.y, w = e.w, h = e.h, label = e.label, value = e.value, adjustable = e.adjustable }
+        end
+        table.insert(bridge.accessibility_sets, { generation = update.generation, pixel_width = update.pixel_width,
+            screen_changed = update.screen_changed, elements = elements })
+        return true
+    end
+    function bridge.accessibilityPoll()
+        local actions = accessibility_queue
+        accessibility_queue = {}
+        return actions
+    end
+    function bridge.queueAccessibility(generation, index, action)
+        table.insert(accessibility_queue, { generation = generation, index = index, action = action })
+    end
+
     function bridge.memoryAvailable()
         if options.memory_available == nil then return nil, "unsupported" end
         return options.memory_available
