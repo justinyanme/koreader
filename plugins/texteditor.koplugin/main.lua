@@ -94,7 +94,7 @@ function TextEditor:loadSettings()
     self.show_keyboard_on_start = self.settings:nilOrTrue("show_keyboard_on_start")
 end
 
-function TextEditor:onFlushSettings()
+function TextEditor:onFlushSettings(show_notification, context)
     if self.settings then
         self.settings:saveSetting("history", self.history)
         self.settings:saveSetting("last_view_pos", self.last_view_pos)
@@ -105,7 +105,7 @@ function TextEditor:onFlushSettings()
         self.settings:saveSetting("force_ltr_para_direction", self.force_ltr_para_direction)
         self.settings:saveSetting("qr_code_export", self.qr_code_export)
         self.settings:saveSetting("show_keyboard_on_start", self.show_keyboard_on_start)
-        self.settings:flush()
+        self.settings:flush(context)
     end
 end
 

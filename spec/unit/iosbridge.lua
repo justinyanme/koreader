@@ -46,11 +46,27 @@ function FakeBridge.new(options)
         return true
     end
 
-    function bridge.backgroundBegin()
+    local pending_task
+    local function acquireBackground()
         if options.background_unavailable then return nil, "unavailable" end
         next_task = next_task + 1
         tasks[next_task] = { expired = false }
         return next_task
+    end
+
+    function bridge.backgroundBegin()
+        if pending_task then
+            local handle = pending_task
+            pending_task = nil
+            return handle
+        end
+        return acquireBackground()
+    end
+
+    -- Native watcher stimulus, including expiry before Lua claims the task.
+    function bridge.watchBackground()
+        if not pending_task then pending_task = acquireBackground() end
+        return pending_task
     end
 
     function bridge.backgroundEnd(handle)
@@ -105,6 +121,7 @@ function FakeBridge.new(options)
         if tasks[handle] then
             tasks[handle].expired = true
             tasks[handle].ended = true
+            incomplete = true
         end
     end
 

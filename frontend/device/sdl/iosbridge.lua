@@ -24,7 +24,8 @@ downloadCancel(handle) -> true | nil, error
 backgroundBegin() -> handle | nil, error
     Acquires short background time, without promising a duration. nil means no
     time was granted; saving must still proceed. Native event watchers may have
-    acquired the handle before Lua receives the lifecycle event.
+    acquired the handle before Lua receives the lifecycle event. Claim that same
+    handle even if it expired before delivery, so backgroundExpired sees expiry.
 backgroundEnd(handle) -> true | nil, error
     Releases the handle; safe after expiry or repeated calls.
 backgroundExpired(handle) -> boolean | nil, error

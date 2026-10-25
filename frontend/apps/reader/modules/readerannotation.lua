@@ -249,10 +249,14 @@ function ReaderAnnotation:onCloseDocument()
     self:updatePageNumbers()
 end
 
-function ReaderAnnotation:onSaveSettings()
+function ReaderAnnotation:onSaveSettings(context)
     self:updatePageNumbers()
     self.ui.doc_settings:saveSetting("annotations", self.annotations)
-    self:onExportAnnotations(true)
+    if context then
+        context:defer(function() return self:onExportAnnotations(true) end)
+    else
+        self:onExportAnnotations(true)
+    end
 end
 
 function ReaderAnnotation:getExportAnnotationsFilepath()
@@ -271,7 +275,8 @@ function ReaderAnnotation:onExportAnnotations(on_closing)
         anno:saveSetting("datetime", os.date("%Y-%m-%d %H:%M:%S"))
         anno:saveSetting("paging", self.ui.paging and true)
         anno:saveSetting("annotations", self.annotations)
-        anno:flush()
+        local ok, err = anno:flush()
+        if not ok then return nil, err end
         os.remove(file .. ".old")
         if not on_closing then
             Notification:notify(_"Annotations exported")

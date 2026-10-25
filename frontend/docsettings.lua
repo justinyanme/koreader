@@ -10,6 +10,7 @@ local dump = require("dump")
 local ffiutil = require("ffi/util")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
+local SettingsWriter = require("settingswriter")
 local util = require("util")
 
 local DocSettings = LuaSettings:extend{}
@@ -330,13 +331,15 @@ function DocSettings:flush(data, no_custom_metadata)
     end
 
     local ser_data = dump(data, nil, true)
+    local write_err
     for _, sidecar_dir in ipairs(sidecar_dirs) do
         local sidecar_dir_slash = sidecar_dir .. "/"
         local sidecar_file = sidecar_dir_slash .. self.sidecar_filename
         util.makePath(sidecar_dir)
         logger.dbg("DocSettings: Writing to", sidecar_file)
-        local directory_updated = LuaSettings:backup(sidecar_file) -- "*.old"
-        if util.writeToFile(ser_data, sidecar_file, true, true, directory_updated) then
+        local written
+        written, write_err = SettingsWriter.write(ser_data, sidecar_file)
+        if written then
             -- move custom cover file and custom metadata file to the metadata file location
             if not no_custom_metadata then
                 local metadata_file, filepath, filename
@@ -367,6 +370,7 @@ function DocSettings:flush(data, no_custom_metadata)
             return sidecar_dir
         end
     end
+    return nil, write_err
 end
 
 --- Purges (removes) sidecar directory.
@@ -388,6 +392,7 @@ function DocSettings:purge(sidecar_to_keep, data_to_purge)
     if data_to_purge.doc_settings and self.candidates then
         for _, t in ipairs(self.candidates) do
             local candidate_path = t.path
+            os.remove(candidate_path .. ".tmp")
             if isFile(candidate_path) then
                 if (not sidecar_to_keep)
                         or (candidate_path ~= sidecar_to_keep and candidate_path ~= sidecar_to_keep .. ".old") then
@@ -411,6 +416,10 @@ function DocSettings:purge(sidecar_to_keep, data_to_purge)
     -- Remove empty sidecar dirs
     if data_to_purge.doc_settings or data_to_purge.custom_cover_file or data_to_purge.custom_metadata_file then
         for _, dir in ipairs({ self.doc_sidecar_dir, self.dir_sidecar_dir, self.hash_sidecar_dir }) do
+            if data_to_purge.doc_settings and dir then
+                -- A first write may have been interrupted before any candidate existed.
+                os.remove(dir .. "/" .. self.sidecar_filename .. ".tmp")
+            end
             DocSettings.removeSidecarDir(dir)
         end
     end
@@ -644,8 +653,9 @@ function DocSettings.saveSettingsArcFile(doc_settings, custom_metadata_file, on_
     }
     local arc_settings = LuaSettings:open(arc_file)
     arc_settings.data = doc_settings.data
-    arc_settings:flush()
+    local ok, err = arc_settings:flush()
     doc_settings.data.metadata_arc = nil
+    return ok, err
 end
 
 return DocSettings

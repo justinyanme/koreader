@@ -324,7 +324,7 @@ function Device:init()
         device = self,
         event_map = dofile("frontend/device/sdl/event_map_sdl2.lua"),
         handleSdlEv = function(device_input, ev)
-
+            if self.handleLifecycleEvent and self:handleLifecycleEvent(ev.code) then return end
             if ev.code == SDL.SDL.SDL_EVENT_MOUSE_WHEEL and (ev.value.integer_x ~= 0 or ev.value.integer_y ~= 0) then
                 local pos = Geom:new{
                     x = 0,
@@ -548,6 +548,23 @@ end
 
 function Device:UIManagerReady(uimgr)
     UIManager = uimgr
+end
+
+function IOS:UIManagerReady(uimgr)
+    Device.UIManagerReady(self, uimgr)
+    self.lifecycle = require("device/sdl/ioslifecycle").new(self, uimgr)
+end
+
+function IOS:handleLifecycleEvent(code)
+    return self.lifecycle and self.lifecycle:handle(code) or false
+end
+
+function IOS:scheduleSettingsSave(reader)
+    if self.lifecycle then self.lifecycle:changed(reader) end
+end
+
+function IOS:cancelPendingSettingsSave(reader)
+    if self.lifecycle then self.lifecycle:cancel(reader) end
 end
 
 function Device:setEventHandlers(uimgr)

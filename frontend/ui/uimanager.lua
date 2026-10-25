@@ -1758,8 +1758,12 @@ function UIManager:consumeInputEarlyAfterPM(toggle)
 end
 
 --- Broadcasts a `FlushSettings` Event to *all* widgets.
-function UIManager:flushSettings()
-    self:broadcastEvent(Event:new("FlushSettings"))
+function UIManager:flushSettings(context)
+    if context then
+        self:broadcastEvent(Event:new("FlushSettings", nil, context))
+    else
+        self:broadcastEvent(Event:new("FlushSettings"))
+    end
 end
 
 --- Sanely restart KOReader (on supported platforms).

@@ -53,8 +53,8 @@ function SwitchPlugin:flipSetting()
     self:_init()
 end
 
-function SwitchPlugin:onFlushSettings()
-    self.settings:flush()
+function SwitchPlugin:onFlushSettings(show_notification, context)
+    self.settings:flush(context)
 end
 
 --- Show a ConfirmBox to ask for enabling or disabling this plugin.

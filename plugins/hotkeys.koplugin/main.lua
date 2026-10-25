@@ -586,9 +586,10 @@ end -- hardcodedEvents()
     This function checks if the `settings_data` exists and if it has been marked as updated.
     If both conditions are met, it flushes the `settings_data` and resets the `updated` flag to false.
 --]]
-function HotKeys:onFlushSettings()
+function HotKeys:onFlushSettings(show_notification, context)
     if self.settings_data and self.updated then
-        self.settings_data:flush()
+        local ok = self.settings_data:flush(context)
+        if context and not ok then return end
         self.updated = false
     end
 end

@@ -154,9 +154,10 @@ function OPDS:openDownloadedFile(file)
     end
 end
 
-function OPDS:onFlushSettings()
+function OPDS:onFlushSettings(show_notification, context)
     if self.updated then
-        self.settings:flush()
+        local ok = self.settings:flush(context)
+        if context and not ok then return end
         self.updated = nil
     end
 end

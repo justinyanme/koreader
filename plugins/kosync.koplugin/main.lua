@@ -73,9 +73,10 @@ function KOSync:loadSettings()
     self.settings = KOSync.settings_obj:readSetting("settings", KOSync.default_settings)
 end
 
-function KOSync:onFlushSettings()
+function KOSync:onFlushSettings(show_notification, context)
     if self.updated then
-        KOSync.settings_obj:flush()
+        local ok = KOSync.settings_obj:flush(context)
+        if context and not ok then return end
         self.updated = nil
     end
 end
@@ -1003,8 +1004,14 @@ function KOSync:_onResume()
     end)
 end
 
-function KOSync:_onSuspend()
+function KOSync:_onSuspend(context)
     logger.dbg("KOSync: onSuspend")
+    if context then
+        -- An iOS background save must persist local progress before spending
+        -- its optional remaining time on a network request.
+        context:defer(function() self:updateProgress(true, false, true) end)
+        return
+    end
     -- We request an extra flashing refresh on success, to deal with potential ghosting left by the NetworkMgr UI
     self:updateProgress(true, false, true)
 end

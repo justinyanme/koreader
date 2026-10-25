@@ -163,7 +163,7 @@ function Wallabag:loadSettings()
     self.wb_settings = Wallabag.settings
 end
 
-function Wallabag:onFlushSettings()
+function Wallabag:onFlushSettings(show_notification, context)
     if self.updated then
         self.wb_settings:saveSetting("wallabag", {
             server_url                    = self.server_url,
@@ -196,7 +196,8 @@ function Wallabag:onFlushSettings()
             large_block_timeout           = self.large_block_timeout,
             large_total_timeout           = self.large_total_timeout,
         })
-        self.wb_settings:flush()
+        local ok = self.wb_settings:flush(context)
+        if context and not ok then return end
         self.updated = nil
     end
 end

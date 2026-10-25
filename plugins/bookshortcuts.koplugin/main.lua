@@ -93,9 +93,10 @@ function BookShortcuts:loadSettings()
     self.settings = BookShortcuts.bs_settings:readSetting("settings", { directory_action = "FM" })
 end
 
-function BookShortcuts:onFlushSettings()
+function BookShortcuts:onFlushSettings(show_notification, context)
     if self.updated then
-        BookShortcuts.bs_settings:flush()
+        local ok = BookShortcuts.bs_settings:flush(context)
+        if context and not ok then return end
         self.updated = false
     end
 end

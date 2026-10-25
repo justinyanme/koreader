@@ -827,9 +827,16 @@ function FileManager:onClose()
     return true
 end
 
-function FileManager:onFlushSettings()
-    self:handleEvent(Event:new("SaveSettings"))
-    G_reader_settings:flush()
+function FileManager:onFlushSettings(show_notification, context)
+    if context then
+        context:required(function()
+            self:handleEvent(Event:new("SaveSettings", context))
+            return true
+        end)
+    else
+        self:handleEvent(Event:new("SaveSettings"))
+    end
+    G_reader_settings:flush(context)
 end
 
 function FileManager:onCloseWidget()
