@@ -1,6 +1,6 @@
 -- Lua implementation of device/sdl/iosbridge's contract. Inject only through seam C.
 -- options.responses[url] is a sequence of download snapshots, advanced by polls.
--- The fake writes no files: consumers needing file contents can supply fixtures at path.
+-- The fake writes no files: consumers needing contents can copy fixtures to the temporary path.
 local FakeBridge = {}
 
 function FakeBridge.new(options)

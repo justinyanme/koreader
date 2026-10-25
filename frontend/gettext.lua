@@ -505,6 +505,12 @@ if isAndroid then
     if lang and country then
         GetText.changeLang(lang.."_"..country)
     end
+else
+    -- util/LuaSettings load gettext before reader.lua has opened settings. Set
+    -- the system default here, before consumers translate module-level strings;
+    -- reader.lua still applies an explicit language setting (or KO_RTL) afterward.
+    local language = require("device/sdl/locale").resolveLanguage()
+    if language then GetText.changeLang(language) end
 end
 
 return GetText

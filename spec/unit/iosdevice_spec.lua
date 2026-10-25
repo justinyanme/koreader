@@ -48,6 +48,20 @@ describe("SDL device selection (seam C)", function()
         assert(ok, err)
     end)
 
+    it("loads the production iOS variant without probing desktop applications through a shell", function()
+        local SDL = require("ffi/SDL3")
+        stub(SDL, "getPlatform", function() return "iOS" end)
+        stub(os, "execute", function() error("iOS must not execute desktop shell probes") end)
+        local ok, err = pcall(function()
+            local device = dofile("frontend/device/sdl/device.lua")
+            assert.is_true(device:isIOS())
+            assert.are.same({}, device:getExternalDictLookupList())
+        end)
+        SDL.getPlatform:revert()
+        os.execute:revert()
+        assert(ok, err)
+    end)
+
     it("reports unsupported native operations until the FFI adapters are installed", function()
         local device = SDLDevice:createVariant{ platform = "iOS" }
         local result, err = device.bridge.downloadStart{ url = "https://example.org/book", path = "unused" }

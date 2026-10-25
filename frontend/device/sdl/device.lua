@@ -54,16 +54,20 @@ local function getLinkOpener()
     return false
 end
 
--- third-party app support
-local external = require("device/thirdparty"):new{
-    dicts = getDesktopDicts(),
-    check = function(self, app)
-        if (isUrl(app) and getLinkOpener()) or isCommand(app) then
-            return true
-        end
-        return false
-    end,
-}
+-- Probe desktop applications only when a device with external lookup support
+-- actually requests them. Loading the iOS variant must never invoke a shell.
+local external
+local function getExternal()
+    if not external then
+        external = require("device/thirdparty"):new{
+            dicts = getDesktopDicts(),
+            check = function(self, app)
+                return (isUrl(app) and getLinkOpener()) or isCommand(app)
+            end,
+        }
+    end
+    return external
+end
 
 local Device = Generic:extend{
     model = "SDL",
@@ -95,8 +99,9 @@ local Device = Generic:extend{
         return runCommand(util.shell_escape{tool, link})
     end,
     canExternalDictLookup = yes,
-    getExternalDictLookupList = function() return external.dicts end,
+    getExternalDictLookupList = function() return getExternal().dicts end,
     doExternalDictLookup = function(self, text, method, callback)
+        local external = getExternal()
         external.when_back_callback = callback
         local ok, app = external:checkMethod("dict", method)
         if app then
