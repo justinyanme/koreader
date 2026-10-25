@@ -163,6 +163,24 @@ iOS 的下载走 URLSession，会校验 TLS 证书；luasec 那条路径（墨�
 
 失败边界：3 秒只是在主循环正常可调度、存储可写时的目标；崩溃、主循环阻塞、存储失败不保证只丢几秒，要求是已落盘数据不损坏，能恢复到最后一个完整版本（旧目标或 `.old`）。
 
+### C2 Keychain（#98，真机复核待执行）
+
+模拟器迁移、真实桥、本地书源/KOSync 认证与卸载 + Keychain reset 后恢复的记录见
+[keychain.md](keychain.md)。以下由 owner 在真机或需要 GUI 的场景复核，未逐票执行：
+
+- [ ] 已有 Basic 密码、CF Client ID/Secret、KOSync 账号升级后仍能登录；编辑书源、
+  注册/登录、登出和删除后重新启动，状态正确，设置及 `.old` 没有明文凭据。
+- [ ] 真实 Cloudflare Tunnel NAS：目录、封面和下载均正常，Keychain 不可用时提示重试，
+  不把新凭据回退写进设置。debug 日志不含密码、Token 或 KOSync userkey。
+- [ ] 将备份恢复到另一台设备，书源显示“登录失败 → 编辑书源”，KOSync 显示未登录；
+  手动重新登录后恢复可用，书、笔记与进度完整。只删除 App 不能代替新设备恢复；
+  模拟器须同时执行 `xcrun simctl keychain <UDID> reset`。
+- [ ] 数据目录照常备份，没有备份排除。验收时记录 Finder 的“加密本地备份”设置，
+  **Finder 备份是否加密取决于用户设置**，不能假定已加密。
+- [x] C2 已 rebase 到含 B5（#93）与 B4（#92）的 master，`.old` 通过无轮转的原子 flush 净化，
+  启动清理已有 `.old.old`；模拟器已补做陈旧备份与保存失败分支冒烟，见 keychain.md。
+- [ ] 仓库 spec 和共享 Lua 的 Leaf5 回归由编排者按 Q46 在 TestFlight 前批量执行。
+
 ### 每次复核记录模板
 
 | 字段 | 填写 |

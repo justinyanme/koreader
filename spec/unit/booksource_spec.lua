@@ -197,6 +197,7 @@ describe("书源 (OPDS as a remote shelf)", function()
     end
 
     local function fakeRequest(request)
+        if server.socket_error then return nil, server.socket_error end
         logRequest(request)
         local parsed = require("socket.url").parse(request.url)
         local path = parsed.path .. (parsed.query and "?" .. parsed.query or "")
@@ -1878,4 +1879,137 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.is_true(has(view, _("No books here yet")))
         end)
     end)
+    it("keeps socket failure diagnostics without logging URLs or server status text", function()
+        local logged
+        local logging = stub(require("logger"), "info", function(...) logged = { ... } end)
+        finally(function() logging:revert() end)
+        for _, err in ipairs{ "timeout", "connection refused", "wantread" } do
+            server.socket_error = err
+            BookSource.fetch(nas(), ROOT)
+            assert.are.same({ "BookSource: cannot get feed", err }, logged)
+        end
+        server.socket_error = nil
+        server.mode = "500"
+        BookSource.fetch(nas(), ROOT)
+        assert.are.same({ "BookSource: cannot get feed", 500 }, logged)
+    end)
+
+    describe("Keychain credentials (seams B + C)", function()
+        local Device, original_bridge, options
+        before_each(function()
+            Device = require("device")
+            original_bridge = Device.bridge
+            options = { keychain = {} }
+            Device.bridge = require("iosbridge").new(options)
+        end)
+        after_each(function() Device.bridge = original_bridge end)
+
+        it("opens and edits a migrated source without storing credentials in settings", function()
+            local fm = openFM()
+            local view = openSources(fm)
+            assert.are.equal("ok", view:top().result.state)
+            local source = fm.opds.servers[1]
+            local ref = source.credential_ref
+            assert.is_string(ref)
+            assert.is_nil(source.password)
+            assert.is_nil(source.access_client_secret)
+            view:showEditSheet(source)
+            assert.is_not_nil(view.edit_rows.password)
+            view:closeSheet()
+            view:saveSource(source, { title = "Renamed", url = ROOT, username = "reader", password = "new-password",
+                access_client_id = "new-id", access_client_secret = "new-secret" })
+            assert.are.equal("new-password", BookSource.authorize(source, { url = ROOT }).password)
+            assert.is_nil(options.keychain[ref])
+            local bytes = assert(require("util").readFromFile(settings_file))
+            assert.is_nil(bytes:find("new-password", 1, true))
+            view:deleteSource(source)
+            assert.are.equal(0, #savedSources())
+            assert.is_nil(options.keychain[source.credential_ref])
+        end)
+
+        it("shows login failed and edit source when restored references have no Keychain items", function()
+            local fm = openFM()
+            fm.opds:loadSettings()
+            Device.bridge = require("iosbridge").new()
+            local view = openSources(fm)
+            assert.are.equal("auth", view:top().result.state)
+            assert.is_true(has(view, _("Login failed")))
+            assert.is_true(has(view, _("Edit source")))
+        end)
+
+        it("keeps the saved account when saving new credentials fails", function()
+            local fm = openFM()
+            local view = openSources(fm)
+            local source = fm.opds.servers[1]
+            local ref = source.credential_ref
+            options.keychain_error = "-25308"
+            view:saveSource(source, { title = "Rejected", url = ROOT, password = "must-not-persist" })
+            assert.are.equal(ref, source.credential_ref)
+            assert.are.equal("NAS at home", savedSources()[1].title)
+            assert.is_nil(assert(require("util").readFromFile(settings_file)):find("must-not-persist", 1, true))
+            assert.are.equal(_("Could not save or clean up credentials. Please try again."), topWidget().text)
+        end)
+
+        it("removes new Keychain items after a failed primary save and can show deletion failures", function()
+            local fm = openFM()
+            local view = openSources(fm)
+            local source = fm.opds.servers[1]
+            local ref = source.credential_ref
+            local failed = stub(fm.opds.settings, "flush", function() return nil, "disk full" end)
+            finally(function() failed:revert() end)
+            view:saveSource(source, { title = "Rejected", url = ROOT, password = "must-not-persist" })
+            assert.are.equal(ref, source.credential_ref)
+            assert.are.equal(ref, next(options.keychain))
+            assert.is_nil(next(options.keychain, ref))
+            assert.are.equal(_("Could not save or clean up credentials. Please try again."), topWidget().text)
+            UIManager:close(topWidget())
+            view:deleteSource(source)
+            assert.are.equal(source, fm.opds.servers[1])
+            assert.is_string(options.keychain[ref])
+            assert.are.equal(_("Could not save or clean up credentials. Please try again."), topWidget().text)
+        end)
+
+        it("retains the committed source reference when only backup cleanup fails", function()
+            local fm = openFM()
+            local view = openSources(fm)
+            local source = fm.opds.servers[1]
+            local flush = LuaSettings.flush
+            local failed = stub(LuaSettings, "flush", function(object, ...)
+                if object.file == settings_file .. ".old" then return nil, "disk full" end
+                return flush(object, ...)
+            end)
+            finally(function() failed:revert() end)
+            view:saveSource(source, { title = "Committed", url = ROOT, password = "saved-password" })
+            assert.are.equal("Committed", savedSources()[1].title)
+            assert.are.equal(source.credential_ref, savedSources()[1].credential_ref)
+            assert.are.equal("saved-password", BookSource.authorize(source, { url = ROOT }).password)
+            assert.is_true(fm.opds.updated)
+            assert.are.equal(_("Could not save or clean up credentials. Please try again."), topWidget().text)
+            failed:revert()
+            fm.opds:onFlushSettings()
+            assert.is_nil(fm.opds.updated)
+        end)
+
+        it("keeps pending OPDS settings and reports lifecycle failure until backup cleanup succeeds", function()
+            local fm = openFM()
+            openSources(fm)
+            fm.opds.updated = true
+            local rename = os.rename
+            local failed = stub(os, "rename", function(from, to)
+                if from == settings_file .. ".old.tmp" then return nil, "backup unavailable" end
+                return rename(from, to)
+            end)
+            finally(function() failed:revert() end)
+            local context = { complete = true, recordFailure = function(self) self.complete = false end }
+            fm.opds:onFlushSettings(false, context)
+            assert.is_true(fm.opds.updated)
+            assert.is_false(context.complete)
+            failed:revert()
+            context.complete = true
+            fm.opds:onFlushSettings(false, context)
+            assert.is_nil(fm.opds.updated)
+            assert.is_true(context.complete)
+        end)
+    end)
+
 end)

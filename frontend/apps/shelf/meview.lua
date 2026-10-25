@@ -636,7 +636,8 @@ function MeView:syncItems()
     else
         local kosync = Me.kosyncSettings()
         table.insert(items, self:entryItem(_("Progress sync"),
-            kosync.userkey and kosync.username and T(_("Logged in as %1"), kosync.username) or _("Not logged in"),
+            require("credentialstore").userkey(kosync) and kosync.username
+                and T(_("Logged in as %1"), kosync.username) or _("Not logged in"),
             function()
                 UIManager:show(InfoMessage:new{
                     text = _("Progress sync is set up in the reader: open a book, then Tools › Progress sync."),

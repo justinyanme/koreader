@@ -168,6 +168,9 @@ Version:updateVersionLog(Device.model)
 -- Handle one time migration stuff (settings, deprecation, ...) in case of an upgrade...
 do
     dofile("frontend/ui/data/onetime_migration.lua")
+    -- Retry credential migration every launch; Keychain may have been unavailable
+    -- on the previous attempt. This also covers disabled/lazily loaded plugins.
+    require("credentialstore").migrate()
 end
 
 -- UI mirroring for RTL languages, and text shaping configuration

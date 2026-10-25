@@ -215,6 +215,9 @@ ko_ios_download_poll
 ko_ios_download_start
 ko_ios_files_pick_poll
 ko_ios_files_pick_start
+ko_ios_keychain_delete
+ko_ios_keychain_get
+ko_ios_keychain_set
 ko_ios_share_poll
 ko_ios_share_start
 lodepng_decode

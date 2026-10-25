@@ -31,6 +31,7 @@ local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
+local InfoMessage = require("ui/widget/infomessage")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local InputDialog = require("ui/widget/inputdialog")
 local LeftContainer = require("ui/widget/container/leftcontainer")
@@ -1446,13 +1447,27 @@ function BookSourceView:confirmDelete(source)
 end
 
 function BookSourceView:deleteSource(source)
+    local removed_index
     for i, s in ipairs(self.opds.servers) do
         if s == source then
             table.remove(self.opds.servers, i)
+            removed_index = i
             break
         end
     end
-    BookSource.save(self.opds)
+    local saved, __err, primary_committed = BookSource.save(self.opds)
+    if not saved then
+        if primary_committed then
+            require("credentialstore").delete(source.credential_ref)
+            self:build()
+            UIManager:setDirty(self, "ui", self.dimen)
+        elseif removed_index then
+            table.insert(self.opds.servers, removed_index, source)
+        end
+        UIManager:show(InfoMessage:new{ text = _("Could not save or clean up credentials. Please try again.") })
+        return
+    end
+    require("credentialstore").delete(source.credential_ref)
     self:build()
     UIManager:setDirty(self, "ui", self.dimen)
     UIManager:show(Notification:new{ text = _("Source deleted") })
@@ -1471,8 +1486,10 @@ local edit_fields = {
 
 function BookSourceView:showEditSheet(source)
     local draft = {}
+    local credentials = source and require("credentialstore").source(source) or {}
+    credentials = credentials or {}
     for _, field in ipairs(edit_fields) do
-        if field.key then draft[field.key] = source and source[field.key] or "" end
+        if field.key then draft[field.key] = credentials[field.key] or source and source[field.key] or "" end
     end
     draft.raw_names = source and source.raw_names or false
     local sheet
@@ -1581,19 +1598,45 @@ end
 function BookSourceView:saveSource(source, draft)
     local is_new = source == nil
     source = source or {}
+    local original = util.tableDeepCopy(source)
+    local stored = util.tableDeepCopy(source)
+    local CredentialStore = require("credentialstore")
+    if not CredentialStore.setSource(stored, {
+        password = nonEmpty(draft.password), access_client_id = nonEmpty(draft.access_client_id),
+        access_client_secret = nonEmpty(draft.access_client_secret),
+    }) then
+        UIManager:show(InfoMessage:new{ text = _("Could not save or clean up credentials. Please try again.") })
+        return
+    end
     if source.url then BookSource.forget(source.url) end -- an old Access cookie must not hide a bad new token
     source.title = util.trim(draft.title)
     source.url = BookSource.normalizeUrl(draft.url)
     source.username = nonEmpty(draft.username)
-    source.password = nonEmpty(draft.password)
-    source.access_client_id = nonEmpty(draft.access_client_id)
-    source.access_client_secret = nonEmpty(draft.access_client_secret)
+    source.password = stored.password
+    source.access_client_id = stored.access_client_id
+    source.access_client_secret = stored.access_client_secret
+    source.credential_ref = stored.credential_ref
     source.raw_names = draft.raw_names or nil
     BookSource.forget(source.url)
     if is_new then
         table.insert(self.opds.servers, source)
     end
-    BookSource.save(self.opds)
+    local saved, __err, primary_committed = BookSource.save(self.opds)
+    if not saved then
+        if primary_committed then
+            CredentialStore.delete(original.credential_ref)
+            self:build()
+            UIManager:setDirty(self, "ui", self.dimen)
+        else
+            CredentialStore.delete(stored.credential_ref)
+            if is_new then table.remove(self.opds.servers) end
+            for key in pairs(source) do source[key] = nil end
+            for key, value in pairs(original) do source[key] = value end
+        end
+        UIManager:show(InfoMessage:new{ text = _("Could not save or clean up credentials. Please try again.") })
+        return
+    end
+    CredentialStore.delete(original.credential_ref)
     UIManager:show(Notification:new{ text = is_new and _("Source added") or _("Saved") })
     -- new credentials: ask again for what failed
     local page = self:top()
