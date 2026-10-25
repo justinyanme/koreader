@@ -999,6 +999,7 @@ end
 ---- @string filename
 ---- @treturn boolean
 function Device:canExecuteScript(file)
+    if not self:canForkProcesses() then return end
     local file_ext = string.lower(util.getFileNameSuffix(file))
     if file_ext == "sh" or file_ext == "py"  then
         return true
