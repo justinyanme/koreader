@@ -56,6 +56,12 @@ describe("FileManager in-process file operations", function()
         return names
     end
 
+    local function ownership(path)
+        local fullpath = root .. "/" .. path
+        local attr = assert(lfs.symlinkattributes(fullpath))
+        return "KOReader FileManager staging v1\n" .. fullpath .. "\n" .. string.format("%.0f:%.0f\n", attr.dev, attr.ino)
+    end
+
     it("copies a binary file in chunks and preserves its modification time", function()
         local content = string.rep("book\0\255", 40000)
         local source = write("source", content)
@@ -216,10 +222,9 @@ describe("FileManager in-process file operations", function()
     end)
 
     it("cleans marked abandoned stages but preserves namesakes, symlinks and foreign entries", function()
-        local marker = "KOReader FileManager staging v1\n"
         local stale = ".koreader-fileop-1-1"
         assert(lfs.mkdir(root .. "/" .. stale))
-        write(stale .. "/.owner", marker)
+        write(stale .. "/.owner", ownership(stale))
         write(stale .. "/payload", "partial")
         local namesake = ".koreader-fileop-1-2"
         assert(lfs.mkdir(root .. "/" .. namesake))
@@ -229,10 +234,10 @@ describe("FileManager in-process file operations", function()
         write(wrong_marker .. "/.owner", "not ours")
         local foreign = ".koreader-fileop-1-4"
         assert(lfs.mkdir(root .. "/" .. foreign))
-        write(foreign .. "/.owner", marker)
+        write(foreign .. "/.owner", ownership(foreign))
         write(foreign .. "/user-book", "keep")
         assert(lfs.mkdir(root .. "/user"))
-        write("user/.owner", marker)
+        write("user/.owner", ownership("user"))
         write("user/payload", "keep")
         assert(lfs.link(root .. "/user", root .. "/.koreader-fileop-1-5", true))
         assert(lfs.mkdir(root .. "/.koreader-fileop-1-6"))
@@ -251,11 +256,25 @@ describe("FileManager in-process file operations", function()
     it("never reaps its source when it happens to look like an abandoned stage", function()
         local source = ".koreader-fileop-1-1"
         assert(lfs.mkdir(root .. "/" .. source))
-        write(source .. "/.owner", "KOReader FileManager staging v1\n")
+        write(source .. "/.owner", ownership(source))
         write(source .. "/payload", "book")
         assert.is_true(FileManager:copyRecursive(root .. "/" .. source, root .. "/target"))
         assert.are.equal("book", read(source .. "/payload"))
         assert.are.equal("book", read("target/payload"))
+    end)
+
+    it("does not reap a completed user copy containing a copied ownership marker", function()
+        local source = ".koreader-fileop-1-1"
+        assert(lfs.mkdir(root .. "/" .. source))
+        write(source .. "/.owner", ownership(source))
+        write(source .. "/payload", "user book")
+        assert(lfs.mkdir(root .. "/dest"))
+        assert.is_true(FileManager:copyRecursive(root .. "/" .. source, root .. "/dest"))
+        local other = write("other", "other book")
+        assert.is_true(FileManager:copyFileFromTo(other, root .. "/dest/other"))
+        assert.are.equal("user book", read("dest/" .. source .. "/payload"))
+        assert.are.equal(ownership(source), read("dest/" .. source .. "/.owner"))
+        assert.are.same({ source, "other" }, entries("dest"))
     end)
 
     it("does not reap another active file operation in the same directory", function()

@@ -1337,6 +1337,11 @@ local fileop_serial = 0
 local fileop_active_staging = {}
 local fileop_owner_marker = "KOReader FileManager staging v1\n"
 
+local function fileopOwnership(path, attr)
+    -- A copied marker must not make a published user directory look abandoned.
+    return fileop_owner_marker .. path .. "\n" .. string.format("%.0f:%.0f\n", attr.dev, attr.ino)
+end
+
 local function fileopEntries(path)
     local entries = {}
     for name in lfs.dir(path) do
@@ -1395,20 +1400,21 @@ end
 local function fileopCleanStale(parent, source, destination)
     for __, name in ipairs(fileopEntries(parent)) do
         local path = ffiUtil.joinPath(parent, name)
+        local stage_attr = name:match("^%.koreader%-fileop%-%d+%-%d+$") and lfs.symlinkattributes(path)
         -- A prefix alone is not proof of ownership. Never remove active stages,
         -- operation inputs/outputs, symlinks, or directories without our marker.
-        if name:match("^%.koreader%-fileop%-%d+%-%d+$") and not fileop_active_staging[path]
+        if stage_attr and stage_attr.mode == "directory" and not fileop_active_staging[path]
             and source ~= path and source:sub(1, #path + 1) ~= path .. "/"
-            and destination ~= path and destination:sub(1, #path + 1) ~= path .. "/"
-            and lfs.symlinkattributes(path, "mode") == "directory" then
+            and destination ~= path and destination:sub(1, #path + 1) ~= path .. "/" then
             local marker_path = path .. "/.owner"
             local attr = lfs.symlinkattributes(marker_path)
-            if attr and attr.mode == "file" and attr.size == #fileop_owner_marker then
+            local expected = fileopOwnership(path, stage_attr)
+            if attr and attr.mode == "file" and attr.size == #expected then
                 local marker = io.open(marker_path, "rb")
                 if marker then
-                    local content = marker:read(#fileop_owner_marker + 1)
+                    local content = marker:read(#expected + 1)
                     local closed = marker:close()
-                    local owned = closed and content == fileop_owner_marker
+                    local owned = closed and content == expected
                     for __, entry in ipairs(fileopEntries(path)) do
                         if entry ~= ".owner" and entry ~= "payload" then owned = false end
                     end
@@ -1484,7 +1490,7 @@ local function fileopRun(from, to, move, recursive)
                 staging[#staging + 1] = path
                 fileop_active_staging[path] = true
                 local marker = assert(io.open(path .. "/.owner", "wb"))
-                local written, write_err = marker:write(fileop_owner_marker)
+                local written, write_err = marker:write(fileopOwnership(path, assert(lfs.symlinkattributes(path))))
                 local closed, close_err = marker:close()
                 assert(written, write_err)
                 assert(closed, close_err)
