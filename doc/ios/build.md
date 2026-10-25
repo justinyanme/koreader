@@ -62,4 +62,11 @@ App 里没有任何独立的 `.dylib`（Q1）：
 
 ## 数据位置
 
-`KO_HOME` 暂时是 `Library/Application Support/koreader`，B3（#91）会改成 Q10 的布局。
+Q10 的布局（B3，#91），实现在 `frontend/device/sdl/iosstorage.lua`：
+
+- **书**：`Documents`，即主目录，Files 里显示为"我的 iPhone/Just Reader"，Finder 文件共享也是它（`UIFileSharingEnabled`）。"文件"页以它为唯一的根。
+- **设置、笔记、docsettings**：`KO_HOME` = `Library/Application Support/koreader`。`.sdr` 集中放在 `docsettings/`（`document_metadata_folder = "dir"`），所以 Files 里看不到。
+- **可重建缓存**：`KO_CACHE_HOME` = `Library/Caches/koreader`。`KO_HOME/cache` 是指向它的软链，系统清掉 Caches 后下次启动重建。
+- **导入**：三条路都是系统给的副本（`Documents/Inbox`、`tmp/<bundle id>-Inbox`），由 `frontend/apps/shelf/bookimport.lua` 移进主目录，重名不覆盖。
+- **容器路径变化**：重装或更新后数据容器的路径可能变，下次启动把 docsettings、设置、历史、`settings/*.lua` 和封面缓存里的绝对路径搬到新路径。
+- **备份**：不做任何备份排除（Q33）。

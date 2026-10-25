@@ -81,6 +81,10 @@ function BookImport.receive(src, home)
     local dest = home .. "/" .. name
     result.status = "imported"
     if lfs.attributes(dest, "mode") then
+        if ffiUtil.realpath(src) == ffiUtil.realpath(dest) then -- it is that book: never remove it
+            result.status, result.dest = "duplicate", dest
+            return result
+        end
         if sameBook(src, dest) then
             os.remove(src)
             result.status, result.dest = "duplicate", dest
@@ -200,7 +204,11 @@ end
 --- "Open with" (SDL's drop event): the system's copy goes into `home`, and the book opens.
 function BookImport.open(src, home)
     local dest, notice
-    if lfs.attributes(src, "mode") ~= "file" and not src:match("%.icloud$") then
+    local real, real_home = ffiUtil.realpath(src), ffiUtil.realpath(home) or home
+    if real and real:sub(1, #real_home + 1) == real_home .. "/" and not real:find("/Inbox/", #real_home, true) then
+        -- one of the app's own books: the system hands those over as they are, not as a copy
+        dest = real
+    elseif lfs.attributes(src, "mode") ~= "file" and not src:match("%.icloud$") then
         dest = BookImport.moved[src] -- swept in before its event came
         if not dest then
             logger.warn("BookImport: dropped path is gone", src) -- not a file URL
@@ -208,6 +216,8 @@ function BookImport.open(src, home)
         end
     else
         local result = BookImport.receive(src, home)
+        local inbox = ffiUtil.dirname(src)
+        if inbox:match("Inbox$") then lfs.rmdir(inbox) end -- once empty: Documents/Inbox would show in Files
         dest = result.dest
         if not dest then
             BookImport.report{ result }

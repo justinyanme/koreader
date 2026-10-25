@@ -83,13 +83,13 @@ private final class FilePicker: NSObject, UIDocumentPickerDelegate {
 
 /// 0: shown, 1: one shows already, 2: no window to show it over. `extensions` is newline-separated.
 @c(ko_ios_files_pick_start)
-public func ko_ios_files_pick_start(_ extensions: UnsafePointer<CChar>) -> Int32 {
+nonisolated public func ko_ios_files_pick_start(_ extensions: UnsafePointer<CChar>) -> Int32 {
     let list = String(cString: extensions).split(separator: "\n").map(String.init)
     return MainActor.assumeIsolated { FilePicker.shared.start(list) }
 }
 
 @c(ko_ios_files_pick_poll)
-public func ko_ios_files_pick_poll() -> UnsafePointer<CChar> {
+nonisolated public func ko_ios_files_pick_poll() -> UnsafePointer<CChar> {
     // a pointer isn't Sendable: it leaves the main actor as its address
     let address = MainActor.assumeIsolated { UInt(bitPattern: FilePicker.shared.poll()) }
     return UnsafePointer(bitPattern: address)!

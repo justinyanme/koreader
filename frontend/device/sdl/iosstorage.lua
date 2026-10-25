@@ -157,7 +157,9 @@ end
 function IosStorage.setup(settings, container, data_dir)
     local roots = IosStorage.roots(container)
     local old_roots = settings:readSetting("ios_container_roots")
-    if old_roots then
+    -- decided first: migrating rewrites old_roots, which is in the settings, too
+    local changed = not util.tableEquals(old_roots or {}, roots)
+    if old_roots and changed then
         IosStorage.migrate(settings, old_roots, roots, data_dir)
     end
     local home = container .. "/Documents"
@@ -172,7 +174,7 @@ function IosStorage.setup(settings, container, data_dir)
     if not settings:has("document_metadata_folder") then
         settings:saveSetting("document_metadata_folder", "dir")
     end
-    if not util.tableEquals(old_roots or {}, roots) then
+    if changed then
         settings:saveSetting("ios_container_roots", roots)
         settings:flush()
     end

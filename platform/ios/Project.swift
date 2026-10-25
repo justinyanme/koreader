@@ -29,6 +29,40 @@ let project = Project(
                         ]],
                     ],
                 ],
+                // B3 (#91, Q10): Documents shows in Files as On My iPhone › Just Reader and in Finder's
+                // file sharing; "Open with" hands the app a copy (frontend/apps/shelf/bookimport.lua).
+                "UIFileSharingEnabled": true,
+                "LSSupportsOpeningDocumentsInPlace": false,
+                "CFBundleDocumentTypes": [[
+                    "CFBundleTypeName": "Book",
+                    "CFBundleTypeRole": "Viewer",
+                    "LSHandlerRank": "Alternate",
+                    "LSItemContentTypes": [
+                        "org.idpf.epub-container", "com.adobe.pdf", "public.plain-text", "public.html", "public.rtf",
+                        "com.microsoft.word.doc", "org.openxmlformats.wordprocessingml.document",
+                        "org.oasis-open.opendocument.text", "net.daringfireball.markdown",
+                        "me.justinyan.justreader.fb2", "me.justinyan.justreader.fb3", "me.justinyan.justreader.mobi",
+                        "me.justinyan.justreader.djvu", "me.justinyan.justreader.cbz", "me.justinyan.justreader.cbr",
+                        "me.justinyan.justreader.chm",
+                    ],
+                ]],
+                // Book formats the system has no type for.
+                "UTImportedTypeDeclarations": .array([
+                    ("fb2", "FictionBook", ["fb2"], ["public.xml"]),
+                    ("fb3", "FictionBook 3", ["fb3"], ["public.zip-archive"]),
+                    ("mobi", "Mobipocket eBook", ["mobi", "prc", "azw", "pdb"], ["public.data"]),
+                    ("djvu", "DjVu Document", ["djvu", "djv"], ["public.data"]),
+                    ("cbz", "Comic Book (ZIP)", ["cbz"], ["public.zip-archive"]),
+                    ("cbr", "Comic Book (RAR)", ["cbr"], ["public.data"]),
+                    ("chm", "Compiled HTML Help", ["chm"], ["public.data"]),
+                ].map { id, name, extensions, conforms -> Plist.Value in
+                    [
+                        "UTTypeIdentifier": .string("me.justinyan.justreader.\(id)"),
+                        "UTTypeDescription": .string(name),
+                        "UTTypeConformsTo": .array(conforms.map { .string($0) }),
+                        "UTTypeTagSpecification": ["public.filename-extension": .array(extensions.map { .string($0) })],
+                    ]
+                }),
                 "UISupportedInterfaceOrientations~ipad": [
                     "UIInterfaceOrientationPortrait",
                     "UIInterfaceOrientationPortraitUpsideDown",
