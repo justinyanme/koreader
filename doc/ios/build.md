@@ -36,7 +36,7 @@ App 里没有任何独立的 `.dylib`（Q1）：
 - **koreader-base**：在 iOS 上 base 的 monolibtic 产物是一个可重定位目标 `base/build/<triple>/libs/libkoreader-monolibtic.o`，它用 `ld -r` 把 base 的全部模块和第三方静态库预链接在一起。
 - **LuaJIT 和 SDL3**：都编成静态库。
 - **App 链接**：把这三者整个装进可执行文件。`platform/ios/ffi-symbols.txt` 的每一行成为一个导出符号，Release 的死代码裁剪只保留 App 用到的代码和这些导出。归档时 `STRIP_STYLE=non-global`，保证导出符号不被 strip。
-- **Lua 侧**：启动器先跑 `platform/ios/ios-shim.lua`，再跑 `reader.lua`。按名字加载的库（`ffi.load`）都直接返回 `ffi.C`；`libs/` 下的 Lua C 模块从可执行文件本身解析。这个文件不改 base。
+- **Lua 侧**：启动器把 13 个链进可执行文件的 Lua C 模块（`luaopen_*`）注册到 `package.preload`，然后先跑 `platform/ios/ios-shim.lua`，再跑 `reader.lua`。shim 只让 bundled 库（`libs/` 路径和 `lib*.dylib` 形式的名字）的 `ffi.load` 返回 `ffi.C`，其他名字照常交给 `ffi.load`，找不到库时报错清楚；`libs/` 下的 Lua C 模块改从可执行文件解析，只作兜底。base 不改。
 
 ## 符号门禁
 

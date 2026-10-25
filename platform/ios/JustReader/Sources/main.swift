@@ -53,6 +53,7 @@ nonisolated func koreaderMain() -> Int32 {
         lua_rawseti(L, -2, Int32(index + 1))
     }
     lua_setfield(L, LUA_GLOBALSINDEX, "arg")
+    preloadModules(L)
     for script in ["ios-shim.lua", "reader.lua"] {
         guard luaL_loadfilex(L, script, nil) == 0, lua_pcall(L, 0, 0, 0) == 0 else {
             print("[JustReader] \(script): \(String(cString: lua_tolstring(L, -1, nil)))")
@@ -60,4 +61,31 @@ nonisolated func koreaderMain() -> Int32 {
         }
     }
     return EXIT_SUCCESS
+}
+
+/// Registers the Lua C modules linked into the executable under the names ffi/loadlib.lua's
+/// monolibtic loader asks for, so require() finds them without loading a library.
+nonisolated func preloadModules(_ L: OpaquePointer) {
+    let modules: [(String, lua_CFunction)] = [
+        ("libs/libkoreader-cre", luaopen_cre),
+        ("libs/libkoreader-djvu", luaopen_djvu),
+        ("libs/libkoreader-lfs", luaopen_lfs),
+        ("libs/libkoreader-nnsvg", luaopen_nnsvg),
+        ("libs/libkoreader-xtext", luaopen_xtext),
+        ("lpeg", luaopen_lpeg),
+        ("mime.mcore", luaopen_mime_mcore),
+        ("rapidjson", luaopen_rapidjson),
+        ("socket.score", luaopen_socket_score),
+        ("ssl.config", luaopen_ssl_config),
+        ("ssl.context", luaopen_ssl_context),
+        ("ssl.core", luaopen_ssl_core),
+        ("ssl.x509", luaopen_ssl_x509),
+    ]
+    lua_getfield(L, LUA_GLOBALSINDEX, "package")
+    lua_getfield(L, -1, "preload")
+    for (name, open) in modules {
+        lua_pushcclosure(L, open, 0)
+        lua_setfield(L, -2, name)
+    }
+    lua_settop(L, -3)
 }

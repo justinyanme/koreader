@@ -35,9 +35,10 @@ describe("iOS static-link shim", function()
         assert.are.same({}, ffi_load_calls)
     end)
 
-    it("still loads libraries given by absolute path", function()
+    it("still loads other libraries", function()
         assert.are.equal("loaded /usr/lib/libz.dylib", ffi.load("/usr/lib/libz.dylib", true))
-        assert.are.same({ { "/usr/lib/libz.dylib", true } }, ffi_load_calls)
+        assert.are.equal("loaded inkview", ffi.load("inkview"))
+        assert.are.same({ { "/usr/lib/libz.dylib", true }, { "inkview" } }, ffi_load_calls)
     end)
 
     it("resolves Lua C modules in libs/ from the executable", function()

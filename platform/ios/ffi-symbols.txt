@@ -4,6 +4,8 @@
 # ko_ios_* bridges come from the Swift @c sources, system libraries resolve through dyld, and
 # disabled-capability cdefs (mxcfb, JNI, inotify, sdcv popen, ...) are deliberately not listed.
 # Maintain it with the iOS module set: add a symbol when enabling Lua code that calls it.
+# turbo's own TLS and hash bindings (SSL_read and friends) are deliberately not listed: they are
+# only used with DUSE_TURBO_LIB=true. Add them before turning that setting on.
 archive_entry_filetype
 archive_entry_free
 archive_entry_new
