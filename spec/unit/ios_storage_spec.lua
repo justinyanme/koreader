@@ -131,6 +131,16 @@ describe("iOS storage and imports", function()
             assert.are.equal("hash", settings:readSetting("document_metadata_folder"))
         end)
 
+        it("sets up the layout first when the iOS device starts", function()
+            -- (a second IOS:init elsewhere in device.lua once replaced this one without a merge conflict)
+            local device = require("device/sdl/device"):createVariant{ platform = "iOS", native_bridge = FakeBridge.new() }
+            stub(IosStorage, "setup", function() error("layout set up") end)
+            local ok, err = pcall(device.init, device)
+            IosStorage.setup:revert()
+            assert.is_false(ok)
+            assert.is_truthy(tostring(err):find("layout set up", 1, true))
+        end)
+
         it("lists no folder above the home folder in 文件, and won't go up from it", function()
             local FileChooser = require("ui/widget/filechooser")
             local home = fresh("home")

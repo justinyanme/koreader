@@ -211,13 +211,6 @@ function IOS:getUpdateInstructions()
     return _("To update it, install the new build from TestFlight.")
 end
 
---- The storage layout (device/sdl/iosstorage) is set up before anything reads the home folder.
-function IOS:init()
-    self.container = os.getenv("HOME")
-    self.home_dir = require("device/sdl/iosstorage").setup(G_reader_settings, self.container)
-    Device.init(self)
-end
-
 --- Moves what the system left in its inboxes into the home folder: "Open with" while the app was not
 -- running (SDL's drop event comes before SDL is initialized, and is lost), and leftovers.
 function IOS:sweepImports()
@@ -501,6 +494,9 @@ function IOS:initKeyboard()
 end
 
 function IOS:init()
+    -- The storage layout (device/sdl/iosstorage) first: nothing may read the home folder before it.
+    self.container = os.getenv("HOME")
+    self.home_dir = require("device/sdl/iosstorage").setup(G_reader_settings, self.container)
     Device.init(self)
     -- SDL must be initialized before querying its keyboard state.
     self:initKeyboard()
