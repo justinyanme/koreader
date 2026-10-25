@@ -1334,6 +1334,8 @@ end
 
 -- Keep these helpers local to the file page; imports have their own lifecycle.
 local fileop_serial = 0
+local fileop_active_staging = {}
+local fileop_owner_marker = "KOReader FileManager staging v1\n"
 
 local function fileopEntries(path)
     local entries = {}
@@ -1390,7 +1392,34 @@ local function fileopRemove(path)
     end
 end
 
-local function fileopCopyFile(node, destination)
+local function fileopCleanStale(parent, source, destination)
+    for __, name in ipairs(fileopEntries(parent)) do
+        local path = ffiUtil.joinPath(parent, name)
+        -- A prefix alone is not proof of ownership. Never remove active stages,
+        -- operation inputs/outputs, symlinks, or directories without our marker.
+        if name:match("^%.koreader%-fileop%-%d+%-%d+$") and not fileop_active_staging[path]
+            and source ~= path and source:sub(1, #path + 1) ~= path .. "/"
+            and destination ~= path and destination:sub(1, #path + 1) ~= path .. "/"
+            and lfs.symlinkattributes(path, "mode") == "directory" then
+            local marker_path = path .. "/.owner"
+            local attr = lfs.symlinkattributes(marker_path)
+            if attr and attr.mode == "file" and attr.size == #fileop_owner_marker then
+                local marker = io.open(marker_path, "rb")
+                if marker then
+                    local content = marker:read(#fileop_owner_marker + 1)
+                    local closed = marker:close()
+                    local owned = closed and content == fileop_owner_marker
+                    for __, entry in ipairs(fileopEntries(path)) do
+                        if entry ~= ".owner" and entry ~= "payload" then owned = false end
+                    end
+                    if owned then fileopRemove(path) end
+                end
+            end
+        end
+    end
+end
+
+local function fileopCopyFile(node, destination, durable)
     local input = assert(io.open(node.path, "rb"))
     local output, open_err = io.open(destination, "wb")
     if not output then
@@ -1408,6 +1437,12 @@ local function fileopCopyFile(node, destination)
             assert(bytes <= node.attr.size, "source grew while copying: " .. node.path)
         end
         assert(bytes == node.attr.size, "copied size mismatch: " .. node.path)
+        if durable then
+            -- Check stdio flushing separately: fsyncOpenedFile ignores its result.
+            assert(output:flush())
+            assert(lfs.touch(destination, node.attr.access, node.attr.modification))
+            assert(ffiUtil.fsyncOpenedFile(output, true))
+        end
     end)
     -- Both handles must be closed even when reading, writing or closing fails.
     local input_closed, input_result = pcall(input.close, input)
@@ -1415,32 +1450,44 @@ local function fileopCopyFile(node, destination)
     assert(ok, err)
     assert(input_closed and input_result and output_closed and output_result, "file close failed")
     assert(lfs.attributes(destination, "size") == node.attr.size, "written size mismatch: " .. destination)
-    assert(lfs.touch(destination, node.attr.access, node.attr.modification))
+    if not durable then assert(lfs.touch(destination, node.attr.access, node.attr.modification)) end
 end
 
-local function fileopCopyTree(node, destination)
+local function fileopCopyTree(node, destination, durable)
     if not node.children then
-        fileopCopyFile(node, destination)
+        fileopCopyFile(node, destination, durable)
         return
     end
     assert(lfs.mkdir(destination))
     for __, child in ipairs(node.children) do
-        fileopCopyTree(child.node, destination .. "/" .. child.name)
+        fileopCopyTree(child.node, destination .. "/" .. child.name, durable)
     end
     assert(lfs.touch(destination, node.attr.access, node.attr.modification))
+    if durable then assert(ffiUtil.fsyncDirectory(destination)) end
 end
 
 local function fileopRun(from, to, move, recursive)
     local staging = {}
+    local cleaned_parents = {}
     local function newStage(destination)
         local parent = ffiUtil.dirname(destination)
+        if not cleaned_parents[parent] then
+            fileopCleanStale(parent, from, destination)
+            cleaned_parents[parent] = true
+        end
         -- mkdir reserves the temporary name without truncating an existing file.
         for __ = 1, 100 do
             fileop_serial = fileop_serial + 1
-            local path = parent .. "/.koreader-fileop-" .. os.time() .. "-" .. fileop_serial
+            local path = ffiUtil.joinPath(parent, ".koreader-fileop-" .. os.time() .. "-" .. fileop_serial)
             local ok, err = lfs.mkdir(path)
             if ok then
                 staging[#staging + 1] = path
+                fileop_active_staging[path] = true
+                local marker = assert(io.open(path .. "/.owner", "wb"))
+                local written, write_err = marker:write(fileop_owner_marker)
+                local closed, close_err = marker:close()
+                assert(written, write_err)
+                assert(closed, close_err)
                 return path .. "/payload"
             end
             assert(lfs.symlinkattributes(path), err)
@@ -1460,7 +1507,7 @@ local function fileopRun(from, to, move, recursive)
             assert(lfs.touch(destination, node.attr.access, node.attr.modification))
         else
             local temporary = newStage(destination)
-            fileopCopyTree(node, temporary)
+            fileopCopyTree(node, temporary, move)
             fileopVerify(node, temporary)
             local current = lfs.symlinkattributes(destination)
             assert(not current or current.mode == node.attr.mode, "destination type changed: " .. destination)
@@ -1468,6 +1515,7 @@ local function fileopRun(from, to, move, recursive)
             -- replaces the old file in one rename; failed copies leave it intact.
             -- External concurrent filesystem writers are not serialized here.
             assert(os.rename(temporary, destination))
+            if move then assert(ffiUtil.fsyncDirectory(ffiUtil.dirname(destination))) end
         end
     end
 
@@ -1511,6 +1559,7 @@ local function fileopRun(from, to, move, recursive)
     end)
     for __, path in ipairs(staging) do
         local cleaned, cleanup_err = pcall(fileopRemove, path)
+        fileop_active_staging[path] = nil
         if not cleaned then
             logger.warn("FileManager temporary cleanup failed:", path, cleanup_err)
             ok = false

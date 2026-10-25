@@ -21,11 +21,15 @@ describe("FileManager in-process file operations", function()
         root = ffiUtil.realpath(root)
         stub(Device, "canForkProcesses", function() return false end)
         stub(ffiUtil, "execute", function() error("unexpected exec") end)
+        stub(ffiUtil, "fsyncOpenedFile", function() return true end)
+        stub(ffiUtil, "fsyncDirectory", function() return true end)
     end)
 
     after_each(function()
         Device.canForkProcesses:revert()
         ffiUtil.execute:revert()
+        ffiUtil.fsyncOpenedFile:revert()
+        ffiUtil.fsyncDirectory:revert()
         ffiUtil.purgeDir(root)
     end)
 
@@ -114,6 +118,162 @@ describe("FileManager in-process file operations", function()
         assert.is_nil(lfs.attributes(source))
         assert.are.equal("book", read("target"))
         assert.are.same({ "target" }, entries())
+    end)
+
+    it("syncs every copied file, the tree and its published parent before deleting a moved source", function()
+        assert(lfs.mkdir(root .. "/source"))
+        assert(lfs.mkdir(root .. "/source/nested"))
+        write("source/a", "first")
+        write("source/nested/b", "second")
+        local synced_files, synced_dirs, published = 0, {}, false
+        ffiUtil.fsyncOpenedFile:revert()
+        stub(ffiUtil, "fsyncOpenedFile", function(file, metadata)
+            assert.is_true(metadata)
+            assert.is_truthy(file:seek()) -- The writable file is still open.
+            synced_files = synced_files + 1
+            return true
+        end)
+        ffiUtil.fsyncDirectory:revert()
+        stub(ffiUtil, "fsyncDirectory", function(path)
+            synced_dirs[path] = true
+            if path == root then assert.is_true(published) end
+            return true
+        end)
+        local rename, remove = os.rename, os.remove
+        local publish = stub(os, "rename", function(from, to)
+            if from == root .. "/source" then return nil, "cross-device link" end
+            assert.are.equal(2, synced_files)
+            assert.is_true(synced_dirs[from])
+            assert.is_true(synced_dirs[from .. "/nested"])
+            local ok, err = rename(from, to)
+            published = ok == true
+            return ok, err
+        end)
+        local delete = stub(os, "remove", function(path)
+            if path:sub(1, #root + 8) == root .. "/source/" then
+                assert.is_true(published)
+                assert.is_true(synced_dirs[root])
+            end
+            return remove(path)
+        end)
+        finally(function()
+            publish:revert()
+            delete:revert()
+        end)
+        assert.is_true(FileManager:moveFile(root .. "/source", root .. "/target"))
+        assert.is_nil(lfs.attributes(root .. "/source"))
+        assert.are.equal("first", read("target/a"))
+        assert.are.equal("second", read("target/nested/b"))
+    end)
+
+    it("keeps the source and old destination when syncing copied data fails", function()
+        local source = write("source", "new book")
+        write("target", "old book")
+        ffiUtil.fsyncOpenedFile:revert()
+        stub(ffiUtil, "fsyncOpenedFile", function() return false, "fsync failed" end)
+        local rename = os.rename
+        local cross_volume = stub(os, "rename", function(from, to)
+            if from == source then return nil, "cross-device link" end
+            return rename(from, to)
+        end)
+        finally(function() cross_volume:revert() end)
+        assert.is_false(FileManager:moveFile(source, root .. "/target"))
+        assert.are.equal("new book", read("source"))
+        assert.are.equal("old book", read("target"))
+        assert.are.same({ "source", "target" }, entries())
+    end)
+
+    it("does not publish a directory if syncing its copied entries fails", function()
+        assert(lfs.mkdir(root .. "/source"))
+        write("source/book", "book")
+        ffiUtil.fsyncDirectory:revert()
+        stub(ffiUtil, "fsyncDirectory", function() return false, "directory fsync failed" end)
+        local rename = os.rename
+        local cross_volume = stub(os, "rename", function(from, to)
+            if from == root .. "/source" then return nil, "cross-device link" end
+            return rename(from, to)
+        end)
+        finally(function() cross_volume:revert() end)
+        assert.is_false(FileManager:moveFile(root .. "/source", root .. "/target"))
+        assert.are.equal("book", read("source/book"))
+        assert.are.same({ "source" }, entries())
+    end)
+
+    it("retains both complete copies if syncing the published parent fails", function()
+        local source = write("source", "book")
+        ffiUtil.fsyncDirectory:revert()
+        stub(ffiUtil, "fsyncDirectory", function() return false, "directory fsync failed" end)
+        local rename = os.rename
+        local cross_volume = stub(os, "rename", function(from, to)
+            if from == source then return nil, "cross-device link" end
+            return rename(from, to)
+        end)
+        finally(function() cross_volume:revert() end)
+        assert.is_false(FileManager:moveFile(source, root .. "/target"))
+        assert.are.equal("book", read("source"))
+        assert.are.equal("book", read("target"))
+        assert.are.same({ "source", "target" }, entries())
+    end)
+
+    it("cleans marked abandoned stages but preserves namesakes, symlinks and foreign entries", function()
+        local marker = "KOReader FileManager staging v1\n"
+        local stale = ".koreader-fileop-1-1"
+        assert(lfs.mkdir(root .. "/" .. stale))
+        write(stale .. "/.owner", marker)
+        write(stale .. "/payload", "partial")
+        local namesake = ".koreader-fileop-1-2"
+        assert(lfs.mkdir(root .. "/" .. namesake))
+        write(namesake .. "/payload", "user data")
+        local wrong_marker = ".koreader-fileop-1-3"
+        assert(lfs.mkdir(root .. "/" .. wrong_marker))
+        write(wrong_marker .. "/.owner", "not ours")
+        local foreign = ".koreader-fileop-1-4"
+        assert(lfs.mkdir(root .. "/" .. foreign))
+        write(foreign .. "/.owner", marker)
+        write(foreign .. "/user-book", "keep")
+        assert(lfs.mkdir(root .. "/user"))
+        write("user/.owner", marker)
+        write("user/payload", "keep")
+        assert(lfs.link(root .. "/user", root .. "/.koreader-fileop-1-5", true))
+        assert(lfs.mkdir(root .. "/.koreader-fileop-1-6"))
+        assert(lfs.link(root .. "/user/.owner", root .. "/.koreader-fileop-1-6/.owner", true))
+        local source = write("source", "book")
+        assert.is_true(FileManager:copyFileFromTo(source, root .. "/target"))
+        assert.is_nil(lfs.symlinkattributes(root .. "/" .. stale))
+        assert.are.equal("user data", read(namesake .. "/payload"))
+        assert.are.equal("not ours", read(wrong_marker .. "/.owner"))
+        assert.are.equal("keep", read(foreign .. "/user-book"))
+        assert.are.equal("link", lfs.symlinkattributes(root .. "/.koreader-fileop-1-5", "mode"))
+        assert.are.equal("link", lfs.symlinkattributes(root .. "/.koreader-fileop-1-6/.owner", "mode"))
+        assert.are.equal("keep", read("user/payload"))
+    end)
+
+    it("never reaps its source when it happens to look like an abandoned stage", function()
+        local source = ".koreader-fileop-1-1"
+        assert(lfs.mkdir(root .. "/" .. source))
+        write(source .. "/.owner", "KOReader FileManager staging v1\n")
+        write(source .. "/payload", "book")
+        assert.is_true(FileManager:copyRecursive(root .. "/" .. source, root .. "/target"))
+        assert.are.equal("book", read(source .. "/payload"))
+        assert.are.equal("book", read("target/payload"))
+    end)
+
+    it("does not reap another active file operation in the same directory", function()
+        local source = write("source", "outer book")
+        local other = write("other", "inner book")
+        local rename = os.rename
+        local nested_copy = stub(os, "rename", function(from, to)
+            if to == root .. "/target" then
+                assert.is_true(FileManager:copyFileFromTo(other, root .. "/inner"))
+                assert.is_truthy(lfs.attributes(from))
+            end
+            return rename(from, to)
+        end)
+        finally(function() nested_copy:revert() end)
+        assert.is_true(FileManager:copyFileFromTo(source, root .. "/target"))
+        assert.are.equal("outer book", read("target"))
+        assert.are.equal("inner book", read("inner"))
+        assert.are.same({ "inner", "other", "source", "target" }, entries())
     end)
 
     it("copies nested and empty directories, including hidden files and modification times", function()
@@ -304,7 +464,7 @@ describe("FileManager in-process file operations", function()
         assert.are.same({ "dest", "source" }, entries())
     end)
 
-    for __, failure in ipairs{ "open", "write", "input close", "output close", "short read", "read error", "touch", "size" } do
+    for __, failure in ipairs{ "open", "write", "flush", "input close", "output close", "short read", "read error", "touch", "size" } do
         it("preserves source and old destination after " .. failure .. " failure", function()
             local source = write("source", "new book")
             write("target", "old book")
@@ -319,6 +479,7 @@ describe("FileManager in-process file operations", function()
                 end)
             else
                 injected = stub(io, "open", function(path, mode)
+                    if path ~= source and path:sub(-8) ~= "/payload" then return open(path, mode) end
                     if mode == "wb" and failure == "open" then return nil, "open failed" end
                     local file = assert(open(path, mode))
                     return {
@@ -333,6 +494,10 @@ describe("FileManager in-process file operations", function()
                                 return nil, "write failed"
                             end
                             return file:write(chunk)
+                        end,
+                        flush = function()
+                            if failure == "flush" then return nil, "flush failed" end
+                            return file:flush()
                         end,
                         close = function()
                             local result = file:close()
@@ -483,6 +648,9 @@ describe("FileManager in-process file operations", function()
         assert.is_false(FileManager:copyFileFromTo("from", "to"))
         assert.is_false(FileManager:copyRecursive("from", "to"))
         assert.is_table(FileManagerUtil.genExecuteScriptButton("script.sh"))
+        assert.is_true(Device:canExecuteScript("script.sh"))
+        assert.is_true(Device:canExecuteScript("script.PY"))
+        assert.is_nil(Device:canExecuteScript("book.epub"))
     end)
 
     it("hides script execution and blocks direct shortcuts without side effects", function()
@@ -495,6 +663,9 @@ describe("FileManager in-process file operations", function()
             schedule:revert()
         end)
         assert.is_nil(FileManagerUtil.genExecuteScriptButton("book.sh"))
+        -- All three file dialog callers and bookshortcuts consult this first.
+        assert.is_nil(Device:canExecuteScript("book.sh"))
+        assert.is_nil(Device:canExecuteScript("book.py"))
         FileManagerUtil.executeScript("book.sh", function() error("unexpected callback") end)
         assert.stub(execute).was_not_called()
         assert.stub(show).was_not_called()
