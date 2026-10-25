@@ -132,6 +132,7 @@ local Device = {
     _updateChargingLED = nil,
     canUseWAL = yes, -- requires mmap'ed I/O on the target FS
     canRestart = yes,
+    canForkProcesses = yes, -- fork/exec child processes (runInSubProcess, popen); no on iOS
     canSuspend = no,
     canStandby = no,
     canPowerSaveWhileCharging = no,
