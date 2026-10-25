@@ -648,6 +648,36 @@ describe("Reorganized settings", function()
             end)
         end)
 
+        it("omits refresh settings without dimmed rows on the injected iOS device", function()
+            local Device = require("device")
+            local ios = require("device/sdl/device"):createVariant{
+                platform = "iOS", native_bridge = require("iosbridge").new(),
+            }
+            -- Seam B keeps its initialized screen/input, using capabilities from seam C.
+            stub(Device, "hasEinkScreen", ios.hasEinkScreen)
+            local ok, err = pcall(function()
+                local page = openSettings(fm)
+                local reading, screen = {}, {}
+                for _, entry in ipairs(page.home) do
+                    assert.are_not.equal("refresh", entry.row_id)
+                    assert.are_not.equal("full_refresh", entry.row_id)
+                    if entry.row_id and entry.group_id == "reading" then table.insert(reading, entry.row_id) end
+                    if entry.row_id and entry.group_id == "screen" then table.insert(screen, entry.row_id) end
+                end
+                assert.are.same({ "tap_zones", "footer", "end_action", "highlight_style" }, reading)
+                assert.are.same({ "sleep_screen", "night_mode" }, screen)
+                assert.is_nil(row(page, _("Refresh and ghosting")))
+                assert.is_nil(row(page, C_("Settings", "Full refresh rate")))
+                page:closeMenu()
+            end)
+            Device.hasEinkScreen:revert()
+            assert(ok, err)
+            -- The same cached settings definition still exposes both rows on the e-ink Emulator.
+            local page = openSettings(fm)
+            assert.is_truthy(row(page, _("Refresh and ghosting")))
+            assert.is_truthy(row(page, C_("Settings", "Full refresh rate")))
+        end)
+
         it("shows exactly six groups with the issues' rows, after the reading preferences", function()
             local page = openSettings(fm)
             local groups = {}

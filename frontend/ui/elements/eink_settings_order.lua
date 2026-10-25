@@ -13,6 +13,7 @@ Each row is backed by items of the original menus, by id:
             the file manager the settings show over
     open    function(settings) showing a page of the new settings' own over them (instead of items)
     toggle  the single item is a checkbox, shown as a toggle on the row
+    show    function() returning false omits the row entirely for this device
     subtitle the second line of a row of the preferences; without one, they show the row's value there
     choice  the entries up to the first separator are one single choice, shown with a check mark
     value   function(item) returning the row's current value; by default the "Name: value" text or checked radio entry
@@ -49,6 +50,7 @@ return {
     { id = "reading", text = C_("Settings group", "Reading"), rows = {
         { id = "tap_zones", text = _("Page turns and tap zones"), items = { "page_turns" }, preview = "tap_zones" },
         { id = "full_refresh", text = C_("Settings", "Full refresh rate"), choice = true,
+          show = function() return Device:hasEinkScreen() end,
           file = Device:hasEinkScreen() and "frontend/ui/elements/refresh_menu_table.lua" or nil },
         { id = "footer", text = C_("Settings", "Status bar"), items = { "status_bar" } },
         { id = "end_action", text = _("After finishing a book"), items = { "document_end_action" } },
@@ -56,7 +58,8 @@ return {
           build = function() return require("apps/reader/modules/readerhighlightbubble").genDefaultStyleMenuItem() end },
     } },
     { id = "screen", text = C_("Settings group", "Screen"), rows = {
-        { id = "refresh", text = _("Refresh and ghosting"), items = { "screen_eink_opt" } },
+        { id = "refresh", text = _("Refresh and ghosting"), items = { "screen_eink_opt" },
+          show = function() return Device:hasEinkScreen() end },
         { id = "sleep_screen", text = C_("Settings", "Sleep screen"), items = { "screensaver" } },
         { id = "night_mode", text = _("Night mode"), items = { "night_mode" }, toggle = true },
     } },

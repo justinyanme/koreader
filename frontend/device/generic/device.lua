@@ -163,6 +163,7 @@ local Device = {
     isRemarkable = no,
     isBookeen = no,
     isSDL = no,
+    isIOS = no,
     isEmulator = no,
     isDesktop = no,
 
@@ -203,6 +204,12 @@ function Device:extend(o)
     setmetatable(o, self)
     self.__index = self
     return o
+end
+
+-- The redesigned Me page describes how to install this custom build, independently of OTA support.
+function Device:getUpdateInstructions()
+    -- @translators On the Me page, after KOReader's About: this fork is built by its owner and is not updated over the air.
+    return _("This is a custom build made for this device. To update it, install a new APK.")
 end
 
 -- Inverts PageTurn button mappings

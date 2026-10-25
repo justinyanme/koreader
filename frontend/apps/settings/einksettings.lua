@@ -426,9 +426,11 @@ function EinkSettings:buildHome()
             table.insert(home, { header = true, text = group.text, group_id = group.id })
         end
         for _, row in ipairs(group.rows) do
-            local entry = self:homeEntry(row, group.id)
-            entry.two_line, entry.subtitle = not group.text, row.subtitle
-            table.insert(home, entry)
+            if not row.show or row.show() then
+                local entry = self:homeEntry(row, group.id)
+                entry.two_line, entry.subtitle = not group.text, row.subtitle
+                table.insert(home, entry)
+            end
         end
     end
     return home

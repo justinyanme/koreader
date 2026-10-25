@@ -1072,6 +1072,35 @@ describe("ReaderToolbar module", function()
             assert(ok, err)
         end)
 
+        it("shows brightness and night mode without warmth controls on the injected iOS device", function()
+            local Device = require("device")
+            local ios = require("device/sdl/device"):createVariant{
+                platform = "iOS", native_bridge = require("iosbridge").new(),
+            }
+            stub(Device, "hasFrontlight", ios.hasFrontlight)
+            stub(Device, "hasNaturalLight", ios.hasNaturalLight)
+            local ok, err = pcall(function()
+                local panel = openBrightness()
+                local steppers = 0
+                local function countSteppers(widget)
+                    if widget.icon == "eink/plus" and widget.callback then steppers = steppers + 1 end
+                    for _, child in ipairs(widget) do countSteppers(child) end
+                end
+                countSteppers(panel)
+                assert.are.equal(1, steppers) -- brightness only, no warmth row or spacer
+                assert.is_truthy(find(panel, function(w) return w.text == _("Night mode (white on black)") end))
+                assert.is_nil(find(panel, function(w) return w.text == _("Adjust warmth automatically by time") end))
+            end)
+            ui.menu:hideToolbar()
+            Device.hasFrontlight:revert()
+            Device.hasNaturalLight:revert()
+            assert(ok, err)
+            -- Restoring the Emulator's capabilities brings the warmth row back.
+            local panel = openBrightness()
+            assert.is_truthy(find(panel, function(w) return w.text and w.text:find(_("Warmth %1"):gsub("%%1", ""), 1, true) == 1 end))
+            ui.menu:hideToolbar()
+        end)
+
         it("should refresh only the brightness panel, and fully only for night mode", function()
             local panel = openBrightness()
             local bars = ui.menu.bars
