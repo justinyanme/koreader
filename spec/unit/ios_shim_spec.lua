@@ -35,6 +35,11 @@ describe("iOS static-link shim", function()
         assert.are.same({}, ffi_load_calls)
     end)
 
+    it("serves pthread from libSystem, which has no separate image on iOS", function()
+        assert.are.equal(ffi.C, ffi.load("pthread"))
+        assert.are.same({}, ffi_load_calls)
+    end)
+
     it("still loads other libraries", function()
         assert.are.equal("loaded /usr/lib/libz.dylib", ffi.load("/usr/lib/libz.dylib", true))
         assert.are.equal("loaded inkview", ffi.load("inkview"))
