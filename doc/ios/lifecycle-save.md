@@ -81,13 +81,28 @@ Release 构建成功，`nm` 门禁 **478/478**，无 loose dylib。原生接线�
 | 切其他 App | 划线与进度改到第 83 页、2 条笔记后，用 simctl 启动 Settings，再启动 Just Reader；两台均观察到 259/260 入队、同步保存、结束续时及 Resume，内存和磁盘的 xpointer、note、pos0/pos1 逐项匹配。 | 两台通过 |
 | 锁屏 | 当前 simctl CLI 没有锁屏/解锁操作，屏幕 power off 不等同系统锁屏。交 owner 真机执行。 | 未验收 |
 | 后台终止 | 第 86 页、3 条笔记后切后台，等待 5 秒，terminate 后重开；两台均恢复到第 86 页、3 条，xpointer 和笔记范围/内容匹配。 | 两台通过 |
-| 覆盖安装 | simctl install 更换了 Data/Application UUID。3 条笔记的原 metadata 完整迁入新容器，但集中 `.sdr` 的路径键包含旧 UUID；以新 Documents 路径打开书，两台均回到第 1 页、0 条。 | **未通过，B3 #91 存储身份/路径迁移依赖** |
+| 覆盖安装 | B3 合并后重新构建；两台各读到第 86 页、新增 3 条笔记并等待正常合并保存，再 terminate、simctl install 覆盖并重开。两台 UUID 均变化，页码、xpointer、3 条笔记的 note/pos0/pos1/page 与迁移后的 metadata 逐项匹配。 | **两台通过，B3 后复验** |
 | 保存中断 | 写入一半、替换前、备份 rename 后三处 terminate，两台重开均恢复完整旧版（90/93/96 页，1/2/3 条）；替换 rename 后、目录 fsync 前 terminate，两台恢复完整新版（100 页、5 条）。每次均核对 xpointer、数量、note、pos0/pos1；备份窗口还确认目标缺失时 `.old` 完整可读。 | 两台四个阶段通过 |
 | 无续时 / 过期 / 写入失败 | 假桥 spec 覆盖同步保存、必要项先写、可选项跳过、结束续时与前台补做；不按成功运行报告。 | 已编写，Q46 未运行 |
 | 秒级合并与缓存清理 | spec 覆盖持续变更不推迟 3 秒截止、关书取消、内存警告清缓存后书与笔记仍可读。 | 已编写，Q46 未运行 |
 
 正常合并保存另做实际冒烟：第 80 页新增第 1 条划线后，不调用保存、不切后台，应用日志从“变更完成”到“保存结束”为 iPhone **2.983212 s**、iPad **2.985091 s**；主机每 100 ms 检查磁盘记录，确认完整版本所需时间分别为 3.085 s / 3.067 s（包含轮询误差）。
 
-覆盖安装的失败不是写入截断：旧 metadata 中第 86 页和 3 条笔记全部可读。当前 master 尚无 B3 的 Q10 沙盒与文档路径身份处理，本票未擅自迁移 `.sdr` 或改书籍身份；须协调 #91 后重做升级场景，不能把它标成通过。覆盖安装后的中断冒烟使用新路径下的独立记录，未改旧路径中保留下来的 3 条笔记。
+首次覆盖安装失败不是写入截断：旧 metadata 中第 86 页和 3 条笔记全部可读。当时 master 尚无 B3 的 Q10 沙盒与文档路径身份处理；覆盖安装后的中断冒烟使用新路径下的独立记录，未改旧路径中保留下来的 3 条笔记。B3 合并后下述复验已通过，解除该依赖；本票未另加路径迁移实现。
 
 真机复核由 owner 执行：来电打断与系统真实内存回收，以及上述五种场景；模拟器 terminate 不能代替真实系统回收。按 Q46，Docker 全量与 Leaf5 验收留给 TestFlight 前批量回归。
+
+## B3 合并后的覆盖安装复验（2026-10-25 19:41）
+
+已 rebase 到 `origin/master` 的 B3 合并提交 `48ff25c2156d523a14f48fa67ec97cb8bb6eb6e6`。构建源码为 `3117e87e78378de7efcabcb7bd0b2e37d8ca6b13`，base 仍为 `0a34ba2983b06beb8f4cde12f9aa5b3bdb3d1de2`；按共享 lockf 串行执行 Release 构建，**484/484** 符号导出通过，无 loose dylib，构建锁已释放。
+
+两台仍用上述 93- 模拟器与同一 Apple EPUB（SHA-256 `7e9c49d9aeed9e4138da8eba9fd289a21b073c46e7b66ce7cc1fb0898a245417`），复制为 `Documents/apple-b3-93.epub`。先装含 B3 的新包，用实际翻页/划线 API 依次到 80、83、86 页，各新增一条可辨识笔记并等待正常合并落盘；不直接调用保存/flush。然后 terminate、`simctl install` 覆盖同一包、以新容器中的书路径重开。
+
+| 设备 | 覆盖前 → 覆盖后 Data/Application UUID | 恢复结果 |
+| --- | --- | --- |
+| iPhone 17 Pro Max | `8E132A38-0623-49BF-BB4F-542420E16236` → `885192FC-1977-4C2D-9246-B5A7B9F55BC8` | 第 86 页、3 条笔记全部恢复 |
+| iPad Pro 11 英寸 M5 | `B060E097-B75D-46A0-A11C-71CE96E1CD3F` → `FA1C4C7D-83C6-4243-A2D6-CD675E19F7F9` | 第 86 页、3 条笔记全部恢复 |
+
+除屏幕页码外，还比对加载后的 EPUB xpointer、每条 note/pos0/pos1/page，以及迁移到新路径的 metadata 文件，全部一致。截图已目视检查为第 86 页的正常正文，带笔记标记，无错误对话框。证据保留在忽略目录 `koreader-93-evidence/` 的 `build-ios-b3.log`、`upgrade-b3.log`、`upgrade_b3.py`、`devices-b3.json`、`*-b3-before.lua`、`*-b3-after.lua`、`*-b3-events.tsv`、`*-b3-reading.png`。冒烟后两台应用已终止，一次性 userpatch 已禁用。
+
+本轮全程仅用 simctl CLI；未操作 Simulator.app，未运行任何 spec/测试或 Leaf5 验收。锁屏及其他真机待验收项不变。PR #155 继续等待审查，不合并。

@@ -143,13 +143,13 @@ iOS 的下载走 URLSession，会校验 TLS 证书；luasec 那条路径（墨�
 
 ### B5 生命周期保存（#93）
 
-2026-10-25 的 Release 构建与两台独立 iOS 27.0 模拟器记录见 [lifecycle-save.md](lifecycle-save.md)，base 补丁见 [fork PR #3](https://github.com/justinyanme/koreader-base/pull/3)。符号门禁 478/478，无 loose dylib。原生 watcher 只申请续时、投递事件与记录状态，没有 Lua FFI callback。
+2026-10-25 的 Release 构建与两台独立 iOS 27.0 模拟器记录见 [lifecycle-save.md](lifecycle-save.md)，base 补丁见 [fork PR #3](https://github.com/justinyanme/koreader-base/pull/3)。首次符号门禁 478/478；B3 合并后重建为 484/484，均无 loose dylib。原生 watcher 只申请续时、投递事件与记录状态，没有 Lua FFI callback。
 
 - [x] 正常主循环下变更后约 3 秒合并保存；两台磁盘中 xpointer、划线内容和范围匹配。
 - [x] 切到其他 App 再返回；真实 SDL 通知触发当前事件内同步保存并结束续时，Resume 可见。
 - [x] 后台等待 5 秒后 terminate，重新打开恢复最后成功保存的进度和笔记。
 - [x] 保存写入一半、替换前、备份 rename 后、替换后四处 terminate：只恢复完整旧版或新版，备份窗口通过 `.old` 恢复。
-- [ ] **覆盖安装尚未通过**：数据容器 UUID 变化后，原 metadata 文件完整保留，但当前集中 `.sdr` 路径键仍指旧文档绝对路径。等待 B3（#91）的存储身份/路径迁移处理后重做，不能视为已验收。
+- [x] **B3（#91）合并后覆盖安装复验通过**：两台 93- 模拟器各读到第 86 页、添加 3 条笔记，正常落盘后 simctl install 覆盖；Data/Application UUID 均变化，重开后页码、EPUB xpointer、3 条笔记内容及范围与迁移后的 metadata 全部匹配。原阻塞已解除，详细 UUID/证据见 lifecycle-save.md。
 - [ ] 锁屏/解锁、来电打断、系统真实内存回收：**未验收**，交 owner 真机复核。当前 simctl CLI 没有锁屏操作，screen power off 不能当锁屏；禁止为此操作 Simulator.app。
 - [ ] 原生续时被拒绝/过期、写入失败后前台补做，以及内存警告释放缓存：假桥/持久化 spec 已编写，**按 Q46 未运行**；真实 UIKit 过期与内存警告另由 owner 复核。
 - [ ] Docker 全量与 Leaf5 回归：按 Q46 留给 TestFlight 前批量运行，本票未运行。
