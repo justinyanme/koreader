@@ -132,6 +132,7 @@ end
 function BridgeJob:start(request_url)
     self.hops = self.hops + 1
     self.url = request_url
+    self.received, self.total = 0, nil -- a redirect's body is not the book's progress
     local headers, user, password = self.client:hop(self.request, request_url)
     if user and password then -- as socket.http sends them
         headers.Authorization = "Basic " .. mime.b64(user .. ":" .. url.unescape(password))

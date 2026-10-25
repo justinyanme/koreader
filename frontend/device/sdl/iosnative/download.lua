@@ -14,7 +14,8 @@ return {
     downloadStart = function(request)
         local lines = {}
         for name, value in pairs(request.headers or {}) do
-            table.insert(lines, name .. ": " .. value .. "\n")
+            -- one header per line: a pasted token with a line break must not add headers of its own
+            table.insert(lines, (name:gsub("[\r\n]", " ")) .. ": " .. (tostring(value):gsub("[\r\n]", " ")) .. "\n")
         end
         local handle = C.ko_ios_download_start(request.url, table.concat(lines), request.path, request.timeout or 60)
         if handle <= 0 then return nil, "download not started" end

@@ -117,6 +117,10 @@ I/O → Keyboard → Connect Hardware Keyboard 的断开/重连、真实左右�
   仍能下完（第二跳不带 Service Token 是预期行为）。
 - [ ] 离开书源页时正在下的书全部取消，并提示下载已取消。
 
+iOS 的下载走 URLSession，会校验 TLS 证书；luasec 那条路径（墨水屏、iOS 上的目录请求）默认不校验。
+所以用自签名证书的书源在 iOS 上能浏览，下载却显示通用的"无法连接"。owner 的 NAS 在 Cloudflare 后面，
+证书有效，不受影响。
+
 ### 每次复核记录模板
 
 | 字段 | 填写 |
