@@ -231,6 +231,11 @@ function Exporter:exportClippings(clippings)
             clipping_dir = self.settings.clipping_dir or self.default_clipping_dir
             clipping_filename = self.settings.clipping_filename_multiple or self.default_clipping_filename_multiple
         end
+        if Device:canShareFiles() then
+            -- Files only exist for the share sheet, which removes them once dismissed.
+            clipping_dir = DataStorage:getDataDir() .. "/cache/share"
+            util.makePath(clipping_dir)
+        end
         -- full file path without extension
         clipping_filename = self.ui.bookinfo:expandString(clipping_filename, file, timestamp)
         clipping_filename = clipping_filename:gsub("\r?\n", "; ")
@@ -241,7 +246,7 @@ function Exporter:exportClippings(clippings)
             UIManager:setSilentMode(true)
         end
         UIManager:nextTick(function()
-            local statuses = {}
+            local statuses, to_share = {}, {}
             for k, v in pairs(self.targets) do
                 if v:isEnabled() then
                     if not v.is_remote then
@@ -254,7 +259,11 @@ function Exporter:exportClippings(clippings)
                             table.insert(statuses, T(_("%1: Exported successfully."), v.name))
                         else
                             local file_path = v:getFilePath()
-                            table.insert(statuses, T(_("%1: Exported to %2."), v.name, file_path))
+                            if Device:canShareFiles() then
+                                table.insert(to_share, file_path)
+                            else
+                                table.insert(statuses, T(_("%1: Exported to %2."), v.name, file_path))
+                            end
                             v:uploadFile(file_path)
                         end
                     else
@@ -263,10 +272,15 @@ function Exporter:exportClippings(clippings)
                     v.timestamp = nil
                 end
             end
-            UIManager:show(InfoMessage:new{
-                text = table.concat(statuses, "\n"),
-            })
+            if #statuses > 0 then
+                UIManager:show(InfoMessage:new{
+                    text = table.concat(statuses, "\n"),
+                })
+            end
             UIManager:setSilentMode(false)
+            if #to_share > 0 then
+                Device:shareFiles(to_share)
+            end
         end)
 
         UIManager:show(InfoMessage:new{

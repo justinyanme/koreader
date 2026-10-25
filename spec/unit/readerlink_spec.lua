@@ -184,4 +184,64 @@ describe("ReaderLink module", function()
         end)
 
     end)
+
+    describe("external links on the injected iOS device", function()
+        local Device, UIManager, bridge, _
+
+        before_each(function()
+            Device = require("device")
+            UIManager = require("ui/uimanager")
+            _ = require("gettext")
+            bridge = require("iosbridge").new()
+            local ios = require("device/sdl/device"):createVariant{ platform = "iOS", native_bridge = bridge }
+            stub(Device, "canOpenLink", ios.canOpenLink)
+            stub(Device, "openLink", function(_self, link) return ios:openLink(link) end)
+            readerui = ReaderUI:new{
+                dimen = Screen:getSize(),
+                document = DocumentRegistry:openDocument(sample_epub),
+            }
+        end)
+
+        after_each(function()
+            Device.canOpenLink:revert()
+            Device.openLink:revert()
+        end)
+
+        local function button(url, text)
+            for _i, row in ipairs(readerui.link:getButtonsForExternalLinkDialog(url)) do
+                for _j, b in ipairs(row) do
+                    if b.text == text then return b end
+                end
+            end
+        end
+
+        local function isShown(widget)
+            for _i, w in ipairs(UIManager._window_stack) do
+                if w.widget == widget then return true end
+            end
+            return false
+        end
+
+        it("opens them with the system, and cancelling leaves the reading position alone", function()
+            local url = "https://example.org/page"
+            readerui.rolling:onGotoPage(5)
+            local stack = #readerui.link.location_stack
+
+            readerui.link:onGotoLink({ xpointer = url })
+            local dialog = readerui.link.external_link_dialog
+            assert.is_true(isShown(dialog))
+            button(url, _("Open in browser")).callback()
+            assert.are.same({ url }, bridge.opened)
+            assert.is_false(isShown(dialog))
+            assert.are.equal(5, readerui.rolling.current_page)
+
+            readerui.link:onGotoLink({ xpointer = url })
+            dialog = readerui.link.external_link_dialog
+            button(url, _("Cancel")).callback()
+            assert.is_false(isShown(dialog))
+            assert.are.same({ url }, bridge.opened)
+            assert.are.equal(5, readerui.rolling.current_page)
+            assert.are.equal(stack, #readerui.link.location_stack)
+        end)
+    end)
 end)

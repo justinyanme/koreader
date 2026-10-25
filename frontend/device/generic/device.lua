@@ -127,6 +127,7 @@ local Device = {
     canImportFiles = no,
     hasSandboxedHome = no, -- books come in only as the system's copies (iOS): see apps/shelf/bookimport
     canShareText = no,
+    canShareFiles = no,
     hasGSensor = no,
     isGSensorLocked = no,
     canToggleMassStorage = no,

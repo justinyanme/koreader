@@ -11,7 +11,8 @@ function FakeBridge.new(options)
     local brightness = options.brightness or 50
     local incomplete = false
     local keyboard_connected = options.keyboard_connected == true
-    local bridge = {}
+    local share
+    local bridge = { opened = {}, shared = {} }
 
     function bridge.keyboardConnected() return keyboard_connected end
     -- Native-side hotplug stimulus, observed on the next input wait (no callback).
@@ -114,6 +115,29 @@ function FakeBridge.new(options)
         local snapshot = util.tableDeepCopy(picking.snapshots[picking.index])
         if snapshot.state ~= "pending" then picking = nil end
         return snapshot
+    end
+
+    function bridge.openURL(url)
+        if options.open_url_error then return nil, options.open_url_error end
+        table.insert(bridge.opened, url)
+        return true
+    end
+
+    function bridge.shareStart(paths)
+        if options.share_error then return nil, options.share_error end
+        table.insert(bridge.shared, util.tableDeepCopy(paths))
+        share = { handle = #bridge.shared, state = "presenting" }
+        return share.handle
+    end
+
+    function bridge.sharePoll(handle)
+        if not share or share.handle ~= handle then return nil, "unknown share" end
+        return share.state
+    end
+
+    -- Native-side dismissal stimulus: "completed", "cancelled" or "failed".
+    function bridge.finishShare(state)
+        share.state = state
     end
 
     -- Native-side expiry stimulus for lifecycle scenarios, never a callback into Lua.

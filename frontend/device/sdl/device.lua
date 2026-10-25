@@ -198,8 +198,8 @@ local IOS = Device:extend{
     canRestart = no,
     hasExitOptions = no,
     isDefaultFullscreen = yes,
-    canOpenLink = no,
-    openLink = no,
+    canOpenLink = yes,
+    canShareFiles = yes,
     canExternalDictLookup = no,
     getExternalDictLookupList = function() return {} end,
     doExternalDictLookup = function() end,
@@ -210,6 +210,37 @@ local IOS = Device:extend{
 
 function IOS:getUpdateInstructions()
     return _("To update it, install the new build from TestFlight.")
+end
+
+function IOS:openLink(link)
+    local ok, err = self.bridge.openURL(link)
+    if not ok then logger.warn("iOS: openURL failed:", link, err) end
+    return ok == true
+end
+
+--- Shows the system share sheet for files Lua owns, polling it from UIManager, then removes them:
+-- whether shared, cancelled or failed, nothing is left behind. done(state) is optional.
+function IOS:shareFiles(paths, done)
+    local function finish(state)
+        for _, path in ipairs(paths) do os.remove(path) end
+        if done then done(state) end
+    end
+    local handle, err = self.bridge.shareStart(paths)
+    if not handle then
+        logger.warn("iOS: shareStart failed:", err)
+        return finish("failed")
+    end
+    local uimanager = UIManager or require("ui/uimanager") -- variants built without init (seam C) have no UIManagerReady yet
+    local function poll()
+        local state, poll_err = self.bridge.sharePoll(handle)
+        if state == "presenting" then
+            uimanager:scheduleIn(0.2, poll)
+            return
+        end
+        if not state then logger.warn("iOS: sharePoll failed:", poll_err) end
+        finish(state or "failed")
+    end
+    uimanager:scheduleIn(0.2, poll)
 end
 
 --- Moves what the system left in its inboxes into the home folder: "Open with" while the app was not
