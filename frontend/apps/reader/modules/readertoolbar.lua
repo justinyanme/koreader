@@ -101,11 +101,17 @@ function ToolbarBars:init()
     self.top = self.toolbar:buildTopBar()
     self.top_rect = Geom:new{ x = 0, y = 0, w = sw, h = self.top:getSize().h }
     self.ges_events.TapOutside = { GestureRange:new{ ges = "tap", range = self.dimen } }
+    self:registerKeyEvents()
+    self:layout()
+end
+
+function ToolbarBars:registerKeyEvents()
     if Device:hasKeys() then
         self.key_events.ToolbarBack = { { Device.input.group.Back } }
     end
-    self:layout()
 end
+
+ToolbarBars.onPhysicalKeyboardConnected = ToolbarBars.registerKeyEvents
 
 --- Lays the bars out around the toolbar's panel. The top bar hides over a panel that asks for it,
 -- and over a nested panel, below which the bottom bar holds only a back arrow unless hidden by the font panel.

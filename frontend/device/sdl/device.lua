@@ -20,6 +20,7 @@ end
 
 local function yes() return true end
 local function no() return false end
+local function hasExternalKeyboard(self) return self._keyboard_connected == true end
 local function notOSX() return jit.os ~= "OSX" end
 
 local function isUrl(s)
@@ -183,9 +184,10 @@ local IOS = Device:extend{
     isEmulator = no,
     hasFrontlight = yes,
     hasNaturalLight = no,
-    hasKeys = no,
+    hasKeys = hasExternalKeyboard,
     hasDPad = no,
-    hasKeyboard = no,
+    hasKeyboard = hasExternalKeyboard,
+    canShowMenuShortcuts = no,
     hasSymKey = no,
     useDPadAsActionKeys = no,
     supportsGamepad = no,
@@ -408,6 +410,59 @@ function Device:init()
     end
 
     Generic.init(self)
+end
+
+function IOS:updateKeyboardState()
+    local connected = self.bridge.keyboardConnected()
+    if connected == nil or connected == self:hasKeys() then return end
+    self._keyboard_connected = connected
+    if not connected then
+        -- A removed keyboard may never send the releases for keys held at unplug.
+        local modifiers = {}
+        for key in pairs(self.input.modifiers) do modifiers[key] = false end
+        self.input.modifiers = modifiers
+        self.input.last_repeat_time = nil
+        self.input.keyboard_toggle_tapped = nil
+    end
+    if UIManager then
+        -- Like the externalkeyboard plugin, update static bindings before live widgets.
+        require("ui/widget/inputtext").initInputEvents()
+        UIManager:broadcastEvent(Event:new(
+            connected and "PhysicalKeyboardConnected" or "PhysicalKeyboardDisconnected"))
+    end
+    return true
+end
+
+function IOS:initKeyboard()
+    self:updateKeyboardState()
+    local backend = self.input.input
+    local function afterWait(...)
+        local has_input_timer = self.input.timer_callbacks and self.input.timer_callbacks[1]
+        if self:updateKeyboardState() and not has_input_timer
+            and select(1, ...) == false and select(2, ...) == ffi.C.EINTR then
+            -- Let UIManager paint changes requested by the hotplug handlers
+            -- before blocking again. Do not discard input batches or errors.
+            -- With a gesture timer pending, ETIME would incorrectly tell Input
+            -- that its requested polling deadline has already elapsed.
+            return false, ffi.C.ETIME, select(3, ...)
+        end
+        return ...
+    end
+    -- Keep this wrapper on the iOS instance. In particular, do not replace the
+    -- shared ffi/input_SDL3 waitForEvent used by Desktop and Emulator.
+    self.input.input = setmetatable({
+        waitForEvent = function(...)
+            -- Check even when SDL reports EINTR for an event discarded by the
+            -- Lua adapter (keyboard hotplug, window focus). No extra wakeups.
+            return afterWait(backend.waitForEvent(...))
+        end,
+    }, { __index = backend })
+end
+
+function IOS:init()
+    Device.init(self)
+    -- SDL must be initialized before querying its keyboard state.
+    self:initKeyboard()
 end
 
 function Device:setDateTime(year, month, day, hour, min, sec)

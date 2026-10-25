@@ -15,6 +15,7 @@ describe("SDL device selection (seam C)", function()
             hasEinkScreen = false, hasFrontlight = true, hasNaturalLight = false,
             hasNaturalLightApi = false, hasNaturalLightMixer = false,
             hasKeys = false, hasDPad = false, hasKeyboard = false, hasSymKey = false,
+            canShowMenuShortcuts = false,
             supportsGamepad = false, useDPadAsActionKeys = false,
             hasWifiToggle = false, hasOTAUpdates = false, canRestart = false,
             hasExitOptions = false, isDefaultFullscreen = true, hasSystemFonts = true,
@@ -34,6 +35,120 @@ describe("SDL device selection (seam C)", function()
         first.bridge.brightnessSet(75)
         assert.are.equal(75, first.bridge.brightnessGet())
         assert.are.equal(50, second.bridge.brightnessGet())
+    end)
+
+    it("observes keyboard hotplug without changing the shared SDL input backend or its return values", function()
+        local bridge = FakeBridge.new{ keyboard_connected = true }
+        local device = SDLDevice:createVariant{ platform = "iOS", native_bridge = bridge }
+        local other = SDLDevice:createVariant{ platform = "iOS", native_bridge = FakeBridge.new() }
+        local batch = { { type = 1, code = 27, value = 1 } }
+        local arguments
+        local backend = {
+            waitForEvent = function(...)
+                arguments = { n = select("#", ...), ... }
+                return false, nil, batch, nil
+            end,
+            is_ffi = true,
+        }
+        local original_wait = backend.waitForEvent
+        device.input = { input = backend, modifiers = { Shift = true, Ctrl = true },
+            last_repeat_time = 42, keyboard_toggle_tapped = "Sym" }
+        device:initKeyboard()
+        assert.is_true(device:hasKeys())
+        assert.is_true(device:hasKeyboard())
+        assert.is_false(device:hasDPad())
+        assert.is_true(device:isTouchDevice())
+        assert.is_false(other:hasKeys())
+        assert.are_not.equal(backend, device.input.input)
+        assert.are.equal(original_wait, backend.waitForEvent)
+        assert.is_true(device.input.input.is_ffi)
+
+        bridge.setKeyboardConnected(false)
+        local function capture(...)
+            return { n = select("#", ...), ... }
+        end
+        local result = capture(device.input.input.waitForEvent(nil, 250))
+        assert.are.same({ n = 2, [2] = 250 }, arguments)
+        assert.are.same({ n = 4, [1] = false, [3] = batch }, result)
+        assert.is_false(device:hasKeys())
+        assert.is_false(device:hasKeyboard())
+        assert.are.same({ Shift = false, Ctrl = false }, device.input.modifiers)
+        assert.is_nil(device.input.last_repeat_time)
+        assert.is_nil(device.input.keyboard_toggle_tapped)
+
+        bridge.setKeyboardConnected(true)
+        device.input.input.waitForEvent()
+        assert.is_true(device:hasKeys())
+        assert.is_true(device:hasKeyboard())
+        assert.are.equal(original_wait, backend.waitForEvent)
+    end)
+
+    it("yields a UI tick for discarded hotplug events without dropping key batches or errors", function()
+        local C = require("ffi").C
+        local bridge = FakeBridge.new()
+        local device = SDLDevice:createVariant{ platform = "iOS", native_bridge = bridge }
+        local reply = { n = 2, false, C.EINTR }
+        device.input = { modifiers = {}, input = {
+            waitForEvent = function() return unpack(reply, 1, reply.n) end,
+        } }
+        device:initKeyboard()
+        local function capture(...)
+            return { n = select("#", ...), ... }
+        end
+        assert.are.same({ n = 2, false, C.EINTR }, capture(device.input.input.waitForEvent()))
+        bridge.setKeyboardConnected(true)
+        assert.are.same({ n = 2, false, C.ETIME }, capture(device.input.input.waitForEvent()))
+        assert.are.same({ n = 2, false, C.EINTR }, capture(device.input.input.waitForEvent()))
+
+        bridge.setKeyboardConnected(false)
+        local batch = { { type = C.EV_KEY, code = 27, value = 1 } }
+        reply = { n = 3, true, batch }
+        assert.are.same({ n = 3, true, batch }, capture(device.input.input.waitForEvent()))
+        bridge.setKeyboardConnected(true)
+        reply = { n = 3, [2] = "poll failed" }
+        assert.are.same({ n = 3, [2] = "poll failed" }, capture(device.input.input.waitForEvent()))
+
+        device.input.timer_callbacks = { {} }
+        bridge.setKeyboardConnected(false)
+        reply = { n = 2, false, C.EINTR }
+        -- A pending gesture timer must not be told its deadline elapsed early.
+        assert.are.same({ n = 2, false, C.EINTR }, capture(device.input.input.waitForEvent()))
+    end)
+
+    it("keeps touch-only capabilities when keyboard detection is unsupported", function()
+        local device = SDLDevice:createVariant{
+            platform = "iOS", native_bridge = require("device/sdl/iosbridge").new(),
+        }
+        device.input = { input = { waitForEvent = function() return nil end } }
+        device:initKeyboard()
+        device.input.input.waitForEvent()
+        assert.is_false(device:hasKeys())
+        assert.is_false(device:hasKeyboard())
+        assert.is_true(device:isTouchDevice())
+    end)
+
+    it("preserves successful SDL event batches and the shared backend used by non-iOS variants", function()
+        local backend = require("ffi/input_SDL3")
+        local original_wait = backend.waitForEvent
+        local batch = { { type = 1, code = 27, value = 1 } }
+        stub(backend, "waitForEvent", function() return true, batch end)
+        local shared_wait = backend.waitForEvent
+        local ok, err = pcall(function()
+            local device = SDLDevice:createVariant{ platform = "iOS", native_bridge = FakeBridge.new() }
+            device.input = { input = backend }
+            device:initKeyboard()
+            local success, events = device.input.input.waitForEvent()
+            assert.is_true(success)
+            assert.are.equal(batch, events)
+            assert.are.equal(shared_wait, require("ffi/input_SDL3").waitForEvent)
+            local non_ios = SDLDevice:createVariant{ platform = "Linux" }
+            assert.is_nil(non_ios.initKeyboard)
+            assert.is_nil(non_ios.updateKeyboardState)
+            assert.are.equal(shared_wait, backend.waitForEvent)
+        end)
+        backend.waitForEvent:revert()
+        assert.are.equal(original_wait, backend.waitForEvent)
+        assert(ok, err)
     end)
 
     it("uses SDL's platform name by default, before desktop environment hints", function()
@@ -136,6 +251,7 @@ describe("SDL device selection (seam C)", function()
             assert.is_true(emulator:hasFrontlight())
             assert.is_true(emulator:hasNaturalLight())
             assert.is_true(emulator:hasKeyboard())
+            assert.is_true(emulator:canShowMenuShortcuts())
             assert.is_true(emulator:canForkProcesses())
             assert.is_false(emulator:hasOTAUpdates())
             assert.is_false(emulator:isIOS())
@@ -150,6 +266,7 @@ describe("SDL device selection (seam C)", function()
             assert.is_false(desktop:hasEinkScreen())
             assert.is_false(desktop:hasFrontlight())
             assert.is_true(desktop:hasKeyboard())
+            assert.is_true(desktop:canShowMenuShortcuts())
             assert.is_true(desktop:canForkProcesses())
             -- The actual SDL platform always wins over desktop packaging hints.
             assert.is_true(SDLDevice:createVariant{ platform = "iOS" }:isIOS())

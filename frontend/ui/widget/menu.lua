@@ -610,7 +610,7 @@ local Menu = FocusManager:extend{
         "A", "S", "D", "F", "G", "H", "J", "K", "L", "Del",
         "Z", "X", "C", "V", "B", "N", "M", ".", "Sym",
     },
-    is_enable_shortcut = Device:hasKeyboard(),
+    is_enable_shortcut = Device:hasKeyboard() and Device:canShowMenuShortcuts(),
 
     item_dimen = nil,
     page = 1,

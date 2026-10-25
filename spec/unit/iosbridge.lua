@@ -10,7 +10,12 @@ function FakeBridge.new(options)
     local next_job, next_task = 0, 0
     local brightness = options.brightness or 50
     local incomplete = false
+    local keyboard_connected = options.keyboard_connected == true
     local bridge = {}
+
+    function bridge.keyboardConnected() return keyboard_connected end
+    -- Native-side hotplug stimulus, observed on the next input wait (no callback).
+    function bridge.setKeyboardConnected(connected) keyboard_connected = connected end
 
     function bridge.downloadStart(request)
         next_job = next_job + 1
