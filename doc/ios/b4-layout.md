@@ -169,6 +169,12 @@ spec，复核通过。末次复核也确认旧事件尺寸不会再混入当前 
   原有触摸平移；补写窗口缩放和非零软件旋转的覆盖。未改无 viewport 的桌面行为。
 - PRODUCT 的命中范围说明收窄到 Tappable、PillButton；没有声称 Toggle、TickTrack、
   Segmented 也获得了扩展。
+- 去重后的原生启动截图发现底栏已在 BB 中、却未上传到 texture。按 advisor 的方案 C，
+  在 SDL framebuffer 的 iOS viewport 路径为新 buffer/texture 保留一次完整内容上传，
+  之后恢复局部上传；建立 viewport 的清白帧不提前消费标记。没有改共享书架的刷新
+  声明。补写首个内容帧、resize 后首帧和 Emulator 局部上传不变的 spec。
+- spec 的 `setup` 显式预加载真实 UIManager，避免单独筛选用例时 FileManager 的首次
+  加载覆盖假 UIManager；两路只读审查及该隔离修正的复核均未运行测试。
 
 本轮 spec 同样按 Q46 只编写、不运行；原有 PNG/SHA 记录仍对应前述构建，不作为
 本轮新增 spec 已通过的证据。

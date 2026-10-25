@@ -16,7 +16,7 @@
 | B4：SDL 安全区与 viewport 重建 | 转发 `SDL_EVENT_WINDOW_SAFE_AREA_CHANGED`（像素尺寸事件原来已转发）；resize 释放旧 view 的完整 allocation，清除旧 viewport 后由设备层重建；夜间反色变化时更新完整 texture，包括安全区外底色，flash shadow 不消耗最终画面的状态。 | `ffi/SDL3.lua`、`ffi/framebuffer_SDL3.lua` |
 | B4：iOS 首帧窗口坐标 | `SDL_SyncWindow` 后仅在 `SDL_GetPlatform() == "iOS"` 时查询 `SDL_GetWindowSize`，把 `win_w/h` 从 display mode 的像素改成实际窗口 point，保证第一帧 dp 标尺和输入缩放成立；桌面、Emulator（包括 Retina 全屏）保持原值。 | `ffi/SDL3.lua` |
 
-B1 构建改动包在 `IOS` 条件里；meson 原生工具链的 `ar` 从 `strip` 改成 `ar` 是所有目标都适用的修正。B4 的首帧 point 查询也只在 iOS 生效；viewport allocation 释放和边缘反色修正适用于 SDL 的 viewport 路径，不改变无 viewport 的桌面渲染，也不改墨水屏 framebuffer。
+B1 构建改动包在 `IOS` 条件里；meson 原生工具链的 `ar` 从 `strip` 改成 `ar` 是所有目标都适用的修正。B4 的首帧 point 查询也只在 iOS 生效；viewport allocation 释放和边缘反色修正适用于 SDL 的 viewport 路径，不改变无 viewport 的桌面渲染，也不改墨水屏 framebuffer。iOS 的 viewport/full buffer 建立后，首个内容帧整帧上传一次，再恢复局部上传；清白帧不提前消费该标记，flash shadow 也不消费。桌面和 Emulator 沿用原有上传范围。
 
 ## 每月合并上游
 
