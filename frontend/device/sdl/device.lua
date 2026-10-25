@@ -270,8 +270,11 @@ function IOS:setScreenDPI()
     Generic.setScreenDPI(self, self.display_dpi)
 end
 
-function IOS:resizeWindow(w, h)
-    self.screen:resize(w, h)
+function IOS:resizeWindow()
+    -- Several resize events may be queued while UIKit has already moved on.
+    -- Match the current renderer pixels to current window points, not to an
+    -- older event's point dimensions. Desktop keeps its existing payload path.
+    self.screen:resize()
     self.window.width, self.window.height = SDL.win_w, SDL.win_h
     -- resize returns a full buffer, with the previous viewport released. Keep
     -- screen_size physical: framebuffer coordinate translation depends on it.

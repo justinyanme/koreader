@@ -34,14 +34,14 @@ describe("iOS point ruler and safe viewport (seam C)", function()
                 w = window_w, h = window_h }
             -- Models the B1-followup framebuffer contract: resize owns and releases
             -- the old full buffer and its view, then returns a fresh full buffer.
-            function screen:resize()
+            function screen:resize(w, h)
                 local rotation = self.bb:getRotation()
                 self.bb:free()
                 if self.full_bb then self.full_bb:free() end
                 self.full_bb, self.viewport = nil, nil
                 self.bb = BB.new(window_w * scale, window_h * scale, BB.TYPE_BBRGB32)
                 self.bb:setRotation(rotation)
-                SDL.win_w, SDL.win_h = window_w, window_h
+                SDL.win_w, SDL.win_h = w or window_w, h or window_h
             end
             return screen
         end)
@@ -122,6 +122,15 @@ describe("iOS point ruler and safe viewport (seam C)", function()
             assert.are.equal(rotation, screen.bb:getRotation())
             assert.are.equal(rotation, screen.full_bb:getRotation())
         end
+    end)
+
+    it("uses current window points when an older resize payload is still queued", function()
+        window_w, window_h = 956, 440
+        insets = { top = 0, right = 62, bottom = 21, left = 62 }
+        device.input:handleSdlEv{ code = SDL.SDL.SDL_EVENT_WINDOW_RESIZED,
+            value = { data1 = 440, data2 = 956 } }
+        assert.are.equal(132, screen:scaleBySize(44))
+        assert.are.same({ x = 186, y = 0, w = 2496, h = 1257 }, device.viewport)
     end)
 
     it("keeps the full buffer white outside the viewport and inverts it with night mode", function()
