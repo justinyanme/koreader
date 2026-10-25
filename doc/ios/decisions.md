@@ -111,3 +111,10 @@ grilling 记录，2026-10-23 起。依据 [可行性报告](../iOS-feasibility.m
 | Q42 | 代理开发、调试、ticket 验收都在模拟器上做：Xcode 27.1，iOS 27 运行时，iPhone 17 Pro Max 和 iPad Pro 11 英寸（M5）两台模拟器，对应 owner 的真机。base 的 iOS 构建要同时支持 `iphonesimulator` 和 `iphoneos` 两种 arm64（hezi 只做了后者）。最低部署版本改为 iOS 27。真机由 owner 在想体验时自己装，需要的步骤写进 `doc/ios/acceptance.md` 的"真机复核"一节，建议首版 B1–B8 关闭后跑第一次；C6 是稳定版的完整一轮。T0 的 go/no-go 按 Q23 的目标值在模拟器上判定，性能数值算临时门禁，真机复核不达标时同样停下评估。仍不建 iOS CI。覆盖 Q2 的部署版本、Q7 的"真机验证"、Q18 的"不建模拟器构建"、Q23 的"两台设备"。 |
 | Q43 | App 名 **Just Reader**，Bundle ID `me.justinyan.justreader`，Team `V88UWDRASU` 开发签名。Files 里显示为"我的 iPhone/Just Reader"，分享菜单里显示为"用 Just Reader 打开"。App 内文案（关于页、致谢）里的 KOReader 字样本轮不改。覆盖 Q17 的显示名和"域名待定"，以及 Q10、Q30 里的文案。 |
 | Q44 | 第一版完全免费：不接 StoreKit，不做内购、订阅或付费功能，也不为收费预留结构。 |
+
+## 第五轮（Q45–Q46，2026-10-25 owner 指定）
+
+| # | 决定 |
+| --- | --- |
+| Q45 | 发布通道照搬 justoodoo（`docs/agents/delivery.md`）：fastlane + match（与 justoodoo、Just-ABC 共用证书仓库和证书）+ mise 任务。`ios:tf` 上传 TestFlight，Internal 组自动拿到，同时提交 Beta App Review 进 External 组；`ios:ota` 发布开发签名包到 `https://test.justinyan.app/justreader/`。新增 D0 票：先做一个空壳 App 上 TestFlight，让 Apple 的审核尽早开始。空壳只在 `platform/ios/` 下，不碰 Lua 代码，不等 T0；T0 判 no-go 时整个目录撤掉。B1 在 D0 的工程上扩展。不用 GitHub Actions，确有需要时用本机做 runner。覆盖 Q17 的"不用 TestFlight"和 Q4 里"没过关不合主线"对这个目录的约束。 |
+| Q46 | 每张票照常写 spec，但实现过程中不跑测试（单个 spec 和全量都不跑），也不逐票做 Leaf5 实机验收；每次提交 TestFlight 之前，由编排者批量跑全量并修复。各票验收里"跑 Docker 全量""Leaf5 实机验收"两条按此执行。iOS 构建和模拟器冒烟不算测试，照做。 |
