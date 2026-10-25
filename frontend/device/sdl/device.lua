@@ -508,7 +508,7 @@ function IOS:init()
     self.container = os.getenv("HOME")
     self.home_dir = require("device/sdl/iosstorage").setup(G_reader_settings, self.container)
     -- Before anything sizes a cache (DocCache sizes itself when first required).
-    require("util").freeMemProvider = function() return self:freeMemory() end
+    util.freeMemProvider = function() return self:freeMemory() end
     Device.init(self)
     -- SDL must be initialized before querying its keyboard state.
     self:initKeyboard()

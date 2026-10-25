@@ -62,7 +62,9 @@ describe("iOS memory awareness (C9)", function()
         end)
 
         it("ignores the provider where /proc/meminfo exists", function()
-            if not orig_open("/proc/meminfo", "r") then return end -- Linux only
+            local meminfo = orig_open("/proc/meminfo", "r")
+            if not meminfo then return end -- Linux only
+            meminfo:close()
             local expected_free, expected_total = util.calcFreeMem()
             util.freeMemProvider = function() return 1234, nil end
             local free, total = util.calcFreeMem()
