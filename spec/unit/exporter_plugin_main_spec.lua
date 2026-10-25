@@ -114,7 +114,7 @@ describe("Exporter plugin module", function()
     end)
 
     describe("exporting notes", function()
-        local Device, UIManager, util, saved_enabled, text
+        local Device, UIManager, util, saved_enabled, text, T, _
 
         local function exists(path)
             local f = io.open(path)
@@ -137,6 +137,8 @@ describe("Exporter plugin module", function()
             Device = require("device")
             UIManager = require("ui/uimanager")
             util = require("util")
+            T = require("ffi/util").template
+            _ = require("gettext")
             saved_enabled = {}
             for name, target in pairs(readerui.exporter.targets) do
                 saved_enabled[name] = target.settings.enabled
@@ -217,12 +219,31 @@ describe("Exporter plugin module", function()
                 assert.are.equal(0, #polls)
             end)
 
-            it("removes the export when the share sheet cannot be presented", function()
+            it("removes the export and says so when the share sheet cannot be presented", function()
                 bridge.shareStart = function() return nil, "no window" end
                 export()
                 local path = text:getFilePath()
                 assert.is_false(exists(path))
                 assert.are.equal(0, #polls)
+                local message = T(_("%1: Failed to export."), text.name)
+                local reported = false
+                for _i, w in ipairs(UIManager._window_stack) do
+                    reported = reported or w.widget.text == message
+                end
+                assert.is_true(reported)
+            end)
+
+            it("clears files a killed app left in the share folder before exporting", function()
+                local share_dir = require("datastorage"):getDataDir() .. "/cache/share"
+                util.makePath(share_dir)
+                local stale = share_dir .. "/stale.txt"
+                local f = io.open(stale, "w")
+                f:write("left behind")
+                f:close()
+                export()
+                assert.is_false(exists(stale))
+                bridge.finishShare("completed")
+                poll()
             end)
         end)
     end)
