@@ -34,7 +34,7 @@ describe("iOS VoiceOver regions (C3)", function()
         local index = assert(indexOf(set, name), name .. " is not published")
         bridge.queueAccessibility(set.generation, index, action or "activate")
         assert.is_true(a11y:dispatch())
-        UIManager:_checkTasks()
+        for __ = 1, 3 do UIManager:_checkTasks() end -- opening a book takes a nested tick
         UIManager:forceRePaint()
     end
 
@@ -114,7 +114,7 @@ describe("iOS VoiceOver regions (C3)", function()
         assert.is_true(set.screen_changed)
         assert.is_true(set.elements[#set.elements].adjustable)
         assert.is_false(set.elements[1].adjustable)
-        assert.are.equal(Screen:getRawSize().w, set.pixel_width)
+        assert.are.equal(Screen:getScreenWidth(), set.pixel_width) -- rects are on the whole screen
     end)
 
     it("publishes again only when something changed", function()
@@ -134,6 +134,10 @@ describe("iOS VoiceOver regions (C3)", function()
         assert.are.equal(T(_("Page %1 of %2"), page, ui.document:getPageCount()), set.elements[1].value)
         act(ui.doc_props.display_title, "increment")
         assert.is_true(ui:getCurrentPage() > page)
+        -- a new page number is published under the same generation: a swipe queued meanwhile still counts
+        local turned = publish()
+        assert.are.equal(set.generation, turned.generation)
+        assert.are_not.equal(set.elements[1].value, turned.elements[1].value)
         act(ui.doc_props.display_title, "decrement")
         assert.are.equal(page, ui:getCurrentPage())
     end)
@@ -205,11 +209,27 @@ describe("iOS VoiceOver regions (C3)", function()
         assert.is_truthy(indexOf(publish(), juliet()))
     end)
 
+    it("runs only the first of the activations queued together", function()
+        local set = publish()
+        local books = FileManager.instance.shelf_view.books
+        local other
+        for __, book in ipairs(books) do
+            if book.title ~= juliet() then other = book.title end
+        end
+        bridge.queueAccessibility(set.generation, indexOf(set, juliet()), "activate")
+        bridge.queueAccessibility(set.generation, indexOf(set, other), "activate")
+        a11y:dispatch()
+        for __ = 1, 3 do UIManager:_checkTasks() end
+        assert.is_truthy(ReaderUI.instance)
+        assert.is_truthy(ReaderUI.instance.document.file:match("juliet%.epub$"))
+        assert.is_false(a11y:dispatch()) -- the second one is gone with the poll
+    end)
+
     it("drops activations of an older set", function()
         local set = publish()
         bridge.queueAccessibility(set.generation - 1, 1, "activate")
         a11y:dispatch()
-        UIManager:_checkTasks()
+        for __ = 1, 3 do UIManager:_checkTasks() end
         assert.is_nil(ReaderUI.instance)
     end)
 
