@@ -173,9 +173,10 @@ function MoveToArchive:openFileBrowser(path)
     end
 end
 
-function MoveToArchive:onFlushSettings()
+function MoveToArchive:onFlushSettings(show_notification, context)
     if self.updated then
-        self.settings:flush()
+        local ok = self.settings:flush(context)
+        if context and not ok then return end
         self.updated = nil
     end
 end

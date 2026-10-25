@@ -73,9 +73,10 @@ function KOSync:loadSettings()
     self.settings = KOSync.settings_obj:readSetting("settings", KOSync.default_settings)
 end
 
-function KOSync:onFlushSettings()
+function KOSync:onFlushSettings(show_notification, context)
     if self.updated then
-        KOSync.settings_obj:flush()
+        local ok = KOSync.settings_obj:flush(context)
+        if context and not ok then return end
         self.updated = nil
     end
 end

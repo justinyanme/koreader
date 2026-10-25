@@ -135,7 +135,7 @@ function BatteryStat:init()
     end
 end
 
-function BatteryStat:onFlushSettings()
+function BatteryStat:onFlushSettings(show_notification, context)
     self.settings:reset({
         charging = self.charging,
         discharging = self.discharging,
@@ -144,7 +144,7 @@ function BatteryStat:onFlushSettings()
         charging_state = self.charging_state,
         awake_state = self.awake_state,
     })
-    self.settings:flush()
+    self.settings:flush(context)
 end
 
 function BatteryStat:accumulate()
@@ -294,8 +294,8 @@ function BatteryStatWidget:onShowBatteryStatistics()
     BatteryStat:showStatistics()
 end
 
-function BatteryStatWidget:onFlushSettings()
-    BatteryStat:onFlushSettings()
+function BatteryStatWidget:onFlushSettings(show_notification, context)
+    BatteryStat:onFlushSettings(show_notification, context)
 end
 
 function BatteryStatWidget:onSuspend()

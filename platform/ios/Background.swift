@@ -10,9 +10,20 @@ private enum Background {
     static var installed = false
     static var nextHandle: Int64 = 0
     static var handle: Int64 = 0
+    // The watcher may expire before Lua gets to SDL_PollEvent. Keep that claim
+    // even after the UIKit task ends, so Lua observes the original expiry.
+    static var pendingClaim: Int64?
     static var task = UIBackgroundTaskIdentifier.invalid
     static var expired: Set<Int64> = []
     static var incomplete = false
+
+    static func claim() -> Int64 {
+        if let pending = pendingClaim {
+            pendingClaim = nil
+            return pending
+        }
+        return begin()
+    }
 
     static func begin() -> Int64 {
         if task != .invalid { return handle }
@@ -43,7 +54,7 @@ private enum Background {
 
     static func observe(_ type: UInt32) {
         if type == SDL_EVENT_WILL_ENTER_BACKGROUND.rawValue || type == SDL_EVENT_DID_ENTER_BACKGROUND.rawValue {
-            _ = begin()
+            if pendingClaim == nil { pendingClaim = begin() }
         }
         // SDL_SendAppEvent only invokes watchers for these app notifications.
         // A marked user event avoids recursively watching our own envelope and
@@ -55,6 +66,7 @@ private enum Background {
         if !SDL_PushEvent(&queued) {
             incomplete = true
             end(handle)
+            pendingClaim = nil
         }
     }
 
@@ -86,7 +98,7 @@ nonisolated public func backgroundInstall() -> Bool {
 
 @c(ko_ios_background_begin)
 nonisolated public func backgroundBegin() -> Int64 {
-    onBackgroundMain { Background.begin() }
+    onBackgroundMain { Background.claim() }
 }
 
 @c(ko_ios_background_end)

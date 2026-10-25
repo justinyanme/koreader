@@ -9,6 +9,7 @@
 - `ioslifecycle` 只由 iOS 设备安装。will-resign-active 对应的 SDL WILL_ENTER_BACKGROUND 立即同步保存；同一次失活的后续通知不重复保存成功的数据，但仍释放 watcher 可能取得的续时。
 - 必要项顺序为：ReaderUI 的 SaveSettings（收集进度与笔记）→ `.sdr` → 全局设置 → UIManager 的 FlushSettings 广播。可选上下文防止广播再次保存同一个 ReaderUI。自动笔记导出、metadata 归档、DocCache 序列化和 KOSync 的 Suspend 上传延后到必要项之后，每项开始前检查过期；必要项失败时也跳过可选项。
 - 续时未获准仍保存；过期仍尝试必要项。原生过期回调立即结束任务并置 sticky 标志，不回调 Lua。Lua 无论保存成功或抛错均结束续时；失败或跳过工作保留未完成标志，回前台补做。
+- watcher 已申请但 Lua 尚未领取的句柄单独保留；即使先过期，Lua 领取的仍是原句柄，不能被一次新申请掩盖过期。FlushSettings 的插件处理器向 LuaSettings 传递可选上下文；写入失败会标记未完成，并保留插件 dirty 标志供前台补做。未传上下文时沿用各处理器原行为。
 - PageUpdate、PosUpdate、AnnotationsModified 在 ReaderUI 的分发完成后调用设备可选钩子。从首次变更起 3 秒到期，后续连续变更不推迟截止时间；关书/失活时取消定时器。普通设备没有该钩子。
 - 内存警告仅清 DocCache 的 RAM/已登记磁盘缓存、GlyphCache、ImageCache 并 GC；不递归删除数据根目录，不释放仍被控件引用的图像。
 

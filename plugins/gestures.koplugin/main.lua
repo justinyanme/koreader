@@ -1380,9 +1380,10 @@ function Gestures:onIgnoreHoldCornersTime(seconds)
     end
 end
 
-function Gestures:onFlushSettings()
+function Gestures:onFlushSettings(show_notification, context)
     if self.updated then
-        Gestures.settings:flush()
+        local ok = Gestures.settings:flush(context)
+        if context and not ok then return end
         self.updated = false
     end
 end

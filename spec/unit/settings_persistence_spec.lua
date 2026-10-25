@@ -2,6 +2,11 @@ describe("atomic settings persistence", function()
     local LuaSettings, DocSettings, ffiutil, lfs, util
     local directory, path, original_open, original_rename, original_sync, original_location
 
+    local function revertStub(object, key)
+        local value = rawget(object, key)
+        if type(value) == "table" and value.revert then value:revert() end
+    end
+
     setup(function()
         require("commonrequire")
         LuaSettings = require("luasettings")
@@ -24,10 +29,10 @@ describe("atomic settings persistence", function()
 
     after_each(function()
         G_reader_settings:saveSetting("document_metadata_folder", original_location)
-        if io.open.revert then io.open:revert() end
-        if os.rename.revert then os.rename:revert() end
-        if ffiutil.fsyncOpenedFile.revert then ffiutil.fsyncOpenedFile:revert() end
-        if ffiutil.fsyncDirectory.revert then ffiutil.fsyncDirectory:revert() end
+        revertStub(io, "open")
+        revertStub(os, "rename")
+        revertStub(ffiutil, "fsyncOpenedFile")
+        revertStub(ffiutil, "fsyncDirectory")
         util.purgeDir(directory)
     end)
 

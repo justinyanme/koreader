@@ -76,9 +76,10 @@ function Cloud:loadSettings()
     self.servers = Cloud.settings:readSetting("cs_servers", {})
 end
 
-function Cloud:onFlushSettings()
+function Cloud:onFlushSettings(show_notification, context)
     if self.updated then
-        Cloud.settings:flush()
+        local ok = Cloud.settings:flush(context)
+        if context and not ok then return end
         self.updated = nil
     end
 end

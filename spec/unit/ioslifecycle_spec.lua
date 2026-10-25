@@ -4,6 +4,11 @@ describe("iOS lifecycle persistence (seams A and C)", function()
     local original_settings, original_package_path, sync_client, network
     local sample = "spec/front/unit/data/juliet.epub"
 
+    local function revertStub(object, key)
+        local value = rawget(object, key)
+        if type(value) == "table" and value.revert then value:revert() end
+    end
+
     setup(function()
         require("commonrequire")
         disable_plugins()
@@ -38,12 +43,13 @@ describe("iOS lifecycle persistence (seams A and C)", function()
 
     after_each(function()
         device:cancelPendingSettingsSave(reader)
-        if device.bridge.backgroundBegin.revert then device.bridge.backgroundBegin:revert() end
-        if device.bridge.backgroundEnd.revert then device.bridge.backgroundEnd:revert() end
-        if reader.doc_settings.flush.revert then reader.doc_settings.flush:revert() end
-        if G_reader_settings.flush.revert then G_reader_settings.flush:revert() end
-        if UIManager.broadcastEvent.revert then UIManager.broadcastEvent:revert() end
-        if host.hasEinkScreen.revert then host.hasEinkScreen:revert() end
+        revertStub(device.bridge, "backgroundBegin")
+        revertStub(device.bridge, "backgroundEnd")
+        revertStub(reader.doc_settings, "flush")
+        revertStub(G_reader_settings, "flush")
+        revertStub(UIManager, "broadcastEvent")
+        revertStub(host, "hasEinkScreen")
+        revertStub(os, "rename")
         if reader.kosync then
             reader.kosync.settings.auto_sync = false
             reader.kosync:registerEvents()
@@ -114,12 +120,9 @@ describe("iOS lifecycle persistence (seams A and C)", function()
     end)
 
     it("writes essentials after expiry, skips optional work and retries on foreground", function()
-        local begin = device.bridge.backgroundBegin
-        stub(device.bridge, "backgroundBegin", function()
-            local handle = begin()
-            device.bridge.expireBackground(handle)
-            return handle
-        end)
+        -- The watcher grants and expires time before Lua dequeues the event.
+        local pending = device.bridge.watchBackground()
+        device.bridge.expireBackground(pending)
         -- Observe optional work through the public archive output.
         archive = os.tmpname()
         os.remove(archive)
@@ -134,13 +137,39 @@ describe("iOS lifecycle persistence (seams A and C)", function()
         assert.is_true(device.bridge.backgroundSaveIncomplete())
         assert.is_nil(require("libs/libkoreader-lfs").attributes(archive .. "/ios-lifecycle-spec.lua"))
         assert.are.equal("remember", require("docsettings"):open(sample):readSetting("annotations")[1].note)
-        device.bridge.backgroundBegin:revert()
         lifecycle("DID_ENTER_FOREGROUND")
         assert.is_false(device.bridge.backgroundSaveIncomplete())
         assert.is_truthy(require("libs/libkoreader-lfs").attributes(archive .. "/ios-lifecycle-spec.lua"))
         G_reader_settings:saveSetting("document_metadata_arc_folder", previous)
         G_reader_settings:saveSetting("document_metadata_arc_on_closing", previous_enabled)
         require("util").purgeDir(archive)
+    end)
+
+    it("retains failed plugin settings and retries them when returning to the foreground", function()
+        local OPDS = dofile("plugins/opds.koplugin/main.lua")
+        archive = os.tmpname()
+        os.remove(archive)
+        require("util").makePath(archive)
+        local path = archive .. "/plugin.lua"
+        local settings = require("luasettings"):open(path):saveSetting("source", "old")
+        assert(settings:flush())
+        local plugin = OPDS:extend{ settings = settings, updated = true }
+        reader:registerModule("opds", plugin)
+        settings:saveSetting("source", "new")
+        local rename = os.rename
+        stub(os, "rename", function(from, to)
+            if from == path .. ".tmp" then return nil, "plugin storage unavailable" end
+            return rename(from, to)
+        end)
+        lifecycle("WILL_ENTER_BACKGROUND")
+        assert.is_true(device.bridge.backgroundSaveIncomplete())
+        assert.is_true(plugin.updated)
+        assert.are.equal("old", require("luasettings"):open(path):readSetting("source"))
+        os.rename:revert()
+        lifecycle("DID_ENTER_FOREGROUND")
+        assert.is_false(device.bridge.backgroundSaveIncomplete())
+        assert.is_nil(plugin.updated)
+        assert.are.equal("new", require("luasettings"):open(path):readSetting("source"))
     end)
 
     it("ends the task and keeps retry state if a required write throws or fails", function()

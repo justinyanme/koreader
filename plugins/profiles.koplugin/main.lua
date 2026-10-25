@@ -57,9 +57,10 @@ function Profiles:loadSettings()
     self.data = Profiles.settings.data
 end
 
-function Profiles:onFlushSettings()
+function Profiles:onFlushSettings(show_notification, context)
     if self.updated then
-        Profiles.settings:flush()
+        local ok = Profiles.settings:flush(context)
+        if context and not ok then return end
         self.updated = nil
     end
 end

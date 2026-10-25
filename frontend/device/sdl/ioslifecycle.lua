@@ -14,12 +14,17 @@ end
 -- handlers need not know about it; ReaderUI uses it to avoid duplicate writes.
 local function saveContext(bridge, handle)
     local context = { readers = {}, optional = {}, complete = true }
+    function context:recordFailure(err)
+        self.complete = false
+        logger.warn("iOS settings save:", err)
+    end
     function context:required(action)
         local ok, result, err = pcall(action)
         if not ok or not result then
-            self.complete = false
-            logger.warn("iOS settings save:", ok and err or result)
+            self:recordFailure(ok and err or result)
+            return nil, ok and err or result
         end
+        return result
     end
     function context:defer(action)
         self.optional[#self.optional + 1] = action
