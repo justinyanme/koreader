@@ -112,4 +112,139 @@ describe("Exporter plugin module", function()
         assert.are.equal("Some important stuff 1", decoded.entries[1].text)
         assert.are.equal(2, #decoded.entries)
     end)
+
+    describe("exporting notes", function()
+        local Device, UIManager, util, saved_enabled, text, T, _
+
+        local function exists(path)
+            local f = io.open(path)
+            if f then f:close() end
+            return f ~= nil
+        end
+
+        local function runTasks()
+            for _ = 1, 3 do UIManager:_checkTasks() end
+        end
+
+        local function closeMessages()
+            for i = #UIManager._window_stack, 1, -1 do
+                local widget = UIManager._window_stack[i].widget
+                if widget.name ~= "ReaderUI" and widget ~= readerui then UIManager:close(widget) end
+            end
+        end
+
+        before_each(function()
+            Device = require("device")
+            UIManager = require("ui/uimanager")
+            util = require("util")
+            T = require("ffi/util").template
+            _ = require("gettext")
+            saved_enabled = {}
+            for name, target in pairs(readerui.exporter.targets) do
+                saved_enabled[name] = target.settings.enabled
+                target.settings.enabled = nil
+            end
+            text = readerui.exporter.targets.text
+            text.settings.enabled = true
+        end)
+
+        after_each(function()
+            for name, target in pairs(readerui.exporter.targets) do
+                target.settings.enabled = saved_enabled[name]
+            end
+            closeMessages()
+        end)
+
+        it("keeps writing to the clippings folder where files cannot be shared", function()
+            assert.is_false(Device:canShareFiles())
+            readerui.exporter:exportClippings(util.tableDeepCopy(sample_clippings))
+            runTasks()
+            local path = text:getFilePath()
+            local dir = readerui.exporter.settings.clipping_dir or readerui.exporter.default_clipping_dir
+            assert.are.equal(dir .. "/", path:sub(1, #dir + 1))
+            assert.is_true(exists(path))
+            local reported = false
+            for _, w in ipairs(UIManager._window_stack) do
+                reported = reported or (w.widget.text or ""):find(path, 1, true) ~= nil
+            end
+            assert.is_true(reported)
+            os.remove(path)
+        end)
+
+        describe("on the injected iOS device", function()
+            local bridge, polls
+
+            before_each(function()
+                bridge = require("iosbridge").new()
+                local ios = require("device/sdl/device"):createVariant{ platform = "iOS", native_bridge = bridge }
+                stub(Device, "canShareFiles", ios.canShareFiles)
+                Device.shareFiles = function(_self, paths, done) return ios:shareFiles(paths, done) end
+                polls = {}
+            end)
+
+            after_each(function()
+                Device.canShareFiles:revert()
+                Device.shareFiles = nil
+            end)
+
+            -- Runs the export, capturing the share sheet's polls instead of waiting for them.
+            local function export()
+                readerui.exporter:exportClippings(util.tableDeepCopy(sample_clippings))
+                stub(UIManager, "scheduleIn", function(_self, _seconds, task) table.insert(polls, task) end)
+                local ok, err = pcall(runTasks)
+                UIManager.scheduleIn:revert()
+                assert(ok, err)
+            end
+
+            local function poll()
+                stub(UIManager, "scheduleIn", function(_self, _seconds, task) table.insert(polls, task) end)
+                local ok, err = pcall(table.remove(polls, 1))
+                UIManager.scheduleIn:revert()
+                assert(ok, err)
+            end
+
+            it("hands the export to the share sheet and leaves nothing behind when cancelled", function()
+                export()
+                assert.are.equal(1, #bridge.shared)
+                local path = bridge.shared[1][1]
+                local share_dir = require("datastorage"):getDataDir() .. "/cache/share/"
+                assert.are.equal(share_dir, path:sub(1, #share_dir))
+                assert.are.equal("txt", path:match("%.(%w+)$"))
+                assert.is_true(exists(path))
+                poll()
+                assert.is_true(exists(path))
+                bridge.finishShare("cancelled")
+                poll()
+                assert.is_false(exists(path))
+                assert.are.equal(0, #polls)
+            end)
+
+            it("removes the export and says so when the share sheet cannot be presented", function()
+                bridge.shareStart = function() return nil, "no window" end
+                export()
+                local path = text:getFilePath()
+                assert.is_false(exists(path))
+                assert.are.equal(0, #polls)
+                local message = T(_("%1: Failed to export."), text.name)
+                local reported = false
+                for _i, w in ipairs(UIManager._window_stack) do
+                    reported = reported or w.widget.text == message
+                end
+                assert.is_true(reported)
+            end)
+
+            it("clears files a killed app left in the share folder before exporting", function()
+                local share_dir = require("datastorage"):getDataDir() .. "/cache/share"
+                util.makePath(share_dir)
+                local stale = share_dir .. "/stale.txt"
+                local f = io.open(stale, "w")
+                f:write("left behind")
+                f:close()
+                export()
+                assert.is_false(exists(stale))
+                bridge.finishShare("completed")
+                poll()
+            end)
+        end)
+    end)
 end)

@@ -58,6 +58,15 @@ pickFilesPoll() -> snapshot | nil, error
 memoryAvailable() -> bytes | nil, error
     How much more the app may allocate before the system's per-process limit.
     Without such a limit (the simulator), the physical memory. No margin applied.
+
+openURL(url) -> true | nil, error
+    Hands url to the system (SDL_OpenURL); the app may move to the background.
+shareStart(paths) -> handle | nil, error
+    Presents the system share sheet for an array of absolute file paths. One sheet
+    at a time; the native side keeps no reference to the files after dismissal.
+sharePoll(handle) -> state | nil, error
+    state is "presenting", "completed", "cancelled" or "failed"; terminal states
+    are sticky. Lua removes the shared files once a terminal state is reached.
 --]]
 
 local Bridge = {}
@@ -83,6 +92,9 @@ function Bridge.new()
         pickFilesStart = unsupported,
         pickFilesPoll = unsupported,
         memoryAvailable = unsupported,
+        openURL = unsupported,
+        shareStart = unsupported,
+        sharePoll = unsupported,
     }
 end
 

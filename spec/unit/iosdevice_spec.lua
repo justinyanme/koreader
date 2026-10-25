@@ -19,7 +19,7 @@ describe("SDL device selection (seam C)", function()
             supportsGamepad = false, useDPadAsActionKeys = false,
             hasWifiToggle = false, hasOTAUpdates = false, canRestart = false,
             hasExitOptions = false, isDefaultFullscreen = true, hasSystemFonts = true,
-            canForkProcesses = false, canOpenLink = false, canExternalDictLookup = false,
+            canForkProcesses = false, canOpenLink = true, canShareFiles = true, canExternalDictLookup = false,
             isTouchDevice = true, hasColorScreen = true,
         }
         for capability, value in pairs(expected) do
@@ -233,6 +233,112 @@ describe("SDL device selection (seam C)", function()
         local denied = SDLDevice:createVariant{ platform = "iOS", native_bridge = FakeBridge.new{ background_unavailable = true } }
         assert.is_nil(denied.bridge.backgroundBegin())
         assert.is_false(denied.bridge.backgroundExpired(nil))
+    end)
+
+    it("maps PowerD's 0..100 frontlight to system brightness and keeps working when the bridge fails", function()
+        local SDLPowerD = require("device/sdl/powerd")
+        local bridge = FakeBridge.new{ brightness = 30 }
+        local powerd = SDLPowerD:new{ device = SDLDevice:createVariant{ platform = "iOS", native_bridge = bridge } }
+        assert.are.equal(30, powerd:frontlightIntensity())
+        assert.are.equal(100, powerd.fl_max)
+        powerd:setIntensity(80, true)
+        assert.are.equal(80, bridge.brightnessGet())
+        assert.are.equal(80, powerd:frontlightIntensity())
+
+        -- The unsupported defaults stand in for a bridge whose calls fail.
+        local Bridge = require("device/sdl/iosbridge")
+        local fallback = SDLPowerD:new{ device = SDLDevice:createVariant{ platform = "iOS", native_bridge = Bridge.new() } }
+        assert.are.equal(50, fallback:frontlightIntensity())
+        assert.has_no.errors(function() fallback:setIntensity(20, true) end)
+        assert.are.equal(20, fallback:frontlightIntensity())
+    end)
+
+    it("opens links through the bridge and returns false when the system refuses", function()
+        local bridge = FakeBridge.new()
+        local device = SDLDevice:createVariant{ platform = "iOS", native_bridge = bridge }
+        assert.is_true(device:canOpenLink())
+        assert.is_true(device:openLink("https://example.org/a"))
+        assert.are.same({ "https://example.org/a" }, bridge.opened)
+        local refused = SDLDevice:createVariant{ platform = "iOS", native_bridge = FakeBridge.new{ open_url_error = "denied" } }
+        assert.is_false(refused:openLink("https://example.org/a"))
+        local unsupported = SDLDevice:createVariant{ platform = "iOS",
+            native_bridge = require("device/sdl/iosbridge").new() }
+        assert.is_false(unsupported:openLink("https://example.org/a"))
+    end)
+
+    describe("share sheet", function()
+        local UIManager, polls, paths
+
+        before_each(function()
+            UIManager = require("ui/uimanager")
+            polls = {}
+            stub(UIManager, "scheduleIn", function(_, _, task) table.insert(polls, task) end)
+            paths = {}
+            for i = 1, 2 do
+                paths[i] = os.tmpname()
+                local f = io.open(paths[i], "w")
+                f:write("notes")
+                f:close()
+            end
+        end)
+
+        after_each(function()
+            UIManager.scheduleIn:revert()
+            for _, path in ipairs(paths) do os.remove(path) end
+        end)
+
+        local function exists(path)
+            local f = io.open(path)
+            if f then f:close() end
+            return f ~= nil
+        end
+
+        local function poll()
+            table.remove(polls, 1)()
+        end
+
+        for _, outcome in ipairs{ "completed", "cancelled", "failed" } do
+            it("polls until " .. outcome .. ", then removes the files", function()
+                local bridge = FakeBridge.new()
+                local device = SDLDevice:createVariant{ platform = "iOS", native_bridge = bridge }
+                assert.is_true(device:canShareFiles())
+                local result
+                device:shareFiles(paths, function(state) result = state end)
+                assert.are.same({ paths }, bridge.shared)
+                poll()
+                assert.is_nil(result)
+                assert.is_true(exists(paths[1]) and exists(paths[2]))
+                bridge.finishShare(outcome)
+                poll()
+                assert.are.equal(outcome, result)
+                assert.is_false(exists(paths[1]) or exists(paths[2]))
+                assert.are.equal(0, #polls)
+            end)
+        end
+
+        it("cleans up when the sheet cannot be presented or its state is lost", function()
+            local result
+            local device = SDLDevice:createVariant{ platform = "iOS", native_bridge = FakeBridge.new{ share_error = "no window" } }
+            device:shareFiles(paths, function(state) result = state end)
+            assert.are.equal("failed", result)
+            assert.is_false(exists(paths[1]) or exists(paths[2]))
+            assert.are.equal(0, #polls)
+
+            local bridge = FakeBridge.new()
+            device = SDLDevice:createVariant{ platform = "iOS", native_bridge = bridge }
+            local kept = os.tmpname()
+            result = nil
+            device:shareFiles({ kept }, function(state) result = state end)
+            bridge.sharePoll = function() return nil, "unknown share" end
+            poll()
+            assert.are.equal("failed", result)
+            assert.is_false(exists(kept))
+        end)
+
+        it("is not offered by e-ink and desktop devices", function()
+            assert.is_false(require("device/generic/device"):canShareFiles())
+            assert.is_false(SDLDevice:createVariant{ platform = "Linux" }:canShareFiles())
+        end)
     end)
 
     it("leaves the Emulator and Desktop capability defaults unchanged", function()

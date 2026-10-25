@@ -11,13 +11,29 @@ local SDLPowerD = BasePowerD:new{
     fl_warmth_max = 100,
 }
 
+-- Only iOS has a native bridge: its brightness is the system's, on the same 0..100 scale.
+-- A failing bridge leaves the emulated value in place rather than raising.
 function SDLPowerD:frontlightIntensityHW()
+    local bridge = self.device and self.device.bridge
+    if bridge then
+        local value, err = bridge.brightnessGet()
+        if value then
+            self.hw_intensity = value
+        else
+            require("logger").warn("SDLPowerD: brightnessGet failed:", err)
+        end
+    end
     return self.hw_intensity
 end
 
 function SDLPowerD:setIntensityHW(intensity)
     require("logger").info("set brightness to", intensity)
     self.hw_intensity = intensity or self.hw_intensity
+    local bridge = self.device and self.device.bridge
+    if bridge then
+        local ok, err = bridge.brightnessSet(self.hw_intensity)
+        if not ok then require("logger").warn("SDLPowerD: brightnessSet failed:", err) end
+    end
     self:_decideFrontlightState()
 end
 
