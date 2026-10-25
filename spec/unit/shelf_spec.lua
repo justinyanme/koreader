@@ -207,6 +207,7 @@ describe("Shelf home (FileManager replacement)", function()
             if FileManager.instance then FileManager.instance:onClose() end
             Replacements.reader_menu = old_menu
             G_reader_settings:delSetting("shelf_removed")
+            os.remove(home .. "/linked.epub") -- purgeDir follows links, whose target may be removed first
             ffiUtil.purgeDir(home)
         end)
 
@@ -2015,14 +2016,18 @@ describe("Shelf home (FileManager replacement)", function()
             local original_can_fork = Device.canForkProcesses
             Device.canForkProcesses = function() return false end
             finally(function() Device.canForkProcesses = original_can_fork end)
+            -- A missing book on page one, regardless of what earlier extraction scenarios cached.
+            local file = home .. "/book04.txt"
+            local old_row = stub.rows[file]
+            finally(function() stub.rows[file] = old_row end)
+            stub.rows[file] = nil
             stub.extracting = false
             local fm, view = openShelf(home)
             view:pollExtraction()
-            local file = stub.jobs[#stub.jobs][1].filepath
-            local old_row = stub.rows[file]
-            finally(function() stub.rows[file] = old_row end)
+            assert.is_truthy(find(view, "book04"))
             view.page = 2
             view:update("grid")
+            assert.is_nil(find(view, "book04"))
             local layout, grid = view[1], view[1][3]
             local cover_reads = #stub.cover_reads
             local done = view.extracting.done

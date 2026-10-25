@@ -62,8 +62,7 @@ describe("ReaderTypesetPanel module", function()
     end
 
     local function closeReader(ui)
-        ui:closeDocument()
-        UIManager:close(ui)
+        -- CloseDocument handlers cancel pending reflow work before the document is released.
         ui:onClose()
     end
 
@@ -827,7 +826,8 @@ describe("ReaderTypesetPanel module", function()
         it("keeps the same text through window rotation and an inset-only reflow", function()
             ui:handleEvent(Event:new("GotoPage", 20))
             UIManager:forceRePaint()
-            local anchor = ui.document:getXPointer()
+            -- The reader retains the navigation anchor; a rendered page starts before that passage.
+            local anchor = ui.rolling:getBookLocation()
             local original_bb, original_size = Screen.bb, Screen.screen_size
             local function resize(w, h)
                 if Screen.bb ~= original_bb then Screen.bb:free() end
@@ -841,6 +841,7 @@ describe("ReaderTypesetPanel module", function()
                 ui:handleEvent(Event:new("RedrawCurrentPage"))
                 runTasks()
                 UIManager:forceRePaint()
+                assert.are.equal(anchor, ui.rolling:getBookLocation())
                 assert.are.equal(ui.document:getCurrentPage(), ui.document:getPageFromXPointer(anchor))
             end
             local ok, err = pcall(function()

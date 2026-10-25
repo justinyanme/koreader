@@ -62,7 +62,7 @@ describe("iOS lifecycle persistence (seams A and C)", function()
         if sync_client then sync_client.new:revert() sync_client = nil end
         if network then network.willRerunWhenOnline:revert() network = nil end
         package.path = original_package_path
-        if archive then require("util").purgeDir(archive) archive = nil end
+        if archive then require("ffi/util").purgeDir(archive) archive = nil end
         G_reader_settings.data = original_settings
         ReaderUI.instance = original_instance
     end)
@@ -146,10 +146,11 @@ describe("iOS lifecycle persistence (seams A and C)", function()
         assert.is_truthy(require("libs/libkoreader-lfs").attributes(archive .. "/ios-lifecycle-spec.lua"))
         G_reader_settings:saveSetting("document_metadata_arc_folder", previous)
         G_reader_settings:saveSetting("document_metadata_arc_on_closing", previous_enabled)
-        require("util").purgeDir(archive)
+        require("ffi/util").purgeDir(archive)
     end)
 
     it("retains failed plugin settings and retries them when returning to the foreground", function()
+        package.path = "plugins/opds.koplugin/?.lua;" .. package.path
         local OPDS = dofile("plugins/opds.koplugin/main.lua")
         archive = os.tmpname()
         os.remove(archive)

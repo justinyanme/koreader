@@ -1,7 +1,7 @@
 -- 导入 and the two ways to 文件 (导入, 我), driven from the shelf home with a temporary home folder and the
 -- real OPDS and calibre plugins.
 describe("Shelf home, 导入 and 文件", function()
-    local DataStorage, Event, FileManager, Geom, ImportPage, Key, LuaSettings, ReaderUI, Replacements, UIManager, Screen
+    local Event, FileManager, Geom, ImportPage, Key, LuaSettings, ReaderUI, Replacements, UIManager, Screen
     local BookSourceView, filemanagerutil, ffiUtil, lfs, T, _, C_
     local home, tmp, opds_settings, saved_settings
     local cleanup_files = {}
@@ -151,7 +151,6 @@ describe("Shelf home, 导入 and 文件", function()
         load_plugin("calibre.koplugin")
         package.path = "plugins/opds.koplugin/?.lua;" .. package.path
         require("document/canvascontext"):init(require("device"))
-        DataStorage = require("datastorage")
         Event = require("ui/event")
         FileManager = require("apps/filemanager/filemanager")
         Geom = require("ui/geometry")
@@ -176,9 +175,11 @@ describe("Shelf home, 导入 and 文件", function()
             saved_settings[key] = G_reader_settings:readSetting(key)
             G_reader_settings:delSetting(key)
         end
-        tmp = ffiUtil.realpath(DataStorage:getDataDir()) .. "/shelf_import_spec"
-        ffiUtil.purgeDir(tmp)
-        lfs.mkdir(tmp)
+        -- Keep the displayed home path short enough that this layout fixture is independent of checkout depth.
+        tmp = os.tmpname()
+        os.remove(tmp)
+        assert(lfs.mkdir(tmp))
+        tmp = ffiUtil.realpath(tmp)
         home = tmp .. "/home"
         lfs.mkdir(home)
         G_reader_settings:saveSetting("home_dir", home)

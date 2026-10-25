@@ -30,6 +30,12 @@ describe("FileManager in-process file operations", function()
         ffiUtil.execute:revert()
         ffiUtil.fsyncOpenedFile:revert()
         ffiUtil.fsyncDirectory:revert()
+        -- purgeDir follows symlinks, so remove these fixtures before their targets.
+        os.remove(root .. "/.koreader-fileop-1-5")
+        os.remove(root .. "/.koreader-fileop-1-6/.owner")
+        os.remove(root .. "/link")
+        os.remove(root .. "/dangling")
+        os.remove(root .. "/tree/loop")
         ffiUtil.purgeDir(root)
     end)
 
