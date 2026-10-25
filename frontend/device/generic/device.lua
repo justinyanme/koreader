@@ -89,6 +89,7 @@ local Device = {
     hasBattery = yes,
     hasAuxBattery = no,
     hasKeyboard = no,
+    canShowMenuShortcuts = yes,
     supportsExternalKeyboard = no,
     hasOTGManagement = no,
     hasKeys = no,

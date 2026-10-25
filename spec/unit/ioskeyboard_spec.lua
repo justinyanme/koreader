@@ -4,7 +4,7 @@ describe("iOS external keyboard in the reader (seams A and C)", function()
     local Device, SDLDevice, FakeBridge, Input, UIManager, Event, Geom, time, C
     local ReaderUI, DocumentRegistry, DocSettings, Replacements, Screen
     local ios, bridge, pending, interrupted, ui, saved_reader_menu
-    local capabilities = { "hasKeys", "hasKeyboard", "hasDPad", "hasFewKeys", "useDPadAsActionKeys" }
+    local capabilities = { "hasKeys", "hasKeyboard", "hasDPad", "hasFewKeys", "useDPadAsActionKeys", "canShowMenuShortcuts" }
 
     setup(function()
         require("commonrequire")
@@ -93,10 +93,9 @@ describe("iOS external keyboard in the reader (seams A and C)", function()
     end
 
     local function key(code)
-        local at = time.timeval(time.now())
         pump{
-            { type = C.EV_KEY, code = code, value = 1, time = at },
-            { type = C.EV_KEY, code = code, value = 0, time = at },
+            { type = C.EV_KEY, code = code, value = 1 },
+            { type = C.EV_KEY, code = code, value = 0 },
         }
     end
 
@@ -104,6 +103,20 @@ describe("iOS external keyboard in the reader (seams A and C)", function()
         UIManager:sendEvent(Event:new("Gesture", {
             ges = "tap", pos = Geom:new{ x = x, y = y, w = 0, h = 0 },
         }))
+    end
+
+    for _, connected in ipairs{ false, true } do
+        it("does not reserve menu shortcut boxes with a keyboard at startup: " .. tostring(connected), function()
+            bridge.setKeyboardConnected(connected)
+            pump()
+            -- Load the class with the startup capabilities, without replacing
+            -- the cached Menu module used by other specs and reader widgets.
+            local StartupMenu = dofile("frontend/ui/widget/menu.lua")
+            local menu = StartupMenu:new{ item_table = { { text = "Chapter 1" } } }
+            finally(function() menu:free() end)
+            assert.is_false(menu.is_enable_shortcut)
+            assert.is_nil(menu.key_events.SelectByShortCut)
+        end)
     end
 
     for _, file in ipairs{ "spec/front/unit/data/juliet.epub", "spec/front/unit/data/sample.pdf" } do

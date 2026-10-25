@@ -15,6 +15,7 @@ describe("SDL device selection (seam C)", function()
             hasEinkScreen = false, hasFrontlight = true, hasNaturalLight = false,
             hasNaturalLightApi = false, hasNaturalLightMixer = false,
             hasKeys = false, hasDPad = false, hasKeyboard = false, hasSymKey = false,
+            canShowMenuShortcuts = false,
             supportsGamepad = false, useDPadAsActionKeys = false,
             hasWifiToggle = false, hasOTAUpdates = false, canRestart = false,
             hasExitOptions = false, isDefaultFullscreen = true, hasSystemFonts = true,
@@ -51,7 +52,7 @@ describe("SDL device selection (seam C)", function()
         }
         local original_wait = backend.waitForEvent
         device.input = { input = backend, modifiers = { Shift = true, Ctrl = true },
-            repeat_count = 3, last_repeat_time = 42, keyboard_toggle_tapped = "Sym" }
+            last_repeat_time = 42, keyboard_toggle_tapped = "Sym" }
         device:initKeyboard()
         assert.is_true(device:hasKeys())
         assert.is_true(device:hasKeyboard())
@@ -72,7 +73,6 @@ describe("SDL device selection (seam C)", function()
         assert.is_false(device:hasKeys())
         assert.is_false(device:hasKeyboard())
         assert.are.same({ Shift = false, Ctrl = false }, device.input.modifiers)
-        assert.are.equal(0, device.input.repeat_count)
         assert.is_nil(device.input.last_repeat_time)
         assert.is_nil(device.input.keyboard_toggle_tapped)
 
@@ -81,6 +81,38 @@ describe("SDL device selection (seam C)", function()
         assert.is_true(device:hasKeys())
         assert.is_true(device:hasKeyboard())
         assert.are.equal(original_wait, backend.waitForEvent)
+    end)
+
+    it("yields a UI tick for discarded hotplug events without dropping key batches or errors", function()
+        local C = require("ffi").C
+        local bridge = FakeBridge.new()
+        local device = SDLDevice:createVariant{ platform = "iOS", native_bridge = bridge }
+        local reply = { n = 2, false, C.EINTR }
+        device.input = { modifiers = {}, input = {
+            waitForEvent = function() return unpack(reply, 1, reply.n) end,
+        } }
+        device:initKeyboard()
+        local function capture(...)
+            return { n = select("#", ...), ... }
+        end
+        assert.are.same({ n = 2, false, C.EINTR }, capture(device.input.input.waitForEvent()))
+        bridge.setKeyboardConnected(true)
+        assert.are.same({ n = 2, false, C.ETIME }, capture(device.input.input.waitForEvent()))
+        assert.are.same({ n = 2, false, C.EINTR }, capture(device.input.input.waitForEvent()))
+
+        bridge.setKeyboardConnected(false)
+        local batch = { { type = C.EV_KEY, code = 27, value = 1 } }
+        reply = { n = 3, true, batch }
+        assert.are.same({ n = 3, true, batch }, capture(device.input.input.waitForEvent()))
+        bridge.setKeyboardConnected(true)
+        reply = { n = 3, [2] = "poll failed" }
+        assert.are.same({ n = 3, [2] = "poll failed" }, capture(device.input.input.waitForEvent()))
+
+        device.input.timer_callbacks = { {} }
+        bridge.setKeyboardConnected(false)
+        reply = { n = 2, false, C.EINTR }
+        -- A pending gesture timer must not be told its deadline elapsed early.
+        assert.are.same({ n = 2, false, C.EINTR }, capture(device.input.input.waitForEvent()))
     end)
 
     it("keeps touch-only capabilities when keyboard detection is unsupported", function()
@@ -219,6 +251,7 @@ describe("SDL device selection (seam C)", function()
             assert.is_true(emulator:hasFrontlight())
             assert.is_true(emulator:hasNaturalLight())
             assert.is_true(emulator:hasKeyboard())
+            assert.is_true(emulator:canShowMenuShortcuts())
             assert.is_true(emulator:canForkProcesses())
             assert.is_false(emulator:hasOTAUpdates())
             assert.is_false(emulator:isIOS())
@@ -233,6 +266,7 @@ describe("SDL device selection (seam C)", function()
             assert.is_false(desktop:hasEinkScreen())
             assert.is_false(desktop:hasFrontlight())
             assert.is_true(desktop:hasKeyboard())
+            assert.is_true(desktop:canShowMenuShortcuts())
             assert.is_true(desktop:canForkProcesses())
             -- The actual SDL platform always wins over desktop packaging hints.
             assert.is_true(SDLDevice:createVariant{ platform = "iOS" }:isIOS())

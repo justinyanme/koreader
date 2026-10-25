@@ -187,6 +187,7 @@ local IOS = Device:extend{
     hasKeys = hasExternalKeyboard,
     hasDPad = no,
     hasKeyboard = hasExternalKeyboard,
+    canShowMenuShortcuts = no,
     hasSymKey = no,
     useDPadAsActionKeys = no,
     supportsGamepad = no,
@@ -420,23 +421,31 @@ function IOS:updateKeyboardState()
         local modifiers = {}
         for key in pairs(self.input.modifiers) do modifiers[key] = false end
         self.input.modifiers = modifiers
-        self.input.repeat_count = 0
         self.input.last_repeat_time = nil
         self.input.keyboard_toggle_tapped = nil
     end
-    if self._keyboard_uimgr then
+    if UIManager then
         -- Like the externalkeyboard plugin, update static bindings before live widgets.
         require("ui/widget/inputtext").initInputEvents()
-        self._keyboard_uimgr:broadcastEvent(Event:new(
+        UIManager:broadcastEvent(Event:new(
             connected and "PhysicalKeyboardConnected" or "PhysicalKeyboardDisconnected"))
     end
+    return true
 end
 
 function IOS:initKeyboard()
     self:updateKeyboardState()
     local backend = self.input.input
     local function afterWait(...)
-        self:updateKeyboardState()
+        local has_input_timer = self.input.timer_callbacks and self.input.timer_callbacks[1]
+        if self:updateKeyboardState() and not has_input_timer
+            and select(1, ...) == false and select(2, ...) == ffi.C.EINTR then
+            -- Let UIManager paint changes requested by the hotplug handlers
+            -- before blocking again. Do not discard input batches or errors.
+            -- With a gesture timer pending, ETIME would incorrectly tell Input
+            -- that its requested polling deadline has already elapsed.
+            return false, ffi.C.ETIME, select(3, ...)
+        end
         return ...
     end
     -- Keep this wrapper on the iOS instance. In particular, do not replace the
@@ -490,11 +499,6 @@ end
 
 function Device:UIManagerReady(uimgr)
     UIManager = uimgr
-end
-
-function IOS:UIManagerReady(uimgr)
-    Device.UIManagerReady(self, uimgr)
-    self._keyboard_uimgr = uimgr
 end
 
 function Device:setEventHandlers(uimgr)

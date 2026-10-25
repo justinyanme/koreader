@@ -5,6 +5,21 @@ describe("Menu widget", function()
         Menu = require("ui/widget/menu")
     end)
 
+    it("keeps the existing shortcut default for non-iOS keyboards without a DPad", function()
+        local Device = require("device")
+        stub(Device, "hasKeyboard", function() return true end)
+        stub(Device, "hasDPad", function() return false end)
+        local ok, err = pcall(function()
+            -- Android QWERTY and externalkeyboard's non-DPad keyboards keep
+            -- Generic's default; only the iOS variant opts out.
+            local StartupMenu = dofile("frontend/ui/widget/menu.lua")
+            assert.is_true(StartupMenu.is_enable_shortcut)
+        end)
+        Device.hasDPad:revert()
+        Device.hasKeyboard:revert()
+        assert(ok, err)
+    end)
+
     it("should convert item table from touch menu properly", function()
         local cb1 = function() end
         local cb2 = function() end
