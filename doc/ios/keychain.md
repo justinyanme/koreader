@@ -44,8 +44,11 @@ KOSync 每个请求关闭 Spore 的线路调试，不影响其他 Spore 客户�
   本地 `localhost:18098` 认证服务收到书源和 KOSync 请求，分别返回 200。
   KOSync 真实登录流程成功，设置里没有 `userkey`。
 - 保存数据快照，执行 `simctl uninstall`、`simctl keychain <UDID> reset`、重装并恢复快照。
-  原引用仍在，书源显示 `Login failed` 和 `Edit source`；KOSync getter 返回未登录。
+  原引用仍在，书源显示 `Login failed` 和 `Edit source`；KOSync getter 返回未登录，
+  “同步与传输”页面截图确认显示 `Not logged in`。
   合成 EPUB 和 `.sdr` 笔记文件恢复前后 SHA-256 一致。
+- 恢复后经书源编辑保存凭据、重新执行 KOSync 登录，真实认证请求再次返回 200，
+  书源恢复 `ok`、KOSync 恢复已登录，设置仍无明文。
 - 迁移前后和恢复后的 debug 控制台、主设置和 `.old` 扫描合成密码、CF ID/Secret、
   KOSync 密码与摘要，匹配数为 0。日志只记录认证是否成功，不记录请求头。
 - 证据在本机 worktree 的忽略目录 `koreader-ios-arm64-apple-ios27.0-simulator/c2-evidence/`，
@@ -53,3 +56,5 @@ KOSync 每个请求关闭 Spore 的线路调试，不影响其他 Spore 客户�
 - 已编写桥适配、迁移重试/幂等/备份清理、FileManager 书源编辑删除/恢复、KOSync 生命周期、
   “我”页面登录状态与日志 spec。**测试已编写、按 Q46 未运行**；未做 Docker 全量或 Leaf5。
   修改的 Lua 文件仅做语法编译检查，不执行 spec。GUI/真机项目见 acceptance.md。
+- code-review 双轴审查：Standards 无文档违规或需处理的代码气味；发现并修复混合记录
+  （明文与丢失旧引用并存）的重试缺陷，补未运行 spec；Spec 无剩余发现。

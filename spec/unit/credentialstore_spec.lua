@@ -66,6 +66,15 @@ describe("Credential migration through the device bridge", function()
         absent(settings.file .. ".old", { "basic-canary", "id-canary", "secret-canary" })
     end)
 
+    it("recovers plaintext in a mixed record even if its previous Keychain reference is missing", function()
+        settings.data.servers[1].credential_ref = "missing-old-ref"
+        assert.is_true(Store.migrateSettings(settings, "opds"))
+        local saved = LuaSettings:open(settings.file):readSetting("servers")[1]
+        assert.are.equal("basic-canary", Store.source(saved).password)
+        assert.are.equal("secret-canary", Store.source(saved).access_client_secret)
+        absent(settings.file, { "basic-canary", "id-canary", "secret-canary" })
+    end)
+
     it("migrates KOSync's reusable password digest and treats a restored device as logged out", function()
         local sync = LuaSettings:wrap{ settings = { username = "reader", userkey = "digest-canary", auto_sync = true } }
         sync.file = dir .. "/kosync.lua"
@@ -86,10 +95,14 @@ describe("Credential migration through the device bridge", function()
             Device.bridge = bridge
             assert.is_true(Store.migrateSettings(settings, "opds"))
             assert.are.equal("basic-canary", settings.data.servers[1].password)
-            local draft = {}
+            local draft = { userkey_ref = "restored-ref" }
             assert.is_true(Store.setUserkey(draft, "legacy-digest"))
             assert.are.equal("legacy-digest", draft.userkey)
             assert.is_nil(draft.userkey_ref)
+            draft.credential_ref = "restored-source-ref"
+            assert.is_true(Store.setSource(draft, { password = "legacy-password" }))
+            assert.is_nil(draft.credential_ref)
+            assert.are.equal("legacy-password", Store.source(draft).password)
         end
     end)
 end)

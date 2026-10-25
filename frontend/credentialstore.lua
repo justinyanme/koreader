@@ -70,6 +70,7 @@ end
 function Store.setSource(draft, credentials)
     if not Store.available() then
         for _, field in ipairs(source_fields) do draft[field] = credentials[field] end
+        draft.credential_ref = nil
         return true
     end
     local values = {}
@@ -85,7 +86,10 @@ function Store.setSource(draft, credentials)
 end
 
 function Store.setUserkey(draft, userkey)
-    if not Store.available() then draft.userkey = userkey; return true end
+    if not Store.available() then
+        draft.userkey, draft.userkey_ref = userkey, nil
+        return true
+    end
     local ref, err
     if userkey then
         ref, err = put(userkey)
@@ -115,8 +119,7 @@ local function migrateSource(source)
     for _, field in ipairs(source_fields) do
         if source[field] ~= nil then
             -- A prior interrupted/older write may leave both a ref and plaintext.
-            local credentials = Store.source(source)
-            if not credentials then return end
+            local credentials = Store.source(source) or {}
             for _, key in ipairs(source_fields) do
                 if source[key] ~= nil then credentials[key] = source[key] end
             end

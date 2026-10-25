@@ -81,7 +81,8 @@ end
 
 function KOSync:saveAccount(username, userkey)
     if not CredentialStore.available() then
-        self.settings.username, self.settings.userkey = username, userkey
+        self.settings.username = username
+        CredentialStore.setUserkey(self.settings, userkey)
         return true
     end
     local previous = self.settings
