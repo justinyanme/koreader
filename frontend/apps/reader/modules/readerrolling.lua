@@ -354,7 +354,7 @@ function ReaderRolling:onReaderReady()
     self.setupXpointer()
     if Device:canForkProcesses() and self.partial_rerendering then
         UIManager:nextTick(function()
-            if self.ui.document and Device:canForkProcesses() then -- (could have disappeared with unit tests)
+            if self.ui.document then -- (could have disappeared with unit tests)
                 self.ui.document:enablePartialRerendering(true)
             end
         end)

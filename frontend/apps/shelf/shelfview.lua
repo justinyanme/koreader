@@ -241,11 +241,26 @@ function ShelfView:pollExtraction()
     end
     local on_extracted
     if not Device:canForkProcesses() then
-        on_extracted = function()
+        on_extracted = function(filepath)
             if self.extracting ~= ext then return end
             self.books = Shelf.load(self.scanned, self.bim, self.cover_specs)
-            ext.done = ext.total - #self:pendingFiles()
-            if self:isShowing() then self:update("title") end
+            local done = ext.total - #self:pendingFiles()
+            if not self:isShowing() then
+                ext.done = done
+                return
+            end
+            local per_page = self.grid.cols * self.grid.rows
+            local first = (self.page - 1) * per_page + 1
+            -- Include the next page's first row when it peeks above the bottom band.
+            local last = first + per_page - 1 + (self.grid.peek and self.grid.cols or 0)
+            for i = first, math.min(last, #self.shown) do
+                if self.shown[i].file == filepath then
+                    ext.done = done
+                    self:update("title")
+                    return
+                end
+            end
+            self:setProgress(done)
         end
     end
     ext.launched = self.bim:extractInBackground(chunk, on_extracted)

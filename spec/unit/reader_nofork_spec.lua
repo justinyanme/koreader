@@ -110,6 +110,8 @@ describe("Reader without fork", function()
     it("keeps book map tap and keyboard navigation available without opening thumbnails", function()
         local BookMapWidget = require("ui/widget/bookmapwidget")
         local Geom = require("ui/geometry")
+        local saved = G_reader_settings:readSetting("book_map_overview_tap_to_page_browser")
+        finally(function() G_reader_settings:saveSetting("book_map_overview_tap_to_page_browser", saved) end)
         local focus = { dimen = { y = 10 } }
         local events, locations = {}, 0
         local map = setmetatable({
@@ -128,6 +130,7 @@ describe("Reader without fork", function()
             },
         }, { __index = BookMapWidget })
         map:onTap(nil, { pos = Geom:new{ x = 10, y = 10, w = 0, h = 0 } })
+        G_reader_settings:makeFalse("book_map_overview_tap_to_page_browser")
         map:onGoToFocusedPage()
         assert.are.equal(2, locations)
         assert.are.equal(2, #events)

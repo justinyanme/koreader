@@ -1986,12 +1986,15 @@ describe("Shelf home (FileManager replacement)", function()
             view:pollExtraction()
             local notify = stub.on_extracted
             assert.is_function(notify)
-            local file = stub.jobs[#stub.jobs][1].filepath
+            view.page = 2
+            view:update("grid")
+            local file = view.shown[view.grid.cols * view.grid.rows + 1].file
             local old_row = stub.rows[file]
             finally(function() stub.rows[file] = old_row end)
             addRow((file:gsub(".*/", "")), { has_cover = "Y" })
-            view.page = 2
+            local layout = view[1]
             notify(file, true)
+            assert.are_not.equal(layout, view[1])
             local found
             for __, book in ipairs(view.books) do
                 if book.file == file then found = book end
@@ -2004,6 +2007,32 @@ describe("Shelf home (FileManager replacement)", function()
             local books = view.books
             notify(file, true)
             assert.are.equal(books, view.books)
+            fm:onClose()
+        end)
+
+        it("updates only progress when an in-process cover is outside the visible page", function()
+            local Device = require("device")
+            local original_can_fork = Device.canForkProcesses
+            Device.canForkProcesses = function() return false end
+            finally(function() Device.canForkProcesses = original_can_fork end)
+            stub.extracting = false
+            local fm, view = openShelf(home)
+            view:pollExtraction()
+            local file = stub.jobs[#stub.jobs][1].filepath
+            local old_row = stub.rows[file]
+            finally(function() stub.rows[file] = old_row end)
+            view.page = 2
+            view:update("grid")
+            local layout, grid = view[1], view[1][3]
+            local cover_reads = #stub.cover_reads
+            local done = view.extracting.done
+            addRow((file:gsub(".*/", "")), { has_cover = "Y" })
+            stub.on_extracted(file, true)
+            assert.are.equal(layout, view[1])
+            assert.are.equal(grid, view[1][3])
+            assert.are.equal(cover_reads, #stub.cover_reads)
+            assert.are.equal(done + 1, view.extracting.done)
+            assert.is_truthy(find(view, T(_("Indexing books %1 / %2…"), done + 1, view.extracting.total)))
             fm:onClose()
         end)
 
