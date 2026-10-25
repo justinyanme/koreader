@@ -106,6 +106,17 @@ describe("Book end", function()
         if not FileManager.instance then FileManager:showFiles(home) end
         local fm = FileManager.instance
         local cell = find(fm.shelf_view, title)
+        -- The other finished books can push this one onto another shelf page.
+        if not cell then
+            fm.shelf_view:setPage(1)
+            UIManager:forceRePaint()
+            cell = find(fm.shelf_view, title)
+            while not cell and fm.shelf_view.page < fm.shelf_view.pages do
+                gesture("swipe", Screen:getWidth() / 2, Screen:getHeight() / 2, "west")
+                cell = find(fm.shelf_view, title)
+            end
+        end
+        assert.is_truthy(cell, "book not found on the shelf: " .. title)
         gesture("hold", cell.dimen.x + 10, cell.dimen.y + 10)
         tap(find(fm, "eink/mark"))
         tap(find(top(), C_("Status of single book", status)))

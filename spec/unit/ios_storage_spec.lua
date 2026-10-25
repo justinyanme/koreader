@@ -148,7 +148,11 @@ describe("iOS storage and imports", function()
             G_reader_settings:saveSetting("home_dir", home)
             G_reader_settings:makeTrue("lock_home_folder")
             lfs.mkdir(home .. "/sub")
-            local chooser = FileChooser:extend{ is_fm = false, refreshPath = function() end }
+            local chooser = FileChooser:extend{
+                is_fm = false,
+                ui = { folder_shortcuts = require("apps/filemanager/filemanagershortcuts") },
+                refreshPath = function() end,
+            }
             chooser:changeToPath(home)
             for __, item in ipairs(chooser:genItemTableFromPath(home)) do
                 assert.is_falsy(item.is_go_up)
@@ -257,8 +261,12 @@ describe("iOS storage and imports", function()
 
         it("keeps the old container recorded while anything failed to move, so the next start tries again", function()
             local old, new, data, settings = install()
+            assert(settings:flush())
             local rename = os.rename
-            stub(os, "rename", function() return nil, "Operation not permitted" end)
+            stub(os, "rename", function(from, to)
+                if from == data .. "/docsettings" .. old then return nil, "Operation not permitted" end
+                return rename(from, to)
+            end)
             local ok, err = pcall(IosStorage.setup, settings, new, data)
             os.rename:revert()
             assert(ok, err)
@@ -414,7 +422,7 @@ describe("iOS storage and imports", function()
             assert.is_truthy(util.arrayContains(extensions, "pdf"))
             assert.is_true(exists(home .. "/juliet.epub"))
             assert.is_false(exists(picked))
-            assert.are.same({ "BooksImported" }, broadcast)
+            assert.are.same({ "onBooksImported" }, broadcast)
             assert.are.equal(1, #shown)
             assert.is_truthy(shown[1].text:find(T(_("Could not import %1: %2"), "far.epub",
                 "The file couldn't be downloaded."), 1, true))
@@ -426,7 +434,7 @@ describe("iOS storage and imports", function()
             BookImport.sweep({ inbox }, home)
             pickWith{ { { state = "picked", paths = { picked } } } }
             assert.are.equal(T(N_("Imported 1 book", "Imported %1 books", 1), 1), shown[1].text)
-            assert.are.same({ "BooksImported" }, broadcast)
+            assert.are.same({ "onBooksImported" }, broadcast)
         end)
 
         it("does nothing when cancelled, and says why when the picker fails", function()

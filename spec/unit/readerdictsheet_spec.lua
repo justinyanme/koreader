@@ -291,7 +291,7 @@ describe("ReaderDictSheet module", function()
                 DictQuickLookup.window_list[i]:onClose()
             end
             UIManager:close(ui.highlight.highlight_dialog)
-            if ui.dictionary.rawSdcv.revert then ui.dictionary.rawSdcv:revert() end
+            if type(ui.dictionary.rawSdcv) == "table" then ui.dictionary.rawSdcv:revert() end
             ui:onClose()
             UIManager:quit()
         end)
@@ -1702,7 +1702,7 @@ describe("ReaderDictSheet module", function()
             vocab_settings.with_context = true
             if NetworkMgr.isOnline.revert then NetworkMgr.isOnline:revert() end
             if Trapper.dismissableRunInSubprocess.revert then Trapper.dismissableRunInSubprocess:revert() end
-            if ui.dictionary.rawSdcv.revert then ui.dictionary.rawSdcv:revert() end
+            if type(ui.dictionary.rawSdcv) == "table" then ui.dictionary.rawSdcv:revert() end
             ui:onClose()
             UIManager:quit()
             assert(ok, err)
@@ -1741,7 +1741,7 @@ describe("ReaderDictSheet module", function()
                 assert.are.equal(ui, topWidget())
                 assert.are.equal(10, ui.paging.current_page)
             end)
-            if ui.dictionary.rawSdcv.revert then ui.dictionary.rawSdcv:revert() end
+            if type(ui.dictionary.rawSdcv) == "table" then ui.dictionary.rawSdcv:revert() end
             UIManager:close(ui.highlight.highlight_dialog)
             ui:onClose()
             UIManager:quit()

@@ -429,15 +429,12 @@ describe("书源 (OPDS as a remote shelf)", function()
         tmp = data_dir .. "/booksource_spec"
         ffiUtil.purgeDir(tmp)
         lfs.mkdir(tmp)
-        home = tmp .. "/home"
-        lfs.mkdir(home)
         settings_file = tmp .. "/opds.lua"
         saved_thumb_dir = BookSource.thumb_dir
         saved_settings = {}
         for _, key in ipairs{ "home_dir", "lastdir", "download_dir", "file_ask_to_open" } do
             saved_settings[key] = G_reader_settings:readSetting(key)
         end
-        G_reader_settings:saveSetting("home_dir", home)
         G_reader_settings:delSetting("file_ask_to_open")
 
         http_stub = stub(require("socket.http"), "request", fakeRequest)
@@ -465,6 +462,9 @@ describe("书源 (OPDS as a remote shelf)", function()
         opened = {}
         -- a child forked by the previous test may still be fetching: it keeps the paths it was forked with
         run = run + 1
+        home = tmp .. "/home" .. run
+        assert(lfs.mkdir(home))
+        G_reader_settings:saveSetting("home_dir", home)
         log_file = tmp .. "/requests" .. run .. ".log"
         BookSource.thumb_dir = tmp .. "/thumbs" .. run
         writeSources{ nas() }
@@ -1068,7 +1068,7 @@ describe("书源 (OPDS as a remote shelf)", function()
             end
         end)
 
-        for _, failure in ipairs{
+        for __, failure in ipairs{
             { name = "an HTTPS downgrade", location = "http://nas.example/files/book5.epub", code = 302, count = 1 },
             { name = "a redirect loop", location = ROOT .. "/download/5/epub/", code = nil, count = 5 },
         } do
@@ -1275,7 +1275,7 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.is_nil(lfs.attributes(home .. "/Author 9 - Book 9.epub", "mode"))
         end)
 
-        for _, failure in ipairs{
+        for __, failure in ipairs{
             { name = "a server error", server = { fail_downloads = true }, result = { state = "http", code = 500 } },
             { name = "a timeout", server = { bridge_end = { state = "failed", error = "timeout" } },
                 result = { state = "unreachable" } },
@@ -1336,7 +1336,7 @@ describe("书源 (OPDS as a remote shelf)", function()
             assert.are.same({}, liveUrls("/"))
         end)
 
-        for _, failure in ipairs{
+        for __, failure in ipairs{
             { name = "an HTTPS downgrade", location = "http://nas.example/files/book5.epub", code = 302, count = 1 },
             { name = "a redirect loop", location = ROOT .. "/download/5/epub/", code = nil, count = 5 },
         } do
