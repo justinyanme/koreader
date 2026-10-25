@@ -1246,6 +1246,9 @@ function ReaderDictionary:rawSdcv(words, dict_names, fuzzy_search, lookup_progre
     if dictDirsEmpty(dict_dirs) then
         return false, nil
     end
+    if not Device:canForkProcesses() then
+        return false, self:lookupInProcess(dict_dirs, words, dict_names, fuzzy_search)
+    end
     local all_results = {}
     local lookup_cancelled = false
     for _, dict_dir in ipairs(dict_dirs) do
@@ -1336,6 +1339,51 @@ function ReaderDictionary:rawSdcv(words, dict_names, fuzzy_search, lookup_progre
         end
     end
     return lookup_cancelled, all_results
+end
+
+--- rawSdcv's results without sdcv, where child processes cannot run (iOS): the dictionaries are read in process.
+-- As sdcv's -u, dict_names gives the dictionaries and their order (all of a directory's when nil). Synchronous,
+-- so never cancelled.
+function ReaderDictionary:lookupInProcess(dict_dirs, words, dict_names, fuzzy_search)
+    local StarDict = require("stardict")
+    local all_results = {}
+    for i = 1, #words do all_results[i] = {} end
+    for _, dict_dir in ipairs(dict_dirs) do
+        local dicts = {}
+        for _, ifo_file in ipairs(getIfosInDir(dict_dir)) do
+            local dict, err = StarDict.open(ifo_file)
+            if dict then
+                table.insert(dicts, dict)
+            else
+                logger.warn("ReaderDictionary: skipping dictionary", ifo_file, err)
+            end
+        end
+        if dict_names then
+            local by_name = {}
+            for _, dict in ipairs(dicts) do
+                by_name[dict.name] = by_name[dict.name] or {}
+                table.insert(by_name[dict.name], dict)
+            end
+            dicts = {}
+            for _, name in ipairs(dict_names) do
+                util.arrayAppend(dicts, by_name[name] or {})
+                by_name[name] = nil
+            end
+        end
+        for i, word in ipairs(words) do
+            for _, dict in ipairs(dicts) do
+                local ok, entries = pcall(dict.lookup, dict, word, fuzzy_search)
+                if ok then
+                    for _, entry in ipairs(entries) do
+                        table.insert(all_results[i], { dict = dict.name, word = entry.word, definition = entry.definition })
+                    end
+                else
+                    logger.warn("ReaderDictionary: lookup failed in", dict.name, entries)
+                end
+            end
+        end
+    end
+    return all_results
 end
 
 function ReaderDictionary:startSdcv(word, dict_names, fuzzy_search)

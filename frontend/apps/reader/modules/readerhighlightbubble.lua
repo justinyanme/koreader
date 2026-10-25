@@ -922,8 +922,15 @@ function ReaderHighlightBubble:isLookedUp(text)
 end
 
 --- The look-up cell for some text (see isLookedUp). Both actions open the dictionary sheet.
+-- None (nil) where sdcv cannot run (iOS) and no dictionary is enabled, unless the text is several words that are
+-- not looked up: the sheet translates those online.
 function ReaderHighlightBubble:lookupCell(text, callback)
-    if self:isLookedUp(text) then
+    local looked_up = self:isLookedUp(text)
+    if not Device:canForkProcesses() and select(2, self.ui.dictionary:getNumberOfDictionaries()) == 0
+            and (looked_up or not text:find("%S%s+%S")) then
+        return nil -- one value: callers table.insert() it
+    end
+    if looked_up then
         return { icon = "eink/search", text = C_("Highlight bubble", "Look up"), callback = callback }
     end
     return { icon = "eink/translate", text = _("Translate"), callback = callback }
@@ -947,28 +954,29 @@ function ReaderHighlightBubble:onShowHighlightMenu(index)
     end
     local text = util.cleanupSelectedText(self.selected_text.text)
     local anchors = self:popoverAnchors(rects)
+    local row = {
+        { icon = "eink/highlight", text = C_("Highlight bubble", "Highlight"), callback = function()
+            self:saveAndShowHighlight()
+        end },
+    }
+    table.insert(row, self:lookupCell(text, function() -- none when hidden
+        self:closeBubble()
+        -- the dictionary popup clears the selection
+        if self.selected_text.text == "" and self.selected_text.sboxes then
+            self:lookupDictWord() -- scanned page: OCR
+        else
+            self:lookupDict()
+        end
+    end))
+    table.insert(row, { icon = "eink/thought", text = C_("Highlight bubble", "Write note"), callback = function()
+        self:showNoteSheet()
+    end })
+    table.insert(row, { icon = "eink/copy", text = C_("Text", "Copy"), callback = function()
+        self:dismiss()
+        self:copyText(text)
+    end })
     local bubble = SelectionPopover:new{
-        rows = { {
-            { icon = "eink/highlight", text = C_("Highlight bubble", "Highlight"), callback = function()
-                self:saveAndShowHighlight()
-            end },
-            self:lookupCell(text, function()
-                self:closeBubble()
-                -- the dictionary popup clears the selection
-                if self.selected_text.text == "" and self.selected_text.sboxes then
-                    self:lookupDictWord() -- scanned page: OCR
-                else
-                    self:lookupDict()
-                end
-            end),
-            { icon = "eink/thought", text = C_("Highlight bubble", "Write note"), callback = function()
-                self:showNoteSheet()
-            end },
-            { icon = "eink/copy", text = C_("Text", "Copy"), callback = function()
-                self:dismiss()
-                self:copyText(text)
-            end },
-        } },
+        rows = { row },
         anchor_rects = anchors,
         tap_close_callback = function() self:dismiss() end,
         page_gesture = function(ges) return self:pageGesture(ges) end,

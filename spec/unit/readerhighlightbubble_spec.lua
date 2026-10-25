@@ -339,6 +339,53 @@ describe("ReaderHighlightBubble module", function()
             ui.highlight:onClose()
         end)
 
+        describe("where child processes cannot run (iOS)", function()
+            local NO_LOOKUP_ACTIONS = { SELECTION_ACTIONS[1], SELECTION_ACTIONS[3], SELECTION_ACTIONS[4] }
+            local function cellOf(text)
+                return ui.highlight:lookupCell(text, function() end)
+            end
+            before_each(function() stub(Device, "canForkProcesses").returns(false) end)
+            after_each(function()
+                Device.canForkProcesses:revert()
+                local count = ui.dictionary.getNumberOfDictionaries
+                if type(count) == "table" then count:revert() end -- a stub
+            end)
+
+            it("should hide the look-up without an enabled dictionary, but keep the online translation of a phrase", function()
+                stub(ui.dictionary, "getNumberOfDictionaries").returns(0, 0, 0)
+                select(ui, Geom:new{ x = 400, y = 70 }) -- a word
+                UIManager:forceRePaint()
+                assertActions(ui.highlight.highlight_dialog, NO_LOOKUP_ACTIONS)
+                ui.highlight:onClose()
+                select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 }) -- a phrase
+                UIManager:forceRePaint()
+                assertActions(ui.highlight.highlight_dialog, SELECTION_ACTIONS)
+                ui.highlight:onClose()
+                assert.is_nil(cellOf("经典"))
+                assert.is_nil(cellOf("")) -- a scanned page: its OCR text is looked up
+                ui.dictionary.getNumberOfDictionaries:revert()
+                stub(ui.dictionary, "getNumberOfDictionaries").returns(2, 0, 2) -- all disabled
+                assert.is_nil(cellOf("apple"))
+            end)
+
+            it("should show the look-up with an enabled dictionary", function()
+                stub(ui.dictionary, "getNumberOfDictionaries").returns(2, 1, 1)
+                select(ui, Geom:new{ x = 400, y = 70 })
+                UIManager:forceRePaint()
+                assertActions(ui.highlight.highlight_dialog, SELECTION_ACTIONS)
+                ui.highlight:onClose()
+                assert.are.equal("Look up", cellOf("经典").text)
+            end)
+        end)
+
+        it("should show the look-up without dictionaries where sdcv runs", function()
+            stub(ui.dictionary, "getNumberOfDictionaries").returns(0, 0, 0)
+            local word, cjk = ui.highlight:lookupCell("apple", function() end), ui.highlight:lookupCell("经典", function() end)
+            ui.dictionary.getNumberOfDictionaries:revert()
+            assert.are.equal("Translate", word.text)
+            assert.are.equal("Look up", cjk.text)
+        end)
+
         it("should draw new highlights as lines until a default style is saved, whatever the book saved", function()
             G_reader_settings:delSetting("highlight_drawing_style")
             closeReader(ui)
