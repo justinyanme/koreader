@@ -62,8 +62,7 @@ describe("ReaderTypesetPanel module", function()
     end
 
     local function closeReader(ui)
-        ui:closeDocument()
-        UIManager:close(ui)
+        -- CloseDocument handlers cancel pending reflow work before the document is released.
         ui:onClose()
     end
 
