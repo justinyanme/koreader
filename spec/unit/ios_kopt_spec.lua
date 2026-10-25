@@ -14,7 +14,7 @@ describe("KOPT reflow on iOS (C5)", function()
             if line:sub(1, 1) ~= "#" then listed[line] = true end
         end
         local called = 0
-        for _, module in ipairs({"ffi/koptcontext", "document/koptinterface"}) do
+        for _, module in ipairs({"ffi/koptcontext", "ffi/mupdf", "document/koptinterface"}) do
             local f = assert(io.open(assert(package.searchpath(module, package.path))))
             local source = f:read("*a")
             f:close()
