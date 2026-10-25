@@ -42,7 +42,9 @@ Desktop / Emulator 继续使用原来的输入 backend，墨水屏的输入实�
   变为全部 `true`，并显示 EPUB 第 1 页。
 - **键盘连接/断开、左右键、Esc 与触控的 GUI 冒烟仍待完成**：advisor 已批准 GUI 独占和
   CLI 打开自己设备的窗口，但电脑控制接口持续报 `cgWindowNotFound`。CLI 启动和截图正常，
-  没有把这部分启动证据算作按键验收通过。等待 advisor 恢复 GUI 窗口。
+  没有把这部分启动证据算作按键验收通过。advisor 在 `jr-100/5` 裁定直接开 PR，
+  未验收项交由 owner 在 iPad 加外接键盘上复核，见 [真机复核清单](acceptance.md#真机复核)。
+  GUI 已归还，临时观察补丁已从两台模拟器清理。
 
 | 自建模拟器 | UDID | 启动截图 |
 | --- | --- | --- |
