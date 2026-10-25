@@ -54,6 +54,9 @@ pickFilesPoll() -> snapshot | nil, error
     "failed"; a final state is returned once, then "idle". paths are the system's copies, which Lua
     moves or removes. errors maps a file name to why it could not be copied (not downloaded from
     its cloud, say); error explains "failed".
+memoryAvailable() -> bytes | nil, error
+    How much more the app may allocate before the system's per-process limit.
+    Without such a limit (the simulator), the physical memory. No margin applied.
 --]]
 
 local Bridge = {}
@@ -78,13 +81,14 @@ function Bridge.new()
         keyboardConnected = unsupported,
         pickFilesStart = unsupported,
         pickFilesPoll = unsupported,
+        memoryAvailable = unsupported,
     }
 end
 
 --- The production bridge on iOS: the defaults above, with each feature's FFI adapter laid over
 -- them. An adapter is device/sdl/iosnative/<feature>.lua returning a table of the functions it
 -- implements, so tickets wiring different features never edit the same file.
-Bridge.features = { "safearea", "brightness", "links", "share", "files", "background", "download", "keychain", "keyboard" }
+Bridge.features = { "safearea", "brightness", "links", "share", "files", "background", "download", "keychain", "keyboard", "memory" }
 
 function Bridge.native()
     local bridge = Bridge.new()

@@ -54,6 +54,7 @@
 - [ ] 模拟器升级安装：先保留已有进度与划线，用 `xcrun simctl install <UDID> <App.app>` 覆盖安装新版本，重新启动后核对数据。
 - [ ] 能力关闭入口不显示；不开放后台重排/缩略图子进程、外部查询进程。
 - [ ] KOPT 重排（C5，[#101](https://github.com/justinyanme/koreader/issues/101)）：文字 PDF（含双栏页）和无文本层的扫描 PDF 各一本，从版式书底栏的“Reflow”打开重排；输出可读，双栏合成一栏；调字号、滚动模式和翻页模式翻页、关闭重排都正常；记录单页 `reflowPage` 耗时和翻页耗时。翻页模式下一页由后台线程（pthread，不是子进程）预先重排。滚动模式翻页偏慢是因为 DocCache 在 iOS 上只有 16MB，归 [#150](https://github.com/justinyanme/koreader/issues/150)。
+- [ ] 内存感知（C9，[#150](https://github.com/justinyanme/koreader/issues/150)）：DocCache 按设备给的可用内存定容量（可用内存 × 0.85 × 0.4，封顶 512MB；模拟器没有进程内存上限，按物理内存算，所以是 512MB）。打开扫描 PDF 开重排，滚动模式来回翻页，日志里不再出现 "Too much memory would be claimed by caching"，回到看过的页不再重新重排。
 - [ ] 稳定版补验：进程内查询、Keychain、VoiceOver 五个流程、外接键盘；记录内存与性能变化。
 - [ ] 仓库 spec 与全量回归由编排者在提交 TestFlight 前按 Q46 批量运行；本清单不授权逐票运行 spec 或做 Leaf5 实机验收。
 
@@ -94,6 +95,7 @@
 - [ ] 在可比较的亮度、网络和阅读时长下记录耗电；模拟器不提供电池门禁数值。
 - [ ] VoiceOver 实际朗读与操作五个核心流程；外接键盘按最终支持范围验收。
 - [ ] KOPT 重排：用真实的扫描书和文字 PDF 重做上面的 C5 项。确认真机上 `ffi.load("pthread")` 能解析（翻页模式后台预重排生效，日志无报错），记录长页重排位图的内存峰值；#150 合并前后各记一次滚动模式翻页耗时。
+- [ ] 内存感知：连续阅读扫描 PDF（开重排，滚动模式，至少 30 分钟）时，记录 App 的峰值内存（Xcode 内存仪表或 Instruments），以及有没有被系统杀掉（jetsam）。被杀时记下设备、系统版本，以及日志里的 `memoryAvailable:` 一行（`os_proc_available_memory` 的值；真机上不应出现 `hw.memsize` 回退），评估是否要降低 DocCache 的上限。
 - [ ] 真机任一目标不达标也停下评估；在报告追加真机记录，不能用模拟器通过覆盖失败。
 
 ### C4 外接键盘（#100，未验收）
