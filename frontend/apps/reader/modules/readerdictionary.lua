@@ -916,6 +916,21 @@ function ReaderDictionary:getNumberOfDictionaries()
     return nb_available, nb_enabled, nb_disabled
 end
 
+--- Scans the dictionary folders again.
+function ReaderDictionary:rescanDictionaries()
+    available_ifos = false
+    self:init()
+end
+
+--- Scans the dictionary folders again when no dictionary was found but they have files now: on iOS, dictionaries
+-- are added through Files while the app keeps running.
+function ReaderDictionary:rescanIfNoDictionaries()
+    if #available_ifos == 0 and (util.isEmptyDir(self.data_dir) == false
+            or util.isEmptyDir(self.data_dir .. "_ext") == false) then
+        self:rescanDictionaries()
+    end
+end
+
 function ReaderDictionary:_genDownloadDictionariesMenu()
     local downloadable_dicts = require("ui/data/dictionaries")
     local IsoLanguage = require("ui/data/isolanguage")

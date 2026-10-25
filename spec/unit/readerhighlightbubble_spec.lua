@@ -344,9 +344,13 @@ describe("ReaderHighlightBubble module", function()
             local function cellOf(text)
                 return ui.highlight:lookupCell(text, function() end)
             end
-            before_each(function() stub(Device, "canForkProcesses").returns(false) end)
+            before_each(function()
+                stub(Device, "canForkProcesses").returns(false)
+                stub(ui.dictionary, "rescanIfNoDictionaries")
+            end)
             after_each(function()
                 Device.canForkProcesses:revert()
+                ui.dictionary.rescanIfNoDictionaries:revert()
                 local count = ui.dictionary.getNumberOfDictionaries
                 if type(count) == "table" then count:revert() end -- a stub
             end)
@@ -356,6 +360,8 @@ describe("ReaderHighlightBubble module", function()
                 select(ui, Geom:new{ x = 400, y = 70 }) -- a word
                 UIManager:forceRePaint()
                 assertActions(ui.highlight.highlight_dialog, NO_LOOKUP_ACTIONS)
+                -- dictionaries added through Files since the last scan would be found
+                assert.stub(ui.dictionary.rescanIfNoDictionaries).was_called()
                 ui.highlight:onClose()
                 select(ui, Geom:new{ x = 400, y = 110 }, Geom:new{ x = 400, y = 170 }) -- a phrase
                 UIManager:forceRePaint()

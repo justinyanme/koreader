@@ -926,9 +926,11 @@ end
 -- not looked up: the sheet translates those online.
 function ReaderHighlightBubble:lookupCell(text, callback)
     local looked_up = self:isLookedUp(text)
-    if not Device:canForkProcesses() and select(2, self.ui.dictionary:getNumberOfDictionaries()) == 0
-            and (looked_up or not text:find("%S%s+%S")) then
-        return nil -- one value: callers table.insert() it
+    if not Device:canForkProcesses() then
+        self.ui.dictionary:rescanIfNoDictionaries()
+        if select(2, self.ui.dictionary:getNumberOfDictionaries()) == 0 and (looked_up or not text:find("%S%s+%S")) then
+            return nil -- one value: callers table.insert() it
+        end
     end
     if looked_up then
         return { icon = "eink/search", text = C_("Highlight bubble", "Look up"), callback = callback }

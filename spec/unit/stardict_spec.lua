@@ -68,6 +68,77 @@ describe("StarDict module", function()
         end)
     end)
 
+    describe("with corrupt or truncated files", function()
+        local dir
+        setup(function()
+            dir = require("datastorage"):getDataDir() .. "/stardict_spec"
+            require("util").makePath(dir)
+        end)
+        teardown(function()
+            require("ffi/util").purgeDir(dir)
+        end)
+
+        local function be32(n)
+            return string.char(math.floor(n / 16777216) % 256, math.floor(n / 65536) % 256, math.floor(n / 256) % 256, n % 256)
+        end
+        local function le16(n)
+            return string.char(n % 256, math.floor(n / 256))
+        end
+        local function entry(word, offset, size)
+            return word .. "\0" .. be32(offset) .. be32(size)
+        end
+        -- writes name's files (by extension) and opens it
+        local function open(name, files)
+            for ext, content in pairs(files) do
+                local f = assert(io.open(dir .. "/" .. name .. ext, "wb"))
+                f:write(content)
+                f:close()
+            end
+            return assert(StarDict.open(dir .. "/" .. name .. ".ifo"))
+        end
+        local function ifo(fields)
+            return "StarDict's dict ifo file\nversion=3.0.0\nbookname=Bad\nsametypesequence=m\n" .. fields
+        end
+
+        it("should skip a synonym pointing past the index", function()
+            local dict = open("badsyn", {
+                [".ifo"] = ifo("wordcount=1\nsynwordcount=1\n"),
+                [".idx"] = entry("a", 0, 1),
+                [".dict"] = "x",
+                [".syn"] = "ran\0\127\255\255\255",
+            })
+            assert.are.same({}, lookup(dict, "ran"))
+            assert.are.same({ { "a", "\nx" } }, lookup(dict, "a"))
+        end)
+
+        it("should drop an index entry truncated in its offset and size", function()
+            local dict = open("cutidx", {
+                [".ifo"] = ifo("wordcount=2\n"),
+                [".idx"] = entry("a", 0, 1) .. "b\0\0\0\0",
+                [".dict"] = "xy",
+            })
+            assert.are.same({}, lookup(dict, "b"))
+            assert.are.same({ { "a", "\nx" } }, lookup(dict, "a"))
+        end)
+
+        it("should fail on a dictzip header longer than the file, or with more chunks than its RA field holds", function()
+            local gzip = "\31\139\8\4\0\0\0\0\2\3"
+            local dict = open("cutdz", {
+                [".ifo"] = ifo("wordcount=1\n"),
+                [".idx"] = entry("a", 0, 1),
+                [".dict.dz"] = gzip .. le16(65535) .. "RA",
+            })
+            assert.has_error(function() dict:lookup("a") end)
+            local ra = le16(1) .. le16(32) .. le16(100) -- 100 chunks, no sizes
+            dict = open("baddz", {
+                [".ifo"] = ifo("wordcount=1\n"),
+                [".idx"] = entry("a", 0, 1),
+                [".dict.dz"] = gzip .. le16(4 + #ra) .. "RA" .. le16(#ra) .. ra,
+            })
+            assert.has_error(function() dict:lookup("a") end)
+        end)
+    end)
+
     it("should not open a dictionary without a bookname, as sdcv", function()
         local dict, err = StarDict.open(FIXTURES .. "/other/nobook.ifo")
         assert.is_nil(dict)

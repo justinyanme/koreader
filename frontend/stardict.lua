@@ -113,9 +113,11 @@ function Index.new(buf, size, tail, count)
     while n < count and pos < size do
         local nul = C.memchr(buf + pos, 0, size - pos)
         if nul == nil then break end
+        local next_pos = tonumber(ffi.cast(u8p, nul) - buf) + 1 + tail
+        if next_pos > size then break end -- truncated in its tail
         starts[n] = pos
         n = n + 1
-        pos = tonumber(ffi.cast(u8p, nul) - buf) + 1 + tail
+        pos = next_pos
     end
     return setmetatable({ buf = buf, size = size, starts = starts, n = n }, Index)
 end
@@ -221,20 +223,25 @@ function StarDict:loadDictzip()
     if self.dz then return end
     local f = assert(io.open(self.dz_file, "rb"))
     local head = f:read(65536 + 12) or ""
+    f:close()
+    -- every read below stays within head: the file may be truncated or corrupt
     local p = ffi.cast(u8p, head)
     if #head < 12 or p[0] ~= 0x1f or p[1] ~= 0x8b or bit.band(p[3], 4) == 0 then
-        f:close()
         error("not a dictzip file") -- ponytail: plain gzip .dict.dz (no random access chunks) is not supported
     end
     local flags = p[3]
     local xlen = p[10] + p[11] * 256
     local pos, extra_end = 12, 12 + xlen
+    if extra_end > #head then error("truncated dictzip header") end
     local chunk_len, count, sizes
     while pos + 4 <= extra_end do -- subfields: id (2), length (2, LE), data
         local len = p[pos + 2] + p[pos + 3] * 256
+        if pos + 4 + len > extra_end then error("bad dictzip header subfield") end
         if p[pos] == 82 and p[pos + 1] == 65 then -- "RA": version (2), chunk length (2), count (2), sizes (2 each)
+            if len < 6 then error("bad dictzip RA subfield") end
             chunk_len = p[pos + 6] + p[pos + 7] * 256
             count = p[pos + 8] + p[pos + 9] * 256
+            if 6 + 2 * count > len then error("bad dictzip RA subfield") end
             sizes = {}
             for i = 0, count - 1 do
                 sizes[i] = p[pos + 10 + 2 * i] + p[pos + 11 + 2 * i] * 256
@@ -242,20 +249,16 @@ function StarDict:loadDictzip()
         end
         pos = pos + 4 + len
     end
-    if not chunk_len then
-        f:close()
-        error("dictzip header without chunks")
-    end
+    if not chunk_len or chunk_len == 0 then error("dictzip header without chunks") end
     pos = extra_end
-    if bit.band(flags, 8) ~= 0 then pos = head:find("\0", pos + 1, true) end -- name
-    if bit.band(flags, 16) ~= 0 then pos = head:find("\0", pos + 1, true) end -- comment
+    if bit.band(flags, 8) ~= 0 then pos = head:find("\0", pos + 1, true) or error("truncated dictzip header") end -- name
+    if bit.band(flags, 16) ~= 0 then pos = head:find("\0", pos + 1, true) or error("truncated dictzip header") end -- comment
     if bit.band(flags, 2) ~= 0 then pos = pos + 2 end -- header crc
     local offsets, offset = {}, pos
     for i = 0, count - 1 do
         offsets[i] = offset
         offset = offset + sizes[i]
     end
-    f:close()
     self.dz = { chunk_len = chunk_len, sizes = sizes, offsets = offsets }
 end
 
@@ -274,6 +277,10 @@ function StarDict:readData(offset, size)
     local f = assert(io.open(self.dz_file, "rb"))
     local parts = {}
     for c = first, last do
+        if not dz.offsets[c] then
+            f:close()
+            error("offset past the dictionary")
+        end
         f:seek("set", dz.offsets[c])
         local out, len = inflate(f:read(dz.sizes[c]) or "", dz.chunk_len, RAW_DEFLATE)
         if not out then
@@ -345,7 +352,10 @@ function StarDict:find(word)
     local set = {}
     for _, i in ipairs(self.idx:find(word)) do set[i] = true end
     if self.syn then
-        for _, s in ipairs(self.syn:find(word)) do set[be32(self.syn:tail(s))] = true end
+        for _, s in ipairs(self.syn:find(word)) do
+            local i = be32(self.syn:tail(s))
+            if i < self.idx.n then set[i] = true end -- a corrupt .syn may point past the index
+        end
     end
     local found = {}
     for i in pairs(set) do table.insert(found, i) end

@@ -109,6 +109,37 @@ describe("Readerdictionary module", function()
             assert.are.same({ { APPLE_DEMO } }, results)
         end)
 
+        it("should find dictionaries added while the app runs, once none was found", function()
+            local DataStorage = require("datastorage")
+            local ffiUtil = require("ffi/util")
+            local dir = DataStorage:getDataDir() .. "/dict_spec"
+            require("util").makePath(dir)
+            G_defaults:saveSetting("STARDICT_DATA_DIR", dir)
+            local ok, err = pcall(function()
+                dictionary:rescanDictionaries()
+                assert.are.equal(0, (dictionary:getNumberOfDictionaries()))
+                spy.on(dictionary, "rescanDictionaries")
+                dictionary:rescanIfNoDictionaries() -- still nothing there
+                assert.spy(dictionary.rescanDictionaries).was_not_called()
+                -- added through Files
+                require("util").makePath(dir .. "/demo")
+                for _, ext in ipairs{ ".ifo", ".idx", ".syn", ".dict.dz" } do
+                    ffiUtil.copyFile(FIXTURES .. "/demo/demo" .. ext, dir .. "/demo/demo" .. ext)
+                end
+                dictionary:rescanIfNoDictionaries()
+                assert.spy(dictionary.rescanDictionaries).was_called(1)
+                assert.are.equal(1, (dictionary:getNumberOfDictionaries()))
+                assert.are.same({ "Demo" }, dictionary.enabled_dict_names)
+                dictionary:rescanIfNoDictionaries() -- found: no more scans
+                assert.spy(dictionary.rescanDictionaries).was_called(1)
+                dictionary.rescanDictionaries:revert()
+            end)
+            G_defaults:delSetting("STARDICT_DATA_DIR")
+            ffiUtil.purgeDir(dir)
+            dictionary:rescanDictionaries() -- back to the test environment's dictionaries
+            assert(ok, err)
+        end)
+
         it("should still run sdcv where child processes can run", function()
             Device.canForkProcesses:revert()
             stub(Device, "canForkProcesses").returns(true)
